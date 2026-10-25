@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Bitnoir"
+description = "A multichain presale and rewards portal for Bitnoir (BITS), with tiered USDT purchases, XP referrals, deposit review, staking balances, and launch-ready claim and swap states."
+version = "1.0.0"
+id = "artifacts/bitnoir-presale"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25906
+
+[services.development]
+run = "pnpm --filter @workspace/bitnoir-presale run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/bitnoir-presale", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/bitnoir-presale/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25906"
+BASE_PATH = "/"
