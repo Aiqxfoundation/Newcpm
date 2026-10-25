@@ -3,13 +3,21 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Bitnoir presale, balances, referral XP, and administrator operations.
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: presale
+    description: Public Bitnoir sale details
+  - name: account
+    description: Signed-in user account operations
+  - name: deposits
+    description: USDT deposit requests and transaction references
+  - name: admin
+    description: Administrator-only presale controls
 paths:
   /healthz:
     get:
@@ -24,6 +32,277 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /presale/overview:
+    get:
+      operationId: getPresaleOverview
+      tags: [presale]
+      summary: Get the public presale overview
+      responses:
+        "200":
+          description: Sale details, allocations, batches, and launch availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresaleOverview"
+  /presale/deposit-addresses:
+    get:
+      operationId: getDepositAddresses
+      tags: [presale]
+      summary: List active deposit addresses for supported chains
+      responses:
+        "200":
+          description: Receiving addresses currently available for USDT deposits
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DepositAddress"
+  /accounts/me:
+    get:
+      operationId: getMyAccount
+      tags: [account]
+      summary: Get or provision the signed-in account
+      responses:
+        "200":
+          description: Current account and token balances
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAccount"
+        "401":
+          description: Authentication required
+  /accounts/me/activity:
+    get:
+      operationId: getMyActivity
+      tags: [account]
+      summary: Get recent account activity
+      responses:
+        "200":
+          description: Recent account activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+  /accounts/me/referral:
+    post:
+      operationId: applyReferralCode
+      tags: [account]
+      summary: Attach a referral code to a newly created account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReferralCodeInput"
+      responses:
+        "200":
+          description: Referral status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferralResult"
+        "400":
+          description: Invalid or already applied referral
+  /accounts/me/deposits:
+    get:
+      operationId: getMyDeposits
+      tags: [deposits]
+      summary: List the current user's deposit requests
+      responses:
+        "200":
+          description: Deposit request history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Deposit"
+  /deposits:
+    post:
+      operationId: createDeposit
+      tags: [deposits]
+      summary: Create a USDT deposit request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositInput"
+      responses:
+        "201":
+          description: Deposit request with configured receiving address, if available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deposit"
+        "400":
+          description: Invalid amount, chain, or sale state
+        "409":
+          description: No receiving address is configured for this network
+  /deposits/{id}/transaction:
+    patch:
+      operationId: updateDepositTransaction
+      tags: [deposits]
+      summary: Attach a transaction hash to a pending deposit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositTransactionInput"
+      responses:
+        "200":
+          description: Updated deposit request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deposit"
+        "404":
+          description: Deposit not found
+  /accounts/me/stake:
+    post:
+      operationId: stakeTokens
+      tags: [account]
+      summary: Move purchased BITS into the presale staking balance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StakeInput"
+      responses:
+        "200":
+          description: Updated account balances
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAccount"
+        "400":
+          description: Invalid amount or staking is not open
+  /admin/summary:
+    get:
+      operationId: getAdminSummary
+      tags: [admin]
+      summary: Get presale administration totals
+      responses:
+        "200":
+          description: Admin overview metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSummary"
+        "403":
+          description: Administrator access required
+  /admin/deposits:
+    get:
+      operationId: getAdminDeposits
+      tags: [admin]
+      summary: List deposit requests for review
+      responses:
+        "200":
+          description: Deposit requests and account details
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminDeposit"
+        "403":
+          description: Administrator access required
+  /admin/deposits/{id}/decision:
+    post:
+      operationId: decideDeposit
+      tags: [admin]
+      summary: Approve or reject a pending deposit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositDecisionInput"
+      responses:
+        "200":
+          description: Finalized deposit request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDeposit"
+        "400":
+          description: Deposit is not pending or sale supply is exhausted
+        "404":
+          description: Deposit not found
+        "403":
+          description: Administrator access required
+  /admin/addresses:
+    get:
+      operationId: getAdminAddresses
+      tags: [admin]
+      summary: List configured USDT receiving addresses
+      responses:
+        "200":
+          description: Receiving addresses by chain
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DepositAddress"
+        "403":
+          description: Administrator access required
+    put:
+      operationId: saveAdminAddress
+      tags: [admin]
+      summary: Add or update a USDT receiving address for a chain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepositAddressInput"
+      responses:
+        "200":
+          description: Saved receiving address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepositAddress"
+        "403":
+          description: Administrator access required
+  /admin/launch:
+    put:
+      operationId: updateLaunchSettings
+      tags: [admin]
+      summary: Update sale, staking, claim, and swap availability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LaunchSettingsInput"
+      responses:
+        "200":
+          description: Updated launch state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LaunchSettings"
+        "403":
+          description: Administrator access required
 components:
   schemas:
     HealthStatus:
@@ -33,4 +312,227 @@ components:
           type: string
       required:
         - status
+    Chain:
+      type: string
+      enum: [ethereum, bnb, polygon, arbitrum, base, solana]
+    UserRole:
+      type: string
+      enum: [admin, user]
+    DepositStatus:
+      type: string
+      enum: [pending, approved, rejected]
+    BatchStatus:
+      type: string
+      enum: [active, upcoming, complete]
+    Allocation:
+      type: object
+      properties:
+        name: { type: string }
+        percent: { type: number }
+        tokens: { type: number }
+      required: [name, percent, tokens]
+    PresaleBatch:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        pricePerToken: { type: number }
+        tokenSupply: { type: number }
+        tokensSold: { type: number }
+        status: { $ref: "#/components/schemas/BatchStatus" }
+      required: [id, name, pricePerToken, tokenSupply, tokensSold, status]
+    LaunchSettings:
+      type: object
+      properties:
+        saleOpen: { type: boolean }
+        stakingOpen: { type: boolean }
+        claimsOpen: { type: boolean }
+        swapsOpen: { type: boolean }
+      required: [saleOpen, stakingOpen, claimsOpen, swapsOpen]
+    PresaleOverview:
+      type: object
+      properties:
+        tokenName: { type: string }
+        tokenSymbol: { type: string }
+        totalSupply: { type: number }
+        basePrice: { type: number }
+        totalRaisedUsdt: { type: number }
+        totalTokensSold: { type: number }
+        publicSaleSupply: { type: number }
+        allocations:
+          type: array
+          items: { $ref: "#/components/schemas/Allocation" }
+        batches:
+          type: array
+          items: { $ref: "#/components/schemas/PresaleBatch" }
+        launch: { $ref: "#/components/schemas/LaunchSettings" }
+        supportedChains:
+          type: array
+          items: { $ref: "#/components/schemas/Chain" }
+      required:
+        - tokenName
+        - tokenSymbol
+        - totalSupply
+        - basePrice
+        - totalRaisedUsdt
+        - totalTokensSold
+        - publicSaleSupply
+        - allocations
+        - batches
+        - launch
+        - supportedChains
+    TokenBalances:
+      type: object
+      properties:
+        purchased: { type: number }
+        staked: { type: number }
+        claimable: { type: number }
+        swapAvailable: { type: number }
+      required: [purchased, staked, claimable, swapAvailable]
+    UserAccount:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: "#/components/schemas/UserRole" }
+        referralCode: { type: string }
+        referredBy: { type: ["string", "null"] }
+        xp: { type: integer }
+        balances: { $ref: "#/components/schemas/TokenBalances" }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - name
+        - email
+        - role
+        - referralCode
+        - referredBy
+        - xp
+        - balances
+        - createdAt
+    ActivityItem:
+      type: object
+      properties:
+        id: { type: integer }
+        kind: { type: string }
+        title: { type: string }
+        detail: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, kind, title, detail, createdAt]
+    Deposit:
+      type: object
+      properties:
+        id: { type: integer }
+        batchId: { type: integer }
+        chain: { $ref: "#/components/schemas/Chain" }
+        amountUsdt: { type: number }
+        pricePerToken: { type: number }
+        estimatedTokens: { type: number }
+        status: { $ref: "#/components/schemas/DepositStatus" }
+        reference: { type: string }
+        receiveAddress: { type: ["string", "null"] }
+        txHash: { type: ["string", "null"] }
+        tokensCredited: { type: ["number", "null"] }
+        rejectionReason: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - batchId
+        - chain
+        - amountUsdt
+        - pricePerToken
+        - estimatedTokens
+        - status
+        - reference
+        - receiveAddress
+        - txHash
+        - tokensCredited
+        - rejectionReason
+        - createdAt
+    AdminDeposit:
+      allOf:
+        - $ref: "#/components/schemas/Deposit"
+        - type: object
+          properties:
+            userId: { type: string }
+            userName: { type: string }
+            userEmail: { type: string, format: email }
+          required: [userId, userName, userEmail]
+    DepositInput:
+      type: object
+      properties:
+        chain: { $ref: "#/components/schemas/Chain" }
+        amountUsdt: { type: number, minimum: 0.000001, multipleOf: 0.000001 }
+      required: [chain, amountUsdt]
+    DepositTransactionInput:
+      type: object
+      properties:
+        txHash: { type: string, minLength: 8, maxLength: 160 }
+      required: [txHash]
+    StakeInput:
+      type: object
+      properties:
+        amountTokens: { type: number, exclusiveMinimum: 0 }
+      required: [amountTokens]
+    ReferralCodeInput:
+      type: object
+      properties:
+        code: { type: string, minLength: 3, maxLength: 32 }
+      required: [code]
+    ReferralResult:
+      type: object
+      properties:
+        applied: { type: boolean }
+        xpAwarded: { type: integer }
+        message: { type: string }
+      required: [applied, xpAwarded, message]
+    DepositDecisionInput:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+        rejectionReason: { type: string, maxLength: 240 }
+      required: [decision]
+    DepositAddress:
+      type: object
+      properties:
+        id: { type: integer }
+        chain: { $ref: "#/components/schemas/Chain" }
+        address: { type: string }
+        active: { type: boolean }
+        updatedAt: { type: string, format: date-time }
+      required: [id, chain, address, active, updatedAt]
+    DepositAddressInput:
+      type: object
+      properties:
+        chain: { $ref: "#/components/schemas/Chain" }
+        address: { type: string, minLength: 10, maxLength: 180 }
+        active: { type: boolean }
+      required: [chain, address, active]
+    LaunchSettingsInput:
+      type: object
+      properties:
+        saleOpen: { type: boolean }
+        stakingOpen: { type: boolean }
+        claimsOpen: { type: boolean }
+        swapsOpen: { type: boolean }
+      required: [saleOpen, stakingOpen, claimsOpen, swapsOpen]
+    AdminSummary:
+      type: object
+      properties:
+        users: { type: integer }
+        pendingDeposits: { type: integer }
+        totalRaisedUsdt: { type: number }
+        tokensSold: { type: number }
+        activeAddresses: { type: integer }
+        saleOpen: { type: boolean }
+      required:
+        - users
+        - pendingDeposits
+        - totalRaisedUsdt
+        - tokensSold
+        - activeAddresses
+        - saleOpen
 

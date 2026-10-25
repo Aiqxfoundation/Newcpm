@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 40" fill="none">
+  <rect x="2" y="5" width="29" height="29" rx="9" transform="rotate(-12 2 5)" stroke="#69D1AE" stroke-width="1.6"/>
+  <circle cx="15" cy="15" r="3.5" fill="#69D1AE"/>
+  <circle cx="23" cy="23" r="2.8" fill="#69D1AE"/>
+  <text x="43" y="28" fill="#EFF5F1" font-family="Manrope, sans-serif" font-size="23" font-weight="700" letter-spacing="-1.2">bitnoir</text>
+</svg>
