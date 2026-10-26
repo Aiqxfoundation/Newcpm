@@ -69,8 +69,9 @@ function AuthProvider({ children }: { children: ReactNode }) {
     try { return JSON.parse(window.sessionStorage.getItem('bitnoir-auth') || 'null') as AuthUser | null; } catch { return null; }
   });
   const save = (next: AuthUser | null) => { setUser(next); if (next) window.sessionStorage.setItem('bitnoir-auth', JSON.stringify(next)); else window.sessionStorage.removeItem('bitnoir-auth'); };
-  const signIn = (email: string) => save({ id: btoa(email).slice(0, 18), email, name: email.split('@')[0] });
-  const signUp = (username: string, email: string, _password: string, _referral?: string) => save({ id: btoa(`${username}:${email}`).slice(0, 18), email, name: username });
+  const makeId = (value: string) => encodeURIComponent(value).replace(/%/g, '').slice(0, 32) || `member-${Date.now()}`;
+  const signIn = (email: string) => save({ id: makeId(email), email, name: email.split('@')[0] || 'member' });
+  const signUp = (username: string, email: string, _password: string, _referral?: string) => save({ id: makeId(`${username}:${email}`), email, name: username.trim() || email.split('@')[0] || 'member' });
   return <AuthContext.Provider value={{ user, signIn, signUp, signOut: () => save(null) }}>{children}</AuthContext.Provider>;
 }
 
@@ -207,7 +208,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const [password, setPassword] = useState('');
   const [referral, setReferral] = useState(() => new URLSearchParams(window.location.search).get('ref') || '');
   const [error, setError] = useState('');
-  const submit = (event: FormEvent) => { event.preventDefault(); if ((mode === 'sign-up' && !username.trim()) || !email.trim() || password.length < 8) { setError(mode === 'sign-up' ? 'Enter a username, valid email, and password with at least 8 characters.' : 'Enter a valid email and a password with at least 8 characters.'); return; } setError(''); mode === 'sign-in' ? signIn(email.trim(), password) : signUp(username.trim(), email.trim(), password, referral.trim() || undefined); setLocation('/dashboard'); };
+  const submit = (event: FormEvent) => { event.preventDefault(); const normalizedEmail = email.trim(); const normalizedUsername = username.trim(); if ((mode === 'sign-up' && !normalizedUsername) || !normalizedEmail || password.length < 8) { setError(mode === 'sign-up' ? 'Enter a username, valid email, and password with at least 8 characters.' : 'Enter a valid email and a password with at least 8 characters.'); return; } try { setError(''); mode === 'sign-in' ? signIn(normalizedEmail, password) : signUp(normalizedUsername, normalizedEmail, password, referral.trim() || undefined); setLocation('/dashboard'); } catch { setError('We could not create this session. Please try again.'); } };
   return <form className="auth-form" onSubmit={submit}>
     <div className="auth-heading"><div className="eyebrow">BITNOIR / {mode === 'sign-up' ? 'ACCESS' : 'RETURN'}</div><h1>{mode === 'sign-up' ? 'Create your protocol account.' : 'Welcome back.'}</h1><p>{mode === 'sign-up' ? 'Username, email, password. Referral is optional.' : 'Sign in to continue to your Bitnoir portal.'}</p></div>
     {mode === 'sign-up' && <><label className="field-label" htmlFor="auth-username">Username</label><input id="auth-username" className="field" value={username} onChange={(event) => setUsername(event.target.value.replace(/\\s/g, ''))} autoComplete="username" maxLength={24} required /></>}
