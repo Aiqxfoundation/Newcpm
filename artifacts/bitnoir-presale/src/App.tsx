@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { ClerkProvider, Show, SignIn, SignUp, useClerk, useUser } from '@clerk/react';
-import { shadcn } from '@clerk/themes';
 import {
   Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, Check,
   Coins, Copy, ExternalLink, FileClock, Globe2, Landmark, Layers3, Link as LinkIcon,
@@ -28,8 +26,7 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 15_000 } },
 });
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
-const isPreviewHost = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.v0.build');
-const clerkPubKey = isPreviewHost ? undefined : import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim();
+
 const chainList: Chain[] = ['ethereum', 'bnb', 'polygon', 'arbitrum', 'base', 'solana'];
 const chainNames: Record<string, string> = {
   ethereum: 'Ethereum', bnb: 'BNB Chain', polygon: 'Polygon', arbitrum: 'Arbitrum', base: 'Base', solana: 'Solana',
@@ -43,60 +40,20 @@ function Brand({ light = false }: { light?: boolean }) {
   return <span className="brand" style={light ? { color: '#eff5f1' } : undefined}><span className="brand-mark" aria-hidden="true" />bitnoir</span>;
 }
 
-function ClerkCacheInvalidator() {
-  const { addListener } = useClerk();
-  const client = useQueryClient();
-  const previous = useRef<string | null | undefined>(undefined);
-  useEffect(() => addListener(({ user }) => {
-    const id = user?.id ?? null;
-    if (previous.current !== undefined && previous.current !== id) client.clear();
-    previous.current = id;
-  }), [addListener, client]);
-  return null;
+type AuthUser = { id: string; email: string; name: string };
+const AuthContext = createContext<{ user: AuthUser | null; signIn: (email: string, password: string) => void; signUp: (email: string, password: string, referral?: string) => void; signOut: () => void }>({ user: null, signIn: () => undefined, signUp: (_email, _password, _referral) => undefined, signOut: () => undefined });
+
+function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    try { return JSON.parse(window.sessionStorage.getItem('bitnoir-auth') || 'null') as AuthUser | null; } catch { return null; }
+  });
+  const save = (next: AuthUser | null) => { setUser(next); if (next) window.sessionStorage.setItem('bitnoir-auth', JSON.stringify(next)); else window.sessionStorage.removeItem('bitnoir-auth'); };
+  const signIn = (email: string) => save({ id: btoa(email).slice(0, 18), email, name: email.split('@')[0] });
+  const signUp = (email: string, _password: string, _referral?: string) => save({ id: btoa(email).slice(0, 18), email, name: email.split('@')[0] });
+  return <AuthContext.Provider value={{ user, signIn, signUp, signOut: () => save(null) }}>{children}</AuthContext.Provider>;
 }
 
-const clerkAppearance = {
-  theme: shadcn,
-  cssLayerName: 'clerk',
-  options: {
-    logoPlacement: 'inside' as const,
-    logoLinkUrl: basePath || '/',
-    logoImageUrl: `${window.location.origin}${basePath}/logo.svg`,
-  },
-  variables: {
-    colorPrimary: '#58b891', colorForeground: '#edf4ef', colorMutedForeground: '#a0afa7',
-    colorDanger: '#df7367', colorBackground: '#172320', colorInput: '#202d29',
-    colorInputForeground: '#f0f6f2', colorNeutral: '#3c4a44', fontFamily: 'Manrope',
-    borderRadius: '0.7rem',
-  },
-  elements: {
-    rootBox: 'w-full flex justify-center',
-    cardBox: 'bg-[#172320] rounded-2xl w-[440px] max-w-full overflow-hidden border border-white/10',
-    card: '!shadow-none !border-0 !bg-transparent !rounded-none',
-    footer: '!shadow-none !border-0 !bg-transparent !rounded-none',
-    headerTitle: 'text-[#f0f6f2] font-semibold',
-    headerSubtitle: 'text-[#a0afa7]',
-    socialButtonsBlockButtonText: 'text-[#e7f1eb]',
-    formFieldLabel: 'text-[#d6e1da]',
-    footerActionLink: 'text-[#83d9b8]',
-    footerActionText: 'text-[#a0afa7]',
-    dividerText: 'text-[#91a198]',
-    identityPreviewEditButton: 'text-[#83d9b8]',
-    formFieldSuccessText: 'text-[#83d9b8]',
-    alertText: 'text-[#f2d5d1]',
-    logoBox: 'mb-2',
-    logoImage: 'max-h-8',
-    socialButtonsBlockButton: 'border border-white/15 bg-[#202d29] hover:bg-[#293833]',
-    formButtonPrimary: 'bg-[#74d6b5] text-[#10211c] hover:bg-[#8be3c5]',
-    formFieldInput: 'bg-[#202d29] border-[#3c4a44] text-[#f0f6f2]',
-    footerAction: 'text-[#a0afa7]',
-    dividerLine: 'bg-[#3c4a44]',
-    alert: 'bg-[#412c29] border-[#68433d]',
-    otpCodeFieldInput: 'bg-[#202d29] border-[#3c4a44] text-[#f0f6f2]',
-    formFieldRow: 'mb-4',
-    main: 'text-[#edf4ef]',
-  },
-};
+function useAuth() { return useContext(AuthContext); }
 
 function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   const [location] = useLocation();
@@ -218,17 +175,26 @@ function HomePage() {
   </div>;
 }
 
-function SignInPage() {
-  return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} /></div><div className="auth-caption">A quieter way to participate in what comes next.</div></div>;
+function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
+  const [, setLocation] = useLocation();
+  const { signIn, signUp } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [referral, setReferral] = useState(() => new URLSearchParams(window.location.search).get('ref') || '');
+  const [error, setError] = useState('');
+  const submit = (event: FormEvent) => { event.preventDefault(); if (!email.trim() || password.length < 8) { setError('Enter a valid email and a password with at least 8 characters.'); return; } setError(''); mode === 'sign-in' ? signIn(email.trim(), password) : signUp(email.trim(), password, referral.trim() || undefined); setLocation('/dashboard'); };
+  return <form className="auth-form" onSubmit={submit}>
+    <div className="auth-heading"><div className="eyebrow">BITNOIR / {mode === 'sign-up' ? 'ACCESS' : 'RETURN'}</div><h1>{mode === 'sign-up' ? 'Join the presale.' : 'Welcome back.'}</h1><p>{mode === 'sign-up' ? 'Create your portal access with only the essentials.' : 'Sign in to continue to your Bitnoir portal.'}</p></div>
+    <label className="field-label" htmlFor="auth-email">Email address</label><input id="auth-email" className="field" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+    <label className="field-label" htmlFor="auth-password">Password</label><input id="auth-password" className="field" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'sign-up' ? 'new-password' : 'current-password'} minLength={8} required />
+    {mode === 'sign-up' && <><label className="field-label" htmlFor="auth-referral">Referral code <span className="muted-text">(optional)</span></label><input id="auth-referral" className="field" value={referral} onChange={(event) => setReferral(event.target.value)} placeholder="e.g. BITS-7K4M" /></>}
+    {error && <p className="inline-error" role="alert">{error}</p>}<button className="button button-primary auth-submit" type="submit">{mode === 'sign-up' ? 'Create account' : 'Sign in'} <ArrowRight size={15} /></button>
+    <p className="auth-switch">{mode === 'sign-up' ? 'Already have access?' : 'New to Bitnoir?'} <Link href={mode === 'sign-up' ? '/sign-in' : '/sign-up'}>{mode === 'sign-up' ? 'Sign in' : 'Create an account'}</Link></p>
+  </form>;
 }
 
-function SignUpPage() {
-  useEffect(() => {
-    const referralCode = new URLSearchParams(window.location.search).get('ref')?.trim();
-    if (referralCode) window.sessionStorage.setItem('bitnoir-pending-referral', referralCode);
-  }, []);
-  return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} /></div><div className="auth-caption">Your name and email are all we need to get started.</div></div>;
-}
+function SignInPage() { return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><AuthCard mode="sign-in" /></div><div className="auth-caption">A quieter way to participate in what comes next.</div></div>; }
+function SignUpPage() { return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><AuthCard mode="sign-up" /></div><div className="auth-caption">Email. Password. Optional referral. Nothing extra.</div></div>; }
 
 const navMain = [
   { href: '/dashboard', label: 'Overview', icon: BarChart3 },
@@ -237,9 +203,8 @@ const navMain = [
 ];
 
 function AppShell({ children, active, admin = false }: { children: ReactNode; active: string; admin?: boolean }) {
-  const { user } = useUser();
-  const { signOut } = useClerk();
-  const name = user?.fullName || user?.primaryEmailAddress?.emailAddress || 'Bitnoir member';
+  const { user, signOut } = useAuth();
+  const name = user?.email || 'Bitnoir member';
   const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('');
   return <div className="app-layout">
     <aside className="sidebar">
@@ -251,7 +216,7 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
       {admin && <><div className="side-caption">Administration</div><nav className="sidebar-nav"><Link href="/admin" className={`side-link ${active === '/admin' ? 'active' : ''}`} data-testid="link-nav-admin"><ShieldCheck size={16} />Control room</Link></nav></>}
       <div className="side-bottom">
         <div className="mini-profile"><span className="avatar">{initials || 'B'}</span><span><span className="profile-name">{name}</span><span className="profile-role">{admin ? 'Administrator' : 'Member'}</span></span></div>
-        <button className="side-link" style={{ width: '100%', border: 0, background: 'none', cursor: 'pointer' }} onClick={() => void signOut({ redirectUrl: basePath || '/' })} data-testid="button-sign-out"><LogOut size={15} />Sign out</button>
+        <button className="side-link" style={{ width: '100%', border: 0, background: 'none', cursor: 'pointer' }} onClick={() => signOut()} data-testid="button-sign-out"><LogOut size={15} />Sign out</button>
       </div>
     </aside>
     <main className="main-area">
@@ -265,10 +230,10 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
 }
 
 function ProtectedGate({ children, admin = false }: { children: (account: UserAccount) => ReactNode; admin?: boolean }) {
-  const { isLoaded, isSignedIn } = useUser();
-  const accountQuery = useGetMyAccount({ query: { enabled: !!isLoaded && !!isSignedIn, queryKey: getGetMyAccountQueryKey() } });
-  if (!isLoaded) return <div className="auth-stage"><div className="auth-caption">Loading your secure portal…</div></div>;
-  if (!isSignedIn) return <Redirect to="/" />;
+  const { user } = useAuth();
+  const isSignedIn = Boolean(user);
+  const accountQuery = useGetMyAccount({ query: { enabled: isSignedIn, queryKey: getGetMyAccountQueryKey() } });
+  if (!isSignedIn) return <Redirect to="/sign-in" />;
   if (accountQuery.isLoading) return <div className="app-layout"><div className="sidebar" /><main className="main-area"><Skeleton rows={6} /></main></div>;
   if (accountQuery.isError || !accountQuery.data) return <div className="app-layout"><main className="main-area"><PageError retry={() => void accountQuery.refetch()} /></main></div>;
   if (admin && accountQuery.data.role !== 'admin') return <Redirect to="/dashboard" />;
@@ -276,16 +241,17 @@ function ProtectedGate({ children, admin = false }: { children: (account: UserAc
 }
 
 function ReferralBootstrap() {
-  const { isLoaded, isSignedIn } = useUser();
+  const { user } = useAuth();
+  const isSignedIn = Boolean(user);
   const account = useGetMyAccount({
-    query: { enabled: !!isLoaded && !!isSignedIn, queryKey: getGetMyAccountQueryKey() },
+    query: { enabled: isSignedIn, queryKey: getGetMyAccountQueryKey() },
   });
   const apply = useApplyReferralCode();
   const client = useQueryClient();
   const attemptedCode = useRef('');
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || !account.data) return;
+    if (!isSignedIn || !account.data) return;
     const code = window.sessionStorage.getItem('bitnoir-pending-referral')?.trim();
     if (!code) return;
     if (account.data.referredBy) {
@@ -303,7 +269,7 @@ function ReferralBootstrap() {
         }
       },
     });
-  }, [account.data, apply, client, isLoaded, isSignedIn]);
+  }, [account.data, apply, client, isSignedIn]);
 
   return null;
 }
@@ -527,43 +493,17 @@ function PortalRoute({ path, page }: { path: string; page: 'dashboard' | 'deposi
   return <Route path={path}>{() => <ProtectedGate>{(account) => page === 'dashboard' ? <DashboardPage account={account} /> : page === 'deposit' ? <DepositsPage account={account} /> : <ReferralsPage account={account} />}</ProtectedGate>}</Route>;
 }
 
-function ClerkRouter() {
-  const [, setLocation] = useLocation();
-  const stripBase = (path: string) => basePath && path.startsWith(basePath) ? path.slice(basePath.length) || '/' : path;
-  return <ClerkProvider
-    publishableKey={clerkPubKey}
-    appearance={clerkAppearance}
-    signInUrl={`${basePath}/sign-in`}
-    signUpUrl={`${basePath}/sign-up`}
-    localization={{
-      signIn: { start: { title: 'Welcome back', subtitle: 'Sign in to continue to your Bitnoir portal.' } },
-      signUp: { start: { title: 'Join Bitnoir', subtitle: 'Create your account with your name and email.' } },
-    }}
-    routerPush={(to) => setLocation(stripBase(to))}
-    routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
-  >
-    <QueryClientProvider client={queryClient}>
-      <ClerkCacheInvalidator />
-      <ReferralBootstrap />
-      <RoutedErrorBoundary><Switch>
-        <Route path="/" component={HomePage} />
-        <Route path="/sign-in/*?" component={SignInPage} />
-        <Route path="/sign-up/*?" component={SignUpPage} />
-        <PortalRoute path="/dashboard" page="dashboard" />
-        <PortalRoute path="/deposit" page="deposit" />
-        <PortalRoute path="/referrals" page="referrals" />
-        <Route path="/admin">{() => <ProtectedGate admin>{(account) => <AdminPage account={account} />}</ProtectedGate>}</Route>
-        <Route component={NotFound} />
-      </Switch></RoutedErrorBoundary>
-    </QueryClientProvider>
-  </ClerkProvider>;
-}
-
 function App() {
-  if (!clerkPubKey) {
-    return <QueryClientProvider client={queryClient}><WouterRouter base={basePath}><Switch><Route path="/" component={HomePage} /><Route component={NotFound} /></Switch></WouterRouter></QueryClientProvider>;
-  }
-  return <WouterRouter base={basePath}><ClerkRouter /></WouterRouter>;
+  return <AuthProvider><QueryClientProvider client={queryClient}><WouterRouter base={basePath}><ReferralBootstrap /><RoutedErrorBoundary><Switch>
+    <Route path="/" component={HomePage} />
+    <Route path="/sign-in/*?" component={SignInPage} />
+    <Route path="/sign-up/*?" component={SignUpPage} />
+    <PortalRoute path="/dashboard" page="dashboard" />
+    <PortalRoute path="/deposit" page="deposit" />
+    <PortalRoute path="/referrals" page="referrals" />
+    <Route path="/admin">{() => <ProtectedGate admin>{(account) => <AdminPage account={account} />}</ProtectedGate>}</Route>
+    <Route component={NotFound} />
+  </Switch></RoutedErrorBoundary></WouterRouter></QueryClientProvider></AuthProvider>;
 }
 
 export default App;
