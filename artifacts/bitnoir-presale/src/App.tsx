@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
-  Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, Check,
+  Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
   Coins, Copy, ExternalLink, FileClock, Globe2, Landmark, Layers3, Link as LinkIcon,
-  LockKeyhole, LogOut, Plus, Radio, ShieldCheck, Sparkles, Wallet,
+  LockKeyhole, LogOut, Plus, Radio, ShieldCheck, Sparkles, Users, Wallet,
 } from 'lucide-react';
 import {
   getGetAdminAddressesQueryKey, getGetAdminDepositsQueryKey, getGetAdminSummaryQueryKey,
@@ -200,11 +200,11 @@ function SignInPage() { return <div className="auth-stage"><Link href="/" classN
 function SignUpPage() { return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><AuthCard mode="sign-up" /></div><div className="auth-caption">Username. Email. Password. Optional referral.</div></div>; }
 
 const navMain = [
-  { href: '/deposit', label: 'Wallet / Assets', icon: Wallet },
-  { href: '/staking', label: 'Staking', icon: Layers3 },
-  { href: '/withdraw', label: 'Withdraw rewards', icon: ArrowUpRight },
-  { href: '/referrals', label: 'Invite & XP', icon: Sparkles },
-  { href: '/activity', label: 'Activity', icon: Activity },
+  { href: '/deposit', label: 'Assets', description: 'Deposit & withdraw', icon: Wallet },
+  { href: '/staking', label: 'Staking', description: 'Positions & rewards', icon: Layers3 },
+  { href: '/referrals', label: 'Airdrop', description: 'Earned XP', icon: Sparkles },
+  { href: '/team', label: 'Team', description: 'Network & referrals', icon: Users },
+  { href: '/docs', label: 'Docs', description: 'Protocol guide', icon: BookOpen },
 ];
 
 function AppShell({ children, active, admin = false }: { children: ReactNode; active: string; admin?: boolean }) {
@@ -369,9 +369,9 @@ function DepositsPage({ account }: { account: UserAccount }) {
   };
   const noAddressAvailable = !knownAddress;
   return <AppShell active="/deposit" admin={account.role === 'admin'}>
-    <div className="page-title-row"><div><h1 className="page-title">Wallet / assets</h1><p className="page-subtitle">Route capital through a verified network and keep the full review trail attached to your position.</p></div></div>
+    <div className="page-title-row"><div><h1 className="page-title">Assets</h1><p className="page-subtitle">Deposit USDT, review your wallet activity, and withdraw eligible staking rewards.</p></div><div className="top-actions"><Link href="#deposit-form" className="button button-primary"><ArrowDownLeft size={15} /> Deposit USDT</Link><Link href="/withdraw" className="button button-ghost"><ArrowUpRight size={15} /> Withdraw</Link></div></div>
     <div className="deposit-layout">
-      <form className="panel deposit-form" onSubmit={handleCreate}>
+      <form className="panel deposit-form" id="deposit-form" onSubmit={handleCreate}>
         <div className="deposit-header"><span className="network-icon"><ArrowDownLeft size={17} /></span><div><h3 style={{ font: '600 17px var(--app-font-serif)', margin: 0 }}>Fund your wallet</h3><p className="muted-text" style={{ fontSize: 10, margin: '5px 0 0' }}>Requests are not on-chain payments.</p></div></div>
         <div className="field-wrap"><label className="field-label" htmlFor="deposit-chain">Network</label><select id="deposit-chain" className="field" value={chain} onChange={(e) => setChain(e.target.value as Chain)} data-testid="select-deposit-chain">{chainList.map((item) => <option key={item} value={item}>{chainNames[item]}</option>)}</select></div>
          <div className="field-wrap"><label className="field-label" htmlFor="deposit-amount">Amount in USDT</label><input id="deposit-amount" className="field" type="number" min="0.000001" step="0.000001" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Enter USDT amount" data-testid="input-deposit-amount" /></div>
@@ -526,12 +526,14 @@ function StakingPage({ account }: { account: UserAccount }) {
   return <AppShell active="/staking" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Staking</h1><p className="page-subtitle">Lock BITS to activate your position and earn rewards. Principal is not directly withdrawable.</p></div><button className="button button-primary" onClick={() => setOpen((value) => !value)} disabled={!launch?.stakingOpen || balances.purchased <= 0}><Layers3 size={15} />{open ? 'Close stake form' : 'Open stake'}</button></div><div className="cards-4"><Metric label="Available to stake" value={`${number(balances.purchased)} BITS`} foot="Credited after review" icon={<Coins size={15} />} /><Metric label="Active position" value={`${number(balances.staked)} BITS`} foot="Currently locked" icon={<Layers3 size={15} />} /><Metric label="Claimable rewards" value={`${number(balances.claimable)} BITS`} foot={launch?.claimsOpen ? 'Claim window open' : 'Launch gated'} icon={<BadgeCheck size={15} />} /><Metric label="Lock status" value={balances.staked > 0 ? 'Active' : 'Inactive'} foot="Position health" icon={<ShieldCheck size={15} />} /></div><div className="dashboard-grid"><section className="panel content-card"><div className="card-heading"><div><h3>Create a position</h3><p>Choose how much of your acquired BITS to lock.</p></div><Layers3 size={16} color="#f7931a" /></div>{open ? <div><label className="field-label" htmlFor="staking-amount">Amount in BITS</label><div style={{ display: 'flex', gap: 8, marginTop: 8 }}><input id="staking-amount" className="field" type="number" min="0" max={balances.purchased} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /><button className="button button-primary" onClick={submit} disabled={stake.isPending || !amount}>{stake.isPending ? 'Confirming…' : 'Confirm stake'}</button></div></div> : <div className="empty-state"><Layers3 size={22} style={{ margin: '0 auto 10px' }} /><div>Ready when you are.</div><p>Open the stake form to lock acquired BITS into a reward position.</p></div>}<div className="callout" style={{ marginTop: 20 }}>Staking updates your verified portal position. On-chain execution is gated until the protocol contract is enabled.</div></section><section className="panel content-card"><div className="card-heading"><div><h3>Position rules</h3><p>Know what each balance means.</p></div><FileClock size={16} color="#f7931a" /></div><div className="switch-row"><span className="switch-copy"><strong>Acquired BITS</strong><span>Can be moved into staking</span></span><Status value="available" /></div><div className="switch-row"><span className="switch-copy"><strong>Staked BITS</strong><span>Locked principal</span></span><Status value="locked" /></div><div className="switch-row"><span className="switch-copy"><strong>Rewards</strong><span>Eligible for conversion to USDT</span></span><Status value="claimable" /></div></section></div>{notice}</AppShell>;
 }
 
+function TeamPage({ account }: { account: UserAccount }) { const { notify, notice } = useNotice(); const [copied, setCopied] = useState(false); const link = `${window.location.origin}/sign-up?ref=${encodeURIComponent(account.id)}`; const copy = async () => { await navigator.clipboard?.writeText(link); setCopied(true); notify('Team invite link copied.'); }; return <AppShell active="/team" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Team</h1><p className="page-subtitle">Build your network and see the contribution path behind your future airdrop position.</p></div><button className="button button-primary" onClick={copy}><Copy size={15} />{copied ? 'Copied' : 'Copy invite link'}</button></div><div className="cards-4"><Metric label="Team size" value="0" foot="Direct invites" icon={<Users size={15} />} /><Metric label="Team XP" value="0 XP" foot="Network contribution" icon={<Sparkles size={15} />} /><Metric label="Your code" value={account.id.slice(0, 8).toUpperCase()} foot="Share with your team" icon={<LinkIcon size={15} />} /><Metric label="Status" value="Open" foot="Invite your first member" icon={<BadgeCheck size={15} />} /></div><div className="dashboard-grid"><section className="panel content-card"><div className="card-heading"><div><h3>Your invite rail</h3><p>Every member enters through one attributable referral path.</p></div><Users size={16} color="#f7931a" /></div><div className="address-box" style={{ marginBottom: 16 }}>{link}</div><button className="button button-ghost" onClick={copy}><Copy size={14} /> Copy referral link</button></section><section className="panel content-card"><div className="card-heading"><div><h3>Team rules</h3><p>Clear separation between activity and rewards.</p></div><ShieldCheck size={16} color="#f7931a" /></div><div className="switch-row"><span className="switch-copy"><strong>Direct referrals</strong><span>Count toward your network</span></span><Status value="tracked" /></div><div className="switch-row"><span className="switch-copy"><strong>XP contribution</strong><span>Tracked for airdrop eligibility</span></span><Status value="tracked" /></div></section></div>{notice}</AppShell>; }
+
 function ActivityPage({ account }: { account: UserAccount }) { const activity = useGetMyActivity(); return <AppShell active="/activity" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Activity</h1><p className="page-subtitle">A complete record of deposits, staking, referrals, and account events.</p></div></div><section className="panel content-card"><div className="card-heading"><div><h3>Account timeline</h3><p>Events are read from the portal ledger.</p></div><Activity size={16} color="#f7931a" /></div><ActivityList rows={activity.data} loading={activity.isLoading} error={activity.isError} retry={() => void activity.refetch()} /></section></AppShell>; }
 
 function DocsPage() { return <div className="site-shell landing docs-page"><PublicHeader /><main className="section"><div className="eyebrow" style={{ color: '#f7931a' }}>BITNOIR / WHITEPAPER INDEX</div><h1 className="display" style={{ marginTop: 20 }}>A Bitcoin-vibe<br />abstract layer.</h1><div className="docs-grid"><article className="panel content-card"><span className="step-num">01 / VISION</span><h3>Multichain abstraction</h3><p>Bitnoir coordinates capital, positions, and rewards across supported networks while keeping the user experience network-aware.</p></article><article className="panel content-card"><span className="step-num">02 / DISTRIBUTION</span><h3>Fair launch event</h3><p>Distribution is visible by batch, price, allocation, and supply. The portal is the source of truth for participation.</p></article><article className="panel content-card"><span className="step-num">03 / STAKING</span><h3>Lock to earn</h3><p>BITS becomes productive only after staking. Earned rewards may later be converted to USDT under the configured policy.</p></article><article className="panel content-card"><span className="step-num">04 / COMMUNITY</span><h3>XP as airdrop position</h3><p>Referral XP is tracked independently for users who have not acquired BITS, preserving a path into future community distribution.</p></article></div></main></div>; }
 
-function PortalRoute({ path, page }: { path: string; page: 'deposit' | 'referrals' | 'staking' | 'withdraw' | 'activity' }) {
-  return <Route path={path}>{() => <ProtectedGate>{(account) => page === 'deposit' ? <DepositsPage account={account} /> : page === 'referrals' ? <ReferralsPage account={account} /> : page === 'withdraw' ? <WithdrawPage account={account} /> : page === 'activity' ? <ActivityPage account={account} /> : <StakingPage account={account} />}</ProtectedGate>}</Route>;
+function PortalRoute({ path, page }: { path: string; page: 'deposit' | 'referrals' | 'staking' | 'withdraw' | 'activity' | 'team' }) {
+  return <Route path={path}>{() => <ProtectedGate>{(account) => page === 'deposit' ? <DepositsPage account={account} /> : page === 'referrals' ? <ReferralsPage account={account} /> : page === 'withdraw' ? <WithdrawPage account={account} /> : page === 'activity' ? <ActivityPage account={account} /> : page === 'team' ? <TeamPage account={account} /> : <StakingPage account={account} />}</ProtectedGate>}</Route>;
 }
 
 function App() {
@@ -546,6 +548,7 @@ function App() {
     <PortalRoute path="/withdraw" page="withdraw" />
     <PortalRoute path="/referrals" page="referrals" />
     <PortalRoute path="/activity" page="activity" />
+    <PortalRoute path="/team" page="team" />
     <Route path="/admin">{() => <ProtectedGate admin>{(account) => <AdminPage account={account} />}</ProtectedGate>}</Route>
     <Route component={NotFound} />
   </Switch></RoutedErrorBoundary></WouterRouter></QueryClientProvider></AuthProvider>;
