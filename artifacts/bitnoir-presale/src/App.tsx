@@ -19,7 +19,7 @@ import {
   useSaveAdminAddress, useStakeTokens, useUpdateDepositTransaction,
   useUpdateLaunchSettings,
 } from '@workspace/api-client-react';
-import type { Chain, Deposit, LaunchSettingsInput, PresaleOverview } from '@workspace/api-client-react';
+import type { Chain, Deposit, LaunchSettingsInput, PresaleOverview, UserAccount } from '@workspace/api-client-react';
 import { Link, Redirect, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import NotFound from '@/pages/not-found';
@@ -106,7 +106,7 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
 
 function useNotice() {
   const [message, setMessage] = useState('');
-  const timer = useRef<number | undefined>();
+  const timer = useRef<number | undefined>(undefined);
   const notify = (text: string) => {
     setMessage(text);
     window.clearTimeout(timer.current);
@@ -267,7 +267,7 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
   </div>;
 }
 
-function ProtectedGate({ children, admin = false }: { children: (account: NonNullable<ReturnType<typeof useGetMyAccount>['data']>) => ReactNode; admin?: boolean }) {
+function ProtectedGate({ children, admin = false }: { children: (account: UserAccount) => ReactNode; admin?: boolean }) {
   const { isLoaded, isSignedIn } = useUser();
   const accountQuery = useGetMyAccount({ query: { enabled: !!isLoaded && !!isSignedIn, queryKey: getGetMyAccountQueryKey() } });
   if (!isLoaded) return <div className="auth-stage"><div className="auth-caption">Loading your secure portal…</div></div>;
@@ -320,7 +320,7 @@ function ActivityList({ rows, loading, error, retry }: { rows?: { id: number; ki
   return <div className="activity-list">{rows.map((item) => <div className="activity-item" key={item.id} data-testid={`activity-row-${item.id}`}><span className="activity-icon"><Activity size={15} /></span><span className="activity-copy"><strong>{item.title}</strong><span>{item.detail || item.kind}</span></span><time className="activity-time">{shortDate(item.createdAt)}</time></div>)}</div>;
 }
 
-function DashboardPage({ account }: { account: NonNullable<ReturnType<typeof useGetMyAccount>['data']> }) {
+function DashboardPage({ account }: { account: UserAccount }) {
   const activity = useGetMyActivity();
   const overview = useGetPresaleOverview();
   const stake = useStakeTokens();
@@ -361,7 +361,7 @@ function Metric({ label, value, foot, icon }: { label: string; value: string; fo
   return <article className="panel metric-card"><div style={{ display: 'flex', justifyContent: 'space-between', color: '#568e74' }}><span className="metric-label">{label}</span>{icon}</div><div className="metric-value" data-testid={`metric-${label.toLowerCase().replaceAll(' ', '-')}`}>{value}</div><div className="metric-foot">{foot}</div></article>;
 }
 
-function DepositsPage({ account }: { account: NonNullable<ReturnType<typeof useGetMyAccount>['data']> }) {
+function DepositsPage({ account }: { account: UserAccount }) {
   const deposits = useGetMyDeposits();
   const receiveAddresses = useGetDepositAddresses({
     query: { queryKey: getGetDepositAddressesQueryKey() },
@@ -418,7 +418,7 @@ function DepositsPage({ account }: { account: NonNullable<ReturnType<typeof useG
   </AppShell>;
 }
 
-function ReferralsPage({ account }: { account: NonNullable<ReturnType<typeof useGetMyAccount>['data']> }) {
+function ReferralsPage({ account }: { account: UserAccount }) {
   const apply = useApplyReferralCode();
   const client = useQueryClient();
   const { notify, notice } = useNotice();
@@ -451,7 +451,7 @@ function ReferralsPage({ account }: { account: NonNullable<ReturnType<typeof use
   </AppShell>;
 }
 
-function AdminPage({ account }: { account: NonNullable<ReturnType<typeof useGetMyAccount>['data']> }) {
+function AdminPage({ account }: { account: UserAccount }) {
   const summary = useGetAdminSummary();
   const deposits = useGetAdminDeposits();
   const addresses = useGetAdminAddresses();
