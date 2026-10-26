@@ -16,7 +16,7 @@ import {
   useSaveAdminAddress, useStakeTokens, useUpdateDepositTransaction,
   useUpdateLaunchSettings,
 } from '@workspace/api-client-react';
-import type { Chain, Deposit, LaunchSettingsInput, PresaleOverview, UserAccount } from '@workspace/api-client-react';
+import type { AdminDeposit, Chain, Deposit, DepositAddress, LaunchSettingsInput, PresaleOverview, UserAccount } from '@workspace/api-client-react';
 import { Link, Redirect, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import NotFound from '@/pages/not-found';
@@ -34,7 +34,28 @@ const chainNames: Record<string, string> = {
 const money = (value?: number | null) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value ?? 0);
 const number = (value?: number | null) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value ?? 0);
 const compact = (value?: number | null) => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(value ?? 0);
-const shortDate = (value: string) => new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const shortDate = (value?: string | null) => value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recently';
+
+function asArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    for (const key of ['rows', 'items', 'data', 'results']) {
+      if (Array.isArray(record[key])) return record[key] as T[];
+    }
+  }
+  return [];
+}
+
+function asRecord<T extends object>(value: unknown): Partial<T> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Partial<T>;
+}
+
+function safeIdentity(value: unknown, fallback = 'member') {
+  const text = typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  return text.split(/\s+/)[0] || fallback;
+}
 
 function Brand({ light = false }: { light?: boolean }) {
   return <span className="brand" style={light ? { color: '#eff5f1' } : undefined}><span className="brand-mark" aria-hidden="true" />bitnoir</span>;
@@ -94,7 +115,9 @@ function PublicHeader() {
 }
 
 function PresaleContent({ overview }: { overview: PresaleOverview }) {
-  const sold = overview.totalTokensSold || 0;
+  const batches = asArray<PresaleOverview['batches'][number]>(overview.batches);
+  const allocations = asArray<PresaleOverview['allocations'][number]>(overview.allocations);
+  const sold = Number(overview.totalTokensSold) || 0;
   const cap = overview.publicSaleSupply || 8_400_000;
   const percentage = Math.min(100, cap ? sold / cap * 100 : 0);
   return <>
@@ -107,17 +130,17 @@ function PresaleContent({ overview }: { overview: PresaleOverview }) {
         <div className="progress-track" aria-label={`${percentage.toFixed(1)} percent allocated`}><div className="progress-value" style={{ width: `${percentage}%` }} /></div>
         <div className="progress-meta"><span>{number(sold)} BITS sold</span><span>{percentage.toFixed(1)}% allocated</span></div>
         <div className="batch-list">
-          {(overview.batches ?? []).map((batch) => <div className="batch-row" key={batch.id} data-testid={`row-batch-${batch.id}`}>
+          {batches.map((batch) => <div className="batch-row" key={batch.id} data-testid={`row-batch-${batch.id}`}>
             <span><strong>{batch.name}</strong></span><span className="mono">{money(batch.pricePerToken)} / BITS</span>
             <span className="mono">{compact(batch.tokensSold)} / {compact(batch.tokenSupply)}</span>
             <span className={`batch-tag ${batch.status === 'active' ? 'active' : ''}`}>{batch.status}</span>
           </div>)}
-          {!overview.batches?.length && <div className="empty-state">Presale batch details will appear here.</div>}
+          {!batches.length && <div className="empty-state">Presale batch details will appear here.</div>}
         </div>
       </div>
       <div className="panel allocation-panel" id="allocation">
         <h3>A measured token economy</h3><p>Designed for a durable community and clear distribution.</p>
-        {(overview.allocations ?? []).map((allocation) => <div className="allocation-row" key={allocation.name}>
+        {allocations.map((allocation) => <div className="allocation-row" key={allocation.name}>
           <strong>{allocation.name}</strong><strong>{allocation.percent}%</strong>
           <div className="progress-track"><div className="progress-value" style={{ width: `${allocation.percent}%` }} /></div>
         </div>)}
@@ -295,7 +318,7 @@ function DashboardPage({ account }: { account: UserAccount }) {
   const [stakeAmount, setStakeAmount] = useState('');
   const [stakeOpen, setStakeOpen] = useState(false);
   const launch = overview.data?.launch;
-  const balances = account.balances ?? { purchased: 0, staked: 0, claimable: 0, swapAvailable: 0 };
+  const balances = { purchased: 0, staked: 0, claimable: 0, swapAvailable: 0, ...asRecord<UserAccount['balances']>(account.balances) };
   const stakeTokens = () => {
     const amountTokens = Number(stakeAmount);
     if (!Number.isFinite(amountTokens) || amountTokens <= 0 || amountTokens > balances.purchased) return;
@@ -303,7 +326,7 @@ function DashboardPage({ account }: { account: UserAccount }) {
       onSuccess: () => { setStakeAmount(''); setStakeOpen(false); notify('Tokens moved to staking balance.'); void queryClient.invalidateQueries({ queryKey: getGetMyAccountQueryKey() }); void queryClient.invalidateQueries({ queryKey: getGetMyActivityQueryKey() }); },
     });
   };
-  return <AppShell active="/dashboard" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Good to have you, {(account.name || account.email || 'member').split(' ')[0]}.</h1><p className="page-subtitle">Your Bitnoir position, at a glance.</p></div><Link href="/deposit" className="button button-primary"><Plus size={15} />Start a deposit</Link></div>
+  return <AppShell active="/dashboard" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Good to have you, {safeIdentity(account.name || account.email)}.</h1><p className="page-subtitle">Your Bitnoir position, at a glance.</p></div><Link href="/deposit" className="button button-primary"><Plus size={15} />Start a deposit</Link></div>
     <div className="cards-4">
       <Metric label="Purchased" value={`${number(balances.purchased)} BITS`} foot="Tokens credited after review" icon={<Coins size={15} />} />
       <Metric label="Staked" value={`${number(balances.staked)} BITS`} foot={launch?.stakingOpen ? 'Staking is available' : 'Opens at launch'} icon={<Layers3 size={15} />} />
@@ -342,11 +365,14 @@ function DepositsPage({ account }: { account: UserAccount }) {
   const [amount, setAmount] = useState('');
   const [hashes, setHashes] = useState<Record<number, string>>({});
   const [formError, setFormError] = useState('');
-  const activeBatch = overview.data?.batches.find((batch) => batch.status === 'active');
+  const depositRows = asArray<Deposit>(deposits.data);
+  const addressRows = asArray<DepositAddress>(receiveAddresses.data);
+  const overviewBatches = asArray<PresaleOverview['batches'][number]>(overview.data?.batches);
+  const activeBatch = overviewBatches.find((batch) => batch.status === 'active');
   const estimatedTokens = activeBatch && Number(amount) > 0
     ? Number((Number(amount) / activeBatch.pricePerToken).toFixed(2))
     : null;
-  const knownAddress = receiveAddresses.data?.find((item) => item.chain === chain && item.active)?.address ?? null;
+  const knownAddress = addressRows.find((item) => item.chain === chain && item.active)?.address ?? null;
   const handleCreate = (event: FormEvent) => {
     event.preventDefault();
     const amountUsdt = Number(amount);
@@ -375,10 +401,10 @@ function DepositsPage({ account }: { account: UserAccount }) {
         {formError && <p className="inline-error" role="alert">{formError}</p>}
         {(overview.isError || receiveAddresses.isError) && <div className="callout error">Network and receiving-address configuration could not be verified. Refresh before creating a request.</div>}
         <button className="button button-primary" type="submit" disabled={create.isPending || noAddressAvailable || overview.isLoading || overview.isError || receiveAddresses.isLoading || receiveAddresses.isError} data-testid="button-create-deposit">{create.isPending ? 'Creating request…' : 'Create deposit request'} <ArrowRight size={14} /></button>
-        <div style={{ marginTop: 18 }} className="small-label">Supported: {(overview.data?.supportedChains ?? []).map((item) => chainNames[item]).join(' · ') || 'Loading networks'}</div>
+        <div style={{ marginTop: 18 }} className="small-label">Supported: {asArray<Chain>(overview.data?.supportedChains).map((item) => chainNames[item]).join(' · ') || 'Loading networks'}</div>
       </form>
       <section className="panel content-card"><div className="card-heading"><div><h3>Request history</h3><p>Your deposit reference and status</p></div><FileClock size={16} color="#4c9275" /></div>
-        {deposits.isLoading ? <Skeleton rows={4} /> : deposits.isError ? <PageError retry={() => void deposits.refetch()} /> : !deposits.data?.length ? <div className="empty-state"><Landmark size={20} style={{ margin: '0 auto 10px' }} /><div>No deposit requests yet.</div><p>New requests will appear here after submission.</p></div> : <div className="table-wrap"><table className="data-table"><thead><tr><th>Reference</th><th>Network / amount</th><th>Status</th><th>Created</th><th>Transaction reference</th></tr></thead><tbody>{deposits.data.map((deposit) => <tr key={deposit.id} data-testid={`row-deposit-${deposit.id}`}><td className="mono">{deposit.reference}</td><td>{chainNames[deposit.chain]}<br /><span className="muted-text">{number(deposit.amountUsdt)} USDT</span></td><td><Status value={deposit.status} />{deposit.rejectionReason && <div className="inline-error">{deposit.rejectionReason}</div>}</td><td>{shortDate(deposit.createdAt)}</td><td>{deposit.txHash ? <span className="mono">{deposit.txHash}</span> : deposit.status === 'pending' ? <div style={{ display: 'flex', minWidth: 210, gap: 6 }}><input className="field" placeholder="Paste tx hash" value={hashes[deposit.id] ?? ''} onChange={(e) => setHashes((state) => ({ ...state, [deposit.id]: e.target.value }))} data-testid={`input-tx-hash-${deposit.id}`} /><button className="button button-soft" disabled={attach.isPending} onClick={() => handleHash(deposit)} type="button" data-testid={`button-save-tx-${deposit.id}`}>Save</button></div> : '—'}</td></tr>)}</tbody></table></div>}
+        {deposits.isLoading ? <Skeleton rows={4} /> : deposits.isError ? <PageError retry={() => void deposits.refetch()} /> : !depositRows.length ? <div className="empty-state"><Landmark size={20} style={{ margin: '0 auto 10px' }} /><div>No deposit requests yet.</div><p>New requests will appear here after submission.</p></div> : <div className="table-wrap"><table className="data-table"><thead><tr><th>Reference</th><th>Network / amount</th><th>Status</th><th>Created</th><th>Transaction reference</th></tr></thead><tbody>{depositRows.map((deposit) => <tr key={deposit.id} data-testid={`row-deposit-${deposit.id}`}><td className="mono">{deposit.reference}</td><td>{chainNames[deposit.chain]}<br /><span className="muted-text">{number(deposit.amountUsdt)} USDT</span></td><td><Status value={deposit.status} />{deposit.rejectionReason && <div className="inline-error">{deposit.rejectionReason}</div>}</td><td>{shortDate(deposit.createdAt)}</td><td>{deposit.txHash ? <span className="mono">{deposit.txHash}</span> : deposit.status === 'pending' ? <div style={{ display: 'flex', minWidth: 210, gap: 6 }}><input className="field" placeholder="Paste tx hash" value={hashes[deposit.id] ?? ''} onChange={(e) => setHashes((state) => ({ ...state, [deposit.id]: e.target.value }))} data-testid={`input-tx-hash-${deposit.id}`} /><button className="button button-soft" disabled={attach.isPending} onClick={() => handleHash(deposit)} type="button" data-testid={`button-save-tx-${deposit.id}`}>Save</button></div> : '—'}</td></tr>)}</tbody></table></div>}
         {formError && <p className="inline-error">{formError}</p>}
       </section>
     </div>{notice}
@@ -433,6 +459,8 @@ function AdminPage({ account }: { account: UserAccount }) {
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [reason, setReason] = useState('');
   const launch = overview.data?.launch;
+  const adminDeposits = asArray<AdminDeposit>(deposits.data);
+  const adminAddresses = asArray<DepositAddress>(addresses.data);
   const invalidateAdmin = () => {
     void client.invalidateQueries({ queryKey: getGetAdminSummaryQueryKey() });
     void client.invalidateQueries({ queryKey: getGetAdminDepositsQueryKey() });
@@ -444,11 +472,11 @@ function AdminPage({ account }: { account: UserAccount }) {
   const decideDeposit = (id: number, decision: 'approve' | 'reject') => {
     const rejectionReason = reason.trim();
     if (decision === 'reject' && !rejectionReason) { setRejectId(id); notify('Add a rejection reason before confirming.'); return; }
-    if (decision === 'approve' && !deposits.data?.find((deposit) => deposit.id === id)?.txHash) { notify('Add a transaction reference before approving this deposit.'); return; }
+    if (decision === 'approve' && !adminDeposits.find((deposit) => deposit.id === id)?.txHash) { notify('Add a transaction reference before approving this deposit.'); return; }
     decide.mutate({ id, data: { decision, ...(decision === 'reject' ? { rejectionReason } : {}) } }, { onSuccess: () => { setRejectId(null); setReason(''); notify(`Deposit ${decision === 'approve' ? 'approved' : 'rejected'}.`); invalidateAdmin(); }, onError: () => notify('Deposit decision could not be saved.') });
   };
   const saveChainAddress = (chain: Chain) => {
-    const known = addresses.data?.find((item) => item.chain === chain);
+    const known = adminAddresses.find((item) => item.chain === chain);
     const address = addressValues[chain] ?? known?.address ?? '';
     if (address.trim().length < 10 || address.trim().length > 180) { notify('Enter a valid receiving address, 10–180 characters.'); return; }
     saveAddress.mutate({ data: { chain, address: address.trim(), active: activeValues[chain] ?? known?.active ?? true } }, { onSuccess: () => { notify(`${chainNames[chain]} address saved.`); void client.invalidateQueries({ queryKey: getGetAdminAddressesQueryKey() }); }, onError: () => notify('Receiving address could not be saved.') });
@@ -469,7 +497,7 @@ function AdminPage({ account }: { account: UserAccount }) {
     </div>}
     <div className="admin-grid">
       <section className="panel content-card"><div className="card-heading"><div><h3>Deposit review</h3><p>Approve only after independently confirming payment.</p></div><FileClock size={16} color="#4c9275" /></div>
-        {deposits.isLoading ? <Skeleton rows={5} /> : deposits.isError ? <PageError retry={() => void deposits.refetch()} /> : !deposits.data?.length ? <div className="empty-state">No deposit requests to review.</div> : <div className="table-wrap"><table className="data-table"><thead><tr><th>Member</th><th>Request</th><th>Reference</th><th>Status / decision</th></tr></thead><tbody>{deposits.data.map((deposit) => <tr key={deposit.id} data-testid={`admin-deposit-${deposit.id}`}><td>{deposit.userName}<br /><span className="muted-text">{deposit.userEmail}</span></td><td>{chainNames[deposit.chain]}<br /><span className="muted-text">{number(deposit.amountUsdt)} USDT</span></td><td className="mono">{deposit.txHash || deposit.reference}</td><td><Status value={deposit.status} />{deposit.status === 'pending' && <div className="table-actions" style={{ marginTop: 9 }}><button className="button button-primary" style={{ minHeight: 31, padding: '0 10px' }} onClick={() => decideDeposit(deposit.id, 'approve')} disabled={decide.isPending} data-testid={`button-approve-${deposit.id}`}>Approve</button><button className="button button-danger" style={{ minHeight: 31, padding: '0 10px' }} onClick={() => { setRejectId(deposit.id); setReason(''); }} data-testid={`button-reject-${deposit.id}`}>Reject</button></div>}{rejectId === deposit.id && <div style={{ marginTop: 9, minWidth: 180 }}><input className="field" maxLength={240} placeholder="Reason for rejection" value={reason} onChange={(e) => setReason(e.target.value)} data-testid={`input-rejection-reason-${deposit.id}`} /><button className="button button-danger" style={{ minHeight: 31, padding: '0 10px', marginTop: 5 }} onClick={() => decideDeposit(deposit.id, 'reject')} disabled={decide.isPending} data-testid={`button-confirm-reject-${deposit.id}`}>Confirm rejection</button></div>}</td></tr>)}</tbody></table></div>}
+        {deposits.isLoading ? <Skeleton rows={5} /> : deposits.isError ? <PageError retry={() => void deposits.refetch()} /> : !adminDeposits.length ? <div className="empty-state">No deposit requests to review.</div> : <div className="table-wrap"><table className="data-table"><thead><tr><th>Member</th><th>Request</th><th>Reference</th><th>Status / decision</th></tr></thead><tbody>{adminDeposits.map((deposit) => <tr key={deposit.id} data-testid={`admin-deposit-${deposit.id}`}><td>{deposit.userName}<br /><span className="muted-text">{deposit.userEmail}</span></td><td>{chainNames[deposit.chain]}<br /><span className="muted-text">{number(deposit.amountUsdt)} USDT</span></td><td className="mono">{deposit.txHash || deposit.reference}</td><td><Status value={deposit.status} />{deposit.status === 'pending' && <div className="table-actions" style={{ marginTop: 9 }}><button className="button button-primary" style={{ minHeight: 31, padding: '0 10px' }} onClick={() => decideDeposit(deposit.id, 'approve')} disabled={decide.isPending} data-testid={`button-approve-${deposit.id}`}>Approve</button><button className="button button-danger" style={{ minHeight: 31, padding: '0 10px' }} onClick={() => { setRejectId(deposit.id); setReason(''); }} data-testid={`button-reject-${deposit.id}`}>Reject</button></div>}{rejectId === deposit.id && <div style={{ marginTop: 9, minWidth: 180 }}><input className="field" maxLength={240} placeholder="Reason for rejection" value={reason} onChange={(e) => setReason(e.target.value)} data-testid={`input-rejection-reason-${deposit.id}`} /><button className="button button-danger" style={{ minHeight: 31, padding: '0 10px', marginTop: 5 }} onClick={() => decideDeposit(deposit.id, 'reject')} disabled={decide.isPending} data-testid={`button-confirm-reject-${deposit.id}`}>Confirm rejection</button></div>}</td></tr>)}</tbody></table></div>}
       </section>
       <section className="panel content-card"><div className="card-heading"><div><h3>Launch availability</h3><p>Opening an action enables its portal control.</p></div><Radio size={16} color="#4c9275" /></div>
         {!launch ? overview.isLoading ? <Skeleton rows={4} /> : <PageError retry={() => void overview.refetch()} /> : <>{[
@@ -484,7 +512,7 @@ function AdminPage({ account }: { account: UserAccount }) {
     </div>
     <section className="panel content-card" style={{ marginTop: 16 }}><div className="card-heading"><div><h3>Receiving addresses</h3><p>Only addresses configured here can be used for deposit requests.</p></div><LockKeyhole size={16} color="#4c9275" /></div>
       {addresses.isLoading ? <Skeleton rows={5} /> : addresses.isError ? <PageError retry={() => void addresses.refetch()} /> : <div>{chainList.map((chain) => {
-        const known = addresses.data?.find((item) => item.chain === chain);
+const known = adminAddresses.find((item) => item.chain === chain);
         const value = addressValues[chain] ?? known?.address ?? '';
         const active = activeValues[chain] ?? known?.active ?? true;
         return <div className="address-entry" key={chain} data-testid={`address-row-${chain}`}><div><div className="field-label">{chainNames[chain]}</div><div className="small-label">{known ? (active ? 'Active' : 'Inactive') : 'Not configured'}</div></div><div><label className="field-label" htmlFor={`address-${chain}`}>USDT receiving address</label><input id={`address-${chain}`} className="field mono" value={value} onChange={(e) => setAddressValues((state) => ({ ...state, [chain]: e.target.value }))} placeholder="Enter verified address" data-testid={`input-address-${chain}`} /></div><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, whiteSpace: 'nowrap' }}><input type="checkbox" checked={active} onChange={(e) => setActiveValues((state) => ({ ...state, [chain]: e.target.checked }))} data-testid={`toggle-address-${chain}`} /> Active</label><button className="button button-soft" onClick={() => saveChainAddress(chain)} disabled={saveAddress.isPending} data-testid={`button-save-address-${chain}`}>{saveAddress.isPending ? 'Saving…' : known ? 'Update' : 'Save'}</button></div></div>;
