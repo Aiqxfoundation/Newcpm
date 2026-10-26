@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Fxl4o9hAmYHlUlHP6y4K9"
+uri = "file://research/notes.md"
+type = "text"
+title = "Bitnoir redesign research"
+description = "Live research plan and findings tracker for the Bitnoir product redesign."
+logical_id = "5e0fe0e7-ed3b-4007-9d64-5e4088c43e73"
+content_hash = "sha256:0ebfd0dc24986c10fe5b4741592dfbc3f0bf6a356c40a550875929e8ee388aa3"
+size = 2802
+mtime_ms = 1792996985523
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:9ed6aa1f-5fbf-400a-bab7-3ea1e2177ae0/5e0fe0e7-ed3b-4007-9d64-5e4088c43e73/82112ff9-87a9-4f11-9e48-fe97113e73bf"
+storage_version_token = "1792997008967326"
+content_type = "text/markdown"
