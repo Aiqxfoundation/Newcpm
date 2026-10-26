@@ -276,11 +276,14 @@ function ReferralBootstrap() {
 
 function Status({ value }: { value: string }) { return <span className={`status ${value}`} data-testid={`status-${value}`}>{value}</span>; }
 
-function ActivityList({ rows, loading, error, retry }: { rows?: { id: number; kind: string; title: string; detail: string; createdAt: string }[]; loading: boolean; error: boolean; retry: () => void }) {
+type ActivityRow = { id: number; kind: string; title: string; detail: string; createdAt: string };
+
+function ActivityList({ rows, loading, error, retry }: { rows?: ActivityRow[] | { rows?: ActivityRow[]; items?: ActivityRow[]; data?: ActivityRow[] }; loading: boolean; error: boolean; retry: () => void }) {
   if (loading) return <Skeleton rows={4} />;
   if (error) return <PageError retry={retry} />;
-  if (!rows?.length) return <div className="empty-state"><Activity size={19} style={{ margin: '0 auto 9px' }} /><div>No account activity yet.</div><p>Approved deposits and account events will show here.</p></div>;
-  return <div className="activity-list">{rows.map((item) => <div className="activity-item" key={item.id} data-testid={`activity-row-${item.id}`}><span className="activity-icon"><Activity size={15} /></span><span className="activity-copy"><strong>{item.title}</strong><span>{item.detail || item.kind}</span></span><time className="activity-time">{shortDate(item.createdAt)}</time></div>)}</div>;
+  const activityRows = Array.isArray(rows) ? rows : Array.isArray(rows?.rows) ? rows.rows : Array.isArray(rows?.items) ? rows.items : Array.isArray(rows?.data) ? rows.data : [];
+  if (!activityRows.length) return <div className="empty-state"><Activity size={19} style={{ margin: '0 auto 9px' }} /><div>No account activity yet.</div><p>Approved deposits and account events will show here.</p></div>;
+  return <div className="activity-list">{activityRows.map((item) => <div className="activity-item" key={item.id} data-testid={`activity-row-${item.id}`}><span className="activity-icon"><Activity size={15} /></span><span className="activity-copy"><strong>{item.title || 'Account activity'}</strong><span>{item.detail || item.kind || 'Updated'}</span></span><time className="activity-time">{item.createdAt ? shortDate(item.createdAt) : 'Recently'}</time></div>)}</div>;
 }
 
 function DashboardPage({ account }: { account: UserAccount }) {
