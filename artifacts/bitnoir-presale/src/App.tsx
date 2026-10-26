@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { ClerkProvider, Show, SignIn, SignUp, useClerk, useUser } from '@clerk/react';
-import { publishableKeyFromHost } from '@clerk/react/internal';
 import { shadcn } from '@clerk/themes';
 import {
   Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, Check,
@@ -29,7 +28,8 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 15_000 } },
 });
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
-const clerkPubKey = publishableKeyFromHost(window.location.hostname, import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+const isPreviewHost = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.v0.build');
+const clerkPubKey = isPreviewHost ? undefined : import.meta.env.VITE_CLERK_PUBLISHABLE_KEY?.trim();
 const chainList: Chain[] = ['ethereum', 'bnb', 'polygon', 'arbitrum', 'base', 'solana'];
 const chainNames: Record<string, string> = {
   ethereum: 'Ethereum', bnb: 'BNB Chain', polygon: 'Polygon', arbitrum: 'Arbitrum', base: 'Base', solana: 'Solana',
@@ -170,9 +170,7 @@ function PresaleContent({ overview }: { overview: PresaleOverview }) {
 }
 
 function HomePage() {
-  const { isLoaded, isSignedIn } = useUser();
   const overview = useGetPresaleOverview();
-  if (isLoaded && isSignedIn) return <Redirect to="/dashboard" />;
   const data = overview.data;
   return <div className="site-shell landing">
     <PublicHeader />
@@ -562,7 +560,9 @@ function ClerkRouter() {
 }
 
 function App() {
-  if (!clerkPubKey) throw new Error('Missing VITE_CLERK_PUBLISHABLE_KEY in .env file');
+  if (!clerkPubKey) {
+    return <QueryClientProvider client={queryClient}><WouterRouter base={basePath}><Switch><Route path="/" component={HomePage} /><Route component={NotFound} /></Switch></WouterRouter></QueryClientProvider>;
+  }
   return <WouterRouter base={basePath}><ClerkRouter /></WouterRouter>;
 }
 
