@@ -1,0 +1,7 @@
+{
+  "buildCommand": "pnpm --filter @workspace/bitnoir-presale build",
+  "outputDirectory": "artifacts/bitnoir-presale/dist/public",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "framework": "vite",
+  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }]
+}
