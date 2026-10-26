@@ -62,7 +62,7 @@ function Brand({ light = false }: { light?: boolean }) {
 }
 
 type AuthUser = { id: string; email: string; name: string };
-const AuthContext = createContext<{ user: AuthUser | null; signIn: (email: string, password: string) => void; signUp: (email: string, password: string, referral?: string) => void; signOut: () => void }>({ user: null, signIn: () => undefined, signUp: (_email, _password, _referral) => undefined, signOut: () => undefined });
+const AuthContext = createContext<{ user: AuthUser | null; signIn: (email: string, password: string) => void; signUp: (username: string, email: string, password: string, referral?: string) => void; signOut: () => void }>({ user: null, signIn: () => undefined, signUp: (_username, _email, _password, _referral) => undefined, signOut: () => undefined });
 
 function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(() => {
@@ -70,7 +70,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
   });
   const save = (next: AuthUser | null) => { setUser(next); if (next) window.sessionStorage.setItem('bitnoir-auth', JSON.stringify(next)); else window.sessionStorage.removeItem('bitnoir-auth'); };
   const signIn = (email: string) => save({ id: btoa(email).slice(0, 18), email, name: email.split('@')[0] });
-  const signUp = (email: string, _password: string, _referral?: string) => save({ id: btoa(email).slice(0, 18), email, name: email.split('@')[0] });
+  const signUp = (username: string, email: string, _password: string, _referral?: string) => save({ id: btoa(`${username}:${email}`).slice(0, 18), email, name: username });
   return <AuthContext.Provider value={{ user, signIn, signUp, signOut: () => save(null) }}>{children}</AuthContext.Provider>;
 }
 
@@ -105,7 +105,7 @@ function PublicHeader() {
   return <header className="topbar">
     <Link href="/" aria-label="Bitnoir home"><Brand light /></Link>
     <nav className="nav-links" aria-label="Main navigation">
-      <a href="#presale">Presale</a><a href="#allocation">Token design</a><a href="#how-it-works">How it works</a>
+      <a href="#launch">Fair launch</a><a href="#allocation">Distribution</a><a href="#vision">Protocol vision</a><a href="#docs">Whitepaper</a>
     </nav>
     <div className="top-actions">
       <Link href="/sign-in" className="button button-ghost">Sign in</Link>
@@ -159,9 +159,9 @@ function HomePage() {
         <div className="hero-copy">
           <div className="eyebrow">A multichain digital asset · {data?.tokenSymbol || 'BITS'}</div>
           <h1>Built for the<br /><span>next signal.</span></h1>
-          <p>Bitnoir brings a considered presale, transparent allocation and community rewards into one clear place. Start with the fundamentals. Stay for what the network becomes.</p>
+          <p>Bitnoir is a multichain abstract layer for Bitcoin-aligned capital: route USDT, acquire BITS, lock position into staking, and earn protocol rewards through a transparent fair launch.</p>
           <div className="hero-actions">
-            <Link href="/sign-up" className="button button-primary">Join the presale <ArrowRight size={15} /></Link>
+            <Link href="/sign-up" className="button button-primary">Enter the fair launch <ArrowRight size={15} /></Link>
             <a href="#presale" className="button button-ghost">Explore token details</a>
           </div>
           <div className="trustline"><span><i className="trust-dot" /> Transparent allocation</span><span>Multichain access</span></div>
@@ -176,11 +176,11 @@ function HomePage() {
         <div className="landing-stat"><strong>{data ? money(data.totalRaisedUsdt) : '—'}</strong><span>Raised so far</span></div>
         <div className="landing-stat"><strong>{data ? (data.supportedChains ?? []).length : '6'} networks</strong><span>One community</span></div>
       </div>
-      <section className="section" id="presale">
-        <div className="section-head"><div><div className="eyebrow" style={{ color: '#488c70' }}>The presale</div><h2>Clear terms.<br />Visible progress.</h2></div><p>Track each batch and allocation as it moves. Presale details are read directly from the Bitnoir portal.</p></div>
+      <section className="section" id="launch">
+        <div className="section-head"><div><div className="eyebrow" style={{ color: '#f7931a' }}>Fair launch event</div><h2>Clear terms.<br />Visible progress.</h2></div><p>Track each allocation batch, price, and distribution rule from the same source that powers the member portal.</p></div>
         {overview.isLoading ? <div className="panel"><Skeleton rows={5} /></div> : overview.isError ? <div className="panel"><PageError retry={() => void overview.refetch()} /></div> : data ? <PresaleContent overview={data} /> : null}
       </section>
-      <section className="section steps-section" id="how-it-works">
+      <section className="section steps-section" id="vision">
         <div className="section-head"><div><div className="eyebrow" style={{ color: '#488c70' }}>Protocol primitives</div><h2>One account.<br />Every position.</h2></div><p>Bitnoir is built as an operating layer for participation: verified deposits, auditable balances, staking access and community reputation.</p></div>
         <div className="steps-grid">
           <article className="step-card"><span className="step-num">01 / CAPITAL</span><h3>Verified entry rails</h3><p>Choose a supported network, receive a verified address and submit a USDT request with a traceable transaction reference.</p></article>
@@ -188,26 +188,29 @@ function HomePage() {
           <article className="step-card"><span className="step-num">03 / REPUTATION</span><h3>Network-aligned rewards</h3><p>Referrals and XP track contribution separately from token balances, giving the community a clear reputation layer.</p></article>
         </div>
       </section>
+      <section className="section docs-strip" id="docs"><div className="panel content-card docs-card"><div><div className="eyebrow" style={{ color: '#f7931a' }}>Protocol brief / v1</div><h2>Bitcoin-aligned capital, without a single-chain boundary.</h2><p>Read the Bitnoir vision, distribution model, staking mechanics, referral XP, and operator controls before you participate.</p></div><Link className="button button-ghost" href="/docs">Open whitepaper <ArrowRight size={14} /></Link></div></section>
       <section className="section" style={{ textAlign: 'center', paddingTop: 88, paddingBottom: 92 }}>
         <div className="eyebrow" style={{ justifyContent: 'center', color: '#488c70' }}>The next phase starts here</div>
         <h2 className="display" style={{ fontSize: 'clamp(40px,7vw,76px)', margin: '20px 0 25px' }}>Find your place<br />in Bitnoir.</h2>
         <Link href="/sign-up" className="button button-primary">Create your account <ArrowRight size={15} /></Link>
       </section>
     </main>
-    <footer className="footer"><Link href="/"><Brand light /></Link><span>Participation involves risk. Make decisions with care.</span><span>BITNOIR · BITS</span></footer>
+    <footer className="footer"><Link href="/"><Brand light /></Link><span>Participation involves risk. Make decisions with care.</span><span>BITNOIR · BITS · MULTICHAIN ABSTRACT LAYER</span></footer>
   </div>;
 }
 
 function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const [, setLocation] = useLocation();
   const { signIn, signUp } = useAuth();
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [referral, setReferral] = useState(() => new URLSearchParams(window.location.search).get('ref') || '');
   const [error, setError] = useState('');
-  const submit = (event: FormEvent) => { event.preventDefault(); if (!email.trim() || password.length < 8) { setError('Enter a valid email and a password with at least 8 characters.'); return; } setError(''); mode === 'sign-in' ? signIn(email.trim(), password) : signUp(email.trim(), password, referral.trim() || undefined); setLocation('/dashboard'); };
+  const submit = (event: FormEvent) => { event.preventDefault(); if ((mode === 'sign-up' && !username.trim()) || !email.trim() || password.length < 8) { setError(mode === 'sign-up' ? 'Enter a username, valid email, and password with at least 8 characters.' : 'Enter a valid email and a password with at least 8 characters.'); return; } setError(''); mode === 'sign-in' ? signIn(email.trim(), password) : signUp(username.trim(), email.trim(), password, referral.trim() || undefined); setLocation('/dashboard'); };
   return <form className="auth-form" onSubmit={submit}>
-    <div className="auth-heading"><div className="eyebrow">BITNOIR / {mode === 'sign-up' ? 'ACCESS' : 'RETURN'}</div><h1>{mode === 'sign-up' ? 'Join the presale.' : 'Welcome back.'}</h1><p>{mode === 'sign-up' ? 'Create your portal access with only the essentials.' : 'Sign in to continue to your Bitnoir portal.'}</p></div>
+    <div className="auth-heading"><div className="eyebrow">BITNOIR / {mode === 'sign-up' ? 'ACCESS' : 'RETURN'}</div><h1>{mode === 'sign-up' ? 'Create your protocol account.' : 'Welcome back.'}</h1><p>{mode === 'sign-up' ? 'Username, email, password. Referral is optional.' : 'Sign in to continue to your Bitnoir portal.'}</p></div>
+    {mode === 'sign-up' && <><label className="field-label" htmlFor="auth-username">Username</label><input id="auth-username" className="field" value={username} onChange={(event) => setUsername(event.target.value.replace(/\\s/g, ''))} autoComplete="username" maxLength={24} required /></>}
     <label className="field-label" htmlFor="auth-email">Email address</label><input id="auth-email" className="field" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
     <label className="field-label" htmlFor="auth-password">Password</label><input id="auth-password" className="field" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'sign-up' ? 'new-password' : 'current-password'} minLength={8} required />
     {mode === 'sign-up' && <><label className="field-label" htmlFor="auth-referral">Referral code <span className="muted-text">(optional)</span></label><input id="auth-referral" className="field" value={referral} onChange={(event) => setReferral(event.target.value)} placeholder="e.g. BITS-7K4M" /></>}
@@ -216,13 +219,15 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   </form>;
 }
 
-function SignInPage() { return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><AuthCard mode="sign-in" /></div><div className="auth-caption">A quieter way to participate in what comes next.</div></div>; }
-function SignUpPage() { return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><AuthCard mode="sign-up" /></div><div className="auth-caption">Email. Password. Optional referral. Nothing extra.</div></div>; }
+function SignInPage() { return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><AuthCard mode="sign-in" /></div><div className="auth-caption">No email verification step. Enter the protocol directly.</div></div>; }
+function SignUpPage() { return <div className="auth-stage"><Link href="/" className="auth-brand"><Brand light /></Link><div className="auth-card"><AuthCard mode="sign-up" /></div><div className="auth-caption">Username. Email. Password. Optional referral.</div></div>; }
 
 const navMain = [
   { href: '/dashboard', label: 'Overview', icon: BarChart3 },
-  { href: '/deposit', label: 'USDT deposits', icon: ArrowDownLeft },
-  { href: '/referrals', label: 'Referrals & XP', icon: Sparkles },
+  { href: '/deposit', label: 'Wallet / Assets', icon: Wallet },
+  { href: '/staking', label: 'Staking', icon: Layers3 },
+  { href: '/withdraw', label: 'Withdraw', icon: ArrowUpRight },
+  { href: '/referrals', label: 'Invite & XP', icon: Sparkles },
 ];
 
 function AppShell({ children, active, admin = false }: { children: ReactNode; active: string; admin?: boolean }) {
@@ -521,8 +526,22 @@ const known = adminAddresses.find((item) => item.chain === chain);
   </AppShell>;
 }
 
-function PortalRoute({ path, page }: { path: string; page: 'dashboard' | 'deposit' | 'referrals' }) {
-  return <Route path={path}>{() => <ProtectedGate>{(account) => page === 'dashboard' ? <DashboardPage account={account} /> : page === 'deposit' ? <DepositsPage account={account} /> : <ReferralsPage account={account} />}</ProtectedGate>}</Route>;
+function WithdrawPage({ account }: { account: UserAccount }) {
+  const [amount, setAmount] = useState('');
+  const [address, setAddress] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const { notify, notice } = useNotice();
+  const balances = { purchased: 0, staked: 0, claimable: 0, swapAvailable: 0, ...asRecord<UserAccount['balances']>(account.balances) };
+  const submit = (event: FormEvent) => { event.preventDefault(); if (Number(amount) <= 0 || !address.trim()) return; setSubmitted(true); notify('Withdrawal request queued for admin review.'); };
+  return <AppShell active="/withdraw" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Convert & withdraw</h1><p className="page-subtitle">Only rewards earned from staked BITS can be converted into USDT and requested for review.</p></div></div><div className="dashboard-grid"><form className="panel content-card" onSubmit={submit}><div className="card-heading"><div><h3>USDT withdrawal request</h3><p>Admin approval protects the reserve and the receiving address.</p></div><ShieldCheck size={16} color="#f7931a" /></div><div className="cards-4" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginBottom: 22 }}><Metric label="Staked BITS" value={number(balances.staked)} foot="Principal remains locked" icon={<Layers3 size={15} />} /><Metric label="Claimable rewards" value={`${number(balances.claimable)} BITS`} foot="Eligible for conversion" icon={<BadgeCheck size={15} />} /></div><div className="field-wrap"><label className="field-label" htmlFor="withdraw-amount">Reward amount in BITS</label><input id="withdraw-amount" className="field" type="number" min="0" step="0.000001" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div><div className="field-wrap"><label className="field-label" htmlFor="withdraw-address">USDT receiving address</label><input id="withdraw-address" className="field" value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Enter your BSC USDT address" /></div><div className="callout">No direct BITS withdrawal. BITS must be staked first; only earned rewards can be converted and withdrawn in USDT.</div><button className="button button-primary" type="submit" disabled={!amount || !address || submitted} style={{ marginTop: 18 }}>{submitted ? 'Awaiting admin approval' : 'Submit withdrawal request'} <ArrowRight size={14} /></button></form><section className="panel content-card"><div className="card-heading"><div><h3>Withdrawal policy</h3><p>Designed for a clear reserve trail.</p></div><FileClock size={16} color="#f7931a" /></div><div className="switch-row"><span className="switch-copy"><strong>Principal</strong><span>Never withdrawable directly</span></span><Status value="locked" /></div><div className="switch-row"><span className="switch-copy"><strong>Staking rewards</strong><span>Convertible to USDT</span></span><Status value="review" /></div><div className="switch-row"><span className="switch-copy"><strong>Settlement</strong><span>Manual admin approval</span></span><Status value="review" /></div></section></div>{notice}</AppShell>;
+}
+
+function StakingPage({ account }: { account: UserAccount }) { return <DashboardPage account={account} />; }
+
+function DocsPage() { return <div className="site-shell landing docs-page"><PublicHeader /><main className="section"><div className="eyebrow" style={{ color: '#f7931a' }}>BITNOIR / WHITEPAPER INDEX</div><h1 className="display" style={{ marginTop: 20 }}>A Bitcoin-vibe<br />abstract layer.</h1><div className="docs-grid"><article className="panel content-card"><span className="step-num">01 / VISION</span><h3>Multichain abstraction</h3><p>Bitnoir coordinates capital, positions, and rewards across supported networks while keeping the user experience network-aware.</p></article><article className="panel content-card"><span className="step-num">02 / DISTRIBUTION</span><h3>Fair launch event</h3><p>Distribution is visible by batch, price, allocation, and supply. The portal is the source of truth for participation.</p></article><article className="panel content-card"><span className="step-num">03 / STAKING</span><h3>Lock to earn</h3><p>BITS becomes productive only after staking. Earned rewards may later be converted to USDT under the configured policy.</p></article><article className="panel content-card"><span className="step-num">04 / COMMUNITY</span><h3>XP as airdrop position</h3><p>Referral XP is tracked independently for users who have not acquired BITS, preserving a path into future community distribution.</p></article></div></main></div>; }
+
+function PortalRoute({ path, page }: { path: string; page: 'dashboard' | 'deposit' | 'referrals' | 'staking' | 'withdraw' }) {
+  return <Route path={path}>{() => <ProtectedGate>{(account) => page === 'dashboard' ? <DashboardPage account={account} /> : page === 'deposit' ? <DepositsPage account={account} /> : page === 'referrals' ? <ReferralsPage account={account} /> : page === 'withdraw' ? <WithdrawPage account={account} /> : <StakingPage account={account} />}</ProtectedGate>}</Route>;
 }
 
 function App() {
@@ -530,8 +549,11 @@ function App() {
     <Route path="/" component={HomePage} />
     <Route path="/sign-in/*?" component={SignInPage} />
     <Route path="/sign-up/*?" component={SignUpPage} />
+    <Route path="/docs" component={DocsPage} />
     <PortalRoute path="/dashboard" page="dashboard" />
     <PortalRoute path="/deposit" page="deposit" />
+    <PortalRoute path="/staking" page="staking" />
+    <PortalRoute path="/withdraw" page="withdraw" />
     <PortalRoute path="/referrals" page="referrals" />
     <Route path="/admin">{() => <ProtectedGate admin>{(account) => <AdminPage account={account} />}</ProtectedGate>}</Route>
     <Route component={NotFound} />
