@@ -106,7 +106,7 @@ function PublicHeader() {
   return <header className="topbar">
     <Link href="/" aria-label="Bitnoir home"><Brand light /></Link>
     <nav className="nav-links" aria-label="Main navigation">
-      <a href="#launch">Fair launch</a><a href="#allocation">Distribution</a><a href="#vision">Protocol vision</a><a href="#docs">Whitepaper</a>
+      <a href="#docs">Protocol brief</a><Link href="/docs">Whitepaper</Link><Link href="/sign-in">Member portal</Link>
     </nav>
     <div className="top-actions">
       <Link href="/sign-in" className="button button-ghost">Sign in</Link>
@@ -151,19 +151,18 @@ function PresaleContent({ overview }: { overview: PresaleOverview }) {
 }
 
 function HomePage() {
-  const overview = useGetPresaleOverview();
-  const data = overview.data;
+  const data = undefined;
   return <div className="site-shell landing">
     <PublicHeader />
     <main>
       <section className="hero">
         <div className="hero-copy">
-          <div className="eyebrow">A multichain digital asset · {data?.tokenSymbol || 'BITS'}</div>
+          <div className="eyebrow">A multichain digital asset · BITS</div>
           <h1>Built for the<br /><span>next signal.</span></h1>
           <p>Bitnoir is a multichain abstract layer for Bitcoin-aligned capital: route USDT, acquire BITS, lock position into staking, and earn protocol rewards through a transparent fair launch.</p>
           <div className="hero-actions">
             <Link href="/sign-up" className="button button-primary">Enter the fair launch <ArrowRight size={15} /></Link>
-            <a href="#presale" className="button button-ghost">Explore token details</a>
+            <Link href="/docs" className="button button-ghost">Read the protocol brief</Link>
           </div>
           <div className="trustline"><span><i className="trust-dot" /> Transparent allocation</span><span>Multichain access</span></div>
         </div>
@@ -171,30 +170,7 @@ function HomePage() {
           <div className="orbital"><div className="orbit-line" /><div className="orbit-line two" /><div className="core-token">B</div><span className="orbit-node node-a">ETH</span><span className="orbit-node node-b">BNB</span><span className="orbit-node node-c">BASE</span><span className="orbit-node node-d">SOL</span></div>
         </div>
       </section>
-      <div className="landing-stats">
-        <div className="landing-stat"><strong>{data ? `${compact(data.totalSupply)} BITS` : '21,000,000 BITS'}</strong><span>Total fixed supply</span></div>
-        <div className="landing-stat"><strong>{data ? money(data.basePrice) : '$0.10'}</strong><span>Starting price</span></div>
-        <div className="landing-stat"><strong>{data ? money(data.totalRaisedUsdt) : '—'}</strong><span>Raised so far</span></div>
-        <div className="landing-stat"><strong>{data ? (data.supportedChains ?? []).length : '6'} networks</strong><span>One community</span></div>
-      </div>
-      <section className="section" id="launch">
-        <div className="section-head"><div><div className="eyebrow" style={{ color: '#f7931a' }}>Fair launch event</div><h2>Clear terms.<br />Visible progress.</h2></div><p>Track each allocation batch, price, and distribution rule from the same source that powers the member portal.</p></div>
-        {overview.isLoading ? <div className="panel"><Skeleton rows={5} /></div> : overview.isError ? <div className="panel"><PageError retry={() => void overview.refetch()} /></div> : data ? <PresaleContent overview={data} /> : null}
-      </section>
-      <section className="section steps-section" id="vision">
-        <div className="section-head"><div><div className="eyebrow" style={{ color: '#488c70' }}>Protocol primitives</div><h2>One account.<br />Every position.</h2></div><p>Bitnoir is built as an operating layer for participation: verified deposits, auditable balances, staking access and community reputation.</p></div>
-        <div className="steps-grid">
-          <article className="step-card"><span className="step-num">01 / CAPITAL</span><h3>Verified entry rails</h3><p>Choose a supported network, receive a verified address and submit a USDT request with a traceable transaction reference.</p></article>
-          <article className="step-card"><span className="step-num">02 / POSITION</span><h3>Transparent ownership</h3><p>Every credit, stake and claim status is reflected in your portal after review. No hidden balances or simulated approvals.</p></article>
-          <article className="step-card"><span className="step-num">03 / REPUTATION</span><h3>Network-aligned rewards</h3><p>Referrals and XP track contribution separately from token balances, giving the community a clear reputation layer.</p></article>
-        </div>
-      </section>
       <section className="section docs-strip" id="docs"><div className="panel content-card docs-card"><div><div className="eyebrow" style={{ color: '#f7931a' }}>Protocol brief / v1</div><h2>Bitcoin-aligned capital, without a single-chain boundary.</h2><p>Read the Bitnoir vision, distribution model, staking mechanics, referral XP, and operator controls before you participate.</p></div><Link className="button button-ghost" href="/docs">Open whitepaper <ArrowRight size={14} /></Link></div></section>
-      <section className="section" style={{ textAlign: 'center', paddingTop: 88, paddingBottom: 92 }}>
-        <div className="eyebrow" style={{ justifyContent: 'center', color: '#488c70' }}>The next phase starts here</div>
-        <h2 className="display" style={{ fontSize: 'clamp(40px,7vw,76px)', margin: '20px 0 25px' }}>Find your place<br />in Bitnoir.</h2>
-        <Link href="/sign-up" className="button button-primary">Create your account <ArrowRight size={15} /></Link>
-      </section>
     </main>
     <footer className="footer"><Link href="/"><Brand light /></Link><span>Participation involves risk. Make decisions with care.</span><span>BITNOIR · BITS · MULTICHAIN ABSTRACT LAYER</span></footer>
   </div>;
