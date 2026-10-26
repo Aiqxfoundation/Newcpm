@@ -299,7 +299,7 @@ function DashboardPage({ account }: { account: UserAccount }) {
       onSuccess: () => { setStakeAmount(''); setStakeOpen(false); notify('Tokens moved to staking balance.'); void queryClient.invalidateQueries({ queryKey: getGetMyAccountQueryKey() }); void queryClient.invalidateQueries({ queryKey: getGetMyActivityQueryKey() }); },
     });
   };
-  return <AppShell active="/dashboard" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Good to have you, {account.name.split(' ')[0]}.</h1><p className="page-subtitle">Your Bitnoir position, at a glance.</p></div><Link href="/deposit" className="button button-primary"><Plus size={15} />Start a deposit</Link></div>
+  return <AppShell active="/dashboard" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Good to have you, {(account.name || account.email || 'member').split(' ')[0]}.</h1><p className="page-subtitle">Your Bitnoir position, at a glance.</p></div><Link href="/deposit" className="button button-primary"><Plus size={15} />Start a deposit</Link></div>
     <div className="cards-4">
       <Metric label="Purchased" value={`${number(account.balances.purchased)} BITS`} foot="Tokens credited after review" icon={<Coins size={15} />} />
       <Metric label="Staked" value={`${number(account.balances.staked)} BITS`} foot={launch?.stakingOpen ? 'Staking is available' : 'Opens at launch'} icon={<Layers3 size={15} />} />
