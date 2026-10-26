@@ -181,11 +181,11 @@ function HomePage() {
         {overview.isLoading ? <div className="panel"><Skeleton rows={5} /></div> : overview.isError ? <div className="panel"><PageError retry={() => void overview.refetch()} /></div> : data ? <PresaleContent overview={data} /> : null}
       </section>
       <section className="section steps-section" id="how-it-works">
-        <div className="section-head"><div><div className="eyebrow" style={{ color: '#488c70' }}>Start in three steps</div><h2>Your entry, without<br />the guesswork.</h2></div><p>Use a verified account to keep deposits, balances and community XP in one place.</p></div>
+        <div className="section-head"><div><div className="eyebrow" style={{ color: '#488c70' }}>Protocol primitives</div><h2>One account.<br />Every position.</h2></div><p>Bitnoir is built as an operating layer for participation: verified deposits, auditable balances, staking access and community reputation.</p></div>
         <div className="steps-grid">
-          <article className="step-card"><span className="step-num">01 / ACCOUNT</span><h3>Make it yours</h3><p>Create an account with your name and email. Your portal keeps your presale position and activity together.</p></article>
-          <article className="step-card"><span className="step-num">02 / DEPOSIT</span><h3>Choose your network</h3><p>Request a USDT deposit using a configured Bitnoir receiving address. Requests stay pending until reviewed.</p></article>
-          <article className="step-card"><span className="step-num">03 / PARTICIPATE</span><h3>Grow with the network</h3><p>Earn community XP through referrals. Staking, claims and swaps become available only when launch settings open them.</p></article>
+          <article className="step-card"><span className="step-num">01 / CAPITAL</span><h3>Verified entry rails</h3><p>Choose a supported network, receive a verified address and submit a USDT request with a traceable transaction reference.</p></article>
+          <article className="step-card"><span className="step-num">02 / POSITION</span><h3>Transparent ownership</h3><p>Every credit, stake and claim status is reflected in your portal after review. No hidden balances or simulated approvals.</p></article>
+          <article className="step-card"><span className="step-num">03 / REPUTATION</span><h3>Network-aligned rewards</h3><p>Referrals and XP track contribution separately from token balances, giving the community a clear reputation layer.</p></article>
         </div>
       </section>
       <section className="section" style={{ textAlign: 'center', paddingTop: 88, paddingBottom: 92 }}>
@@ -326,7 +326,7 @@ function DashboardPage({ account }: { account: UserAccount }) {
       onSuccess: () => { setStakeAmount(''); setStakeOpen(false); notify('Tokens moved to staking balance.'); void queryClient.invalidateQueries({ queryKey: getGetMyAccountQueryKey() }); void queryClient.invalidateQueries({ queryKey: getGetMyActivityQueryKey() }); },
     });
   };
-  return <AppShell active="/dashboard" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Good to have you, {safeIdentity(account.name || account.email)}.</h1><p className="page-subtitle">Your Bitnoir position, at a glance.</p></div><Link href="/deposit" className="button button-primary"><Plus size={15} />Start a deposit</Link></div>
+  return <AppShell active="/dashboard" admin={account.role === 'admin'}><div className="page-title-row"><div><h1 className="page-title">Good to have you, {safeIdentity(account.name || account.email)}.</h1><p className="page-subtitle">A live view of your verified position, protocol access, and community reputation.</p></div><Link href="/deposit" className="button button-primary"><Plus size={15} />Start a deposit</Link></div>
     <div className="cards-4">
       <Metric label="Purchased" value={`${number(balances.purchased)} BITS`} foot="Tokens credited after review" icon={<Coins size={15} />} />
       <Metric label="Staked" value={`${number(balances.staked)} BITS`} foot={launch?.stakingOpen ? 'Staking is available' : 'Opens at launch'} icon={<Layers3 size={15} />} />
@@ -387,7 +387,7 @@ function DepositsPage({ account }: { account: UserAccount }) {
   };
   const noAddressAvailable = !knownAddress;
   return <AppShell active="/deposit" admin={account.role === 'admin'}>
-    <div className="page-title-row"><div><h1 className="page-title">USDT deposits</h1><p className="page-subtitle">Create a request and follow it through administrator review.</p></div></div>
+    <div className="page-title-row"><div><h1 className="page-title">USDT deposits</h1><p className="page-subtitle">Route capital through a verified network and keep the full review trail attached to your position.</p></div></div>
     <div className="deposit-layout">
       <form className="panel deposit-form" onSubmit={handleCreate}>
         <div className="deposit-header"><span className="network-icon"><ArrowDownLeft size={17} /></span><div><h3 style={{ font: '600 17px var(--app-font-serif)', margin: 0 }}>New deposit request</h3><p className="muted-text" style={{ fontSize: 10, margin: '5px 0 0' }}>Requests are not on-chain payments.</p></div></div>
@@ -430,7 +430,7 @@ function ReferralsPage({ account }: { account: UserAccount }) {
     apply.mutate({ data: { code: value } }, { onSuccess: (result) => { setCode(''); notify(result.message); void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() }); void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() }); }, onError: () => setError('This referral code could not be applied. Check the code and try again.') });
   };
   return <AppShell active="/referrals" admin={account.role === 'admin'}>
-    <div className="page-title-row"><div><h1 className="page-title">A network that rewards.</h1><p className="page-subtitle">Invite people you trust. Earn XP as the Bitnoir community grows.</p></div></div>
+    <div className="page-title-row"><div><h1 className="page-title">A network that rewards.</h1><p className="page-subtitle">Build a trusted network and earn reputation XP without mixing it with token balances.</p></div></div>
     <div className="dashboard-grid">
       <section className="panel referral-hero"><div className="eyebrow">Your invite link</div><h2 className="display" style={{ fontSize: 34, margin: '16px 0 3px' }}>Good networks<br />start with people.</h2><p style={{ color: '#9caaa3', fontSize: 11 }}>Share your personal link with your community.</p>
         <div className="referral-code" data-testid="text-referral-code">{account.referralCode}</div>
@@ -487,7 +487,7 @@ function AdminPage({ account }: { account: UserAccount }) {
     saveLaunch({ ...launch, [key]: value });
   };
   const adminError = summary.isError || deposits.isError || addresses.isError || overview.isError;
-  return <AppShell active="/admin" admin><div className="page-title-row"><div><h1 className="page-title">Control room</h1><p className="page-subtitle">Review requests and manage live presale configuration.</p></div><span className="status approved"><ShieldCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Admin access</span></div>
+  return <AppShell active="/admin" admin><div className="page-title-row"><div><h1 className="page-title">Control room</h1><p className="page-subtitle">Operate the protocol surface: verify capital, manage receiving rails, and gate launch actions.</p></div><span className="status approved"><ShieldCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Admin access</span></div>
     {adminError && <div className="callout error" style={{ marginBottom: 15 }}>Some administrative data could not be loaded. Retry the affected section below.</div>}
     {summary.isLoading ? <div className="panel"><Skeleton rows={4} /></div> : summary.isError ? <div className="panel"><PageError retry={() => void summary.refetch()} /></div> : summary.data && <div className="cards-4">
       <Metric label="Members" value={number(summary.data.users)} foot="Provisioned accounts" icon={<Globe2 size={15} />} />
