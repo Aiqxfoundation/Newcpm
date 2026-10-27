@@ -21,6 +21,7 @@ import type { AdminDeposit, Chain, Deposit, DepositAddress, LaunchSettingsInput,
 import { Link, Redirect, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import NotFound from '@/pages/not-found';
+import { supabase } from './lib/supabase';
 import '@/index.css';
 
 const queryClient = new QueryClient({
@@ -116,8 +117,8 @@ function BitsMark({ size = 20 }: { size?: number }) {
 type AuthUser = { id: string; email: string; name: string; username: string };
 const AuthContext = createContext<{
   user: AuthUser | null;
-  signIn: (email: string, password: string) => void;
-  signUp: (username: string, email: string, password: string, referral?: string) => void;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (username: string, email: string, password: string, referral?: string) => Promise<string>;
   signOut: () => void;
 }>({
   user: null,
@@ -127,70 +128,50 @@ const AuthContext = createContext<{
 });
 
 function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    try {
-      const stored = window.localStorage.getItem('bitnoir-auth') || window.sessionStorage.getItem('bitnoir-auth');
-      return stored ? (JSON.parse(stored) as AuthUser) : {
-        id: 'member-alpha',
-        name: 'SatoshiNode',
-        username: 'satoshinode',
-        email: 'node@bitnoir.io',
-      };
-    } catch {
-      return {
-        id: 'member-alpha',
-        name: 'SatoshiNode',
-        username: 'satoshinode',
-        email: 'node@bitnoir.io',
-      };
-    }
-  });
+  const [user, setUser] = useState<AuthUser | null>(null);
 
-  const save = (next: AuthUser | null) => {
-    setUser(next);
-    try {
-      if (next) {
-        window.localStorage.setItem('bitnoir-auth', JSON.stringify(next));
-        window.sessionStorage.setItem('bitnoir-auth', JSON.stringify(next));
-      } else {
-        window.localStorage.removeItem('bitnoir-auth');
-        window.sessionStorage.removeItem('bitnoir-auth');
-      }
-    } catch {
-      // In-memory fallback
-    }
+  const hydrate = async (sessionUser: { id: string; email?: string; user_metadata?: { username?: string; name?: string } } | null) => {
+    if (!sessionUser) { setUser(null); return; }
+    const email = sessionUser.email || '';
+    const username = sessionUser.user_metadata?.username || email.split('@')[0] || 'member';
+    setUser({ id: sessionUser.id, email, username, name: sessionUser.user_metadata?.name || username });
   };
 
-  const signIn = (email: string, _password: string) => {
-    const normalizedEmail = email.trim().toLowerCase();
-    const username = normalizedEmail.split('@')[0] || 'member';
-    save({
-      id: `usr-${encodeURIComponent(username).slice(0, 16)}`,
-      email: normalizedEmail,
-      username,
-      name: username.charAt(0).toUpperCase() + username.slice(1),
-    });
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => { if (active) void hydrate(data.session?.user || null); });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { if (active) void hydrate(session?.user || null); });
+    return () => { active = false; listener.subscription.unsubscribe(); };
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
+    if (error) throw new Error('Invalid email or password.');
   };
 
-  const signUp = (username: string, email: string, _password: string, referral?: string) => {
+  const signUp = async (username: string, email: string, password: string, referral?: string) => {
     const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const cleanEmail = email.trim().toLowerCase();
-    if (referral) {
-      window.sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toUpperCase());
-    }
-    save({
-      id: `usr-${cleanUsername || 'member'}`,
+    const loginKey = `BN-${crypto.randomUUID().replaceAll('-', '').slice(0, 24).toUpperCase()}`;
+    const keyBytes = new TextEncoder().encode(loginKey);
+    const digest = await crypto.subtle.digest('SHA-256', keyBytes);
+    const loginKeyHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toUpperCase());
+    const { data, error } = await supabase.auth.signUp({
       email: cleanEmail,
-      username: cleanUsername || 'member',
-      name: cleanUsername.charAt(0).toUpperCase() + cleanUsername.slice(1),
+      password,
+      options: {
+        data: { username: cleanUsername, name: cleanUsername, login_key_hash: loginKeyHash },
+        emailRedirectTo: import.meta.env.VITE_SUPABASE_REDIRECT_URL || import.meta.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/sign-in`,
+      },
     });
+    if (error) throw new Error(error.message.includes('already') ? 'Unable to create this account. Check the details and try again.' : 'Unable to create your account. Please try again.');
+    if (data.session) await hydrate(data.user);
+    return loginKey;
   };
 
-  return (
-    <AuthContext.Provider value={{ user, signIn, signUp, signOut: () => save(null) }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  const signOut = () => { void supabase.auth.signOut(); setUser(null); };
+  return <AuthContext.Provider value={{ user, signIn, signUp, signOut }}>{children}</AuthContext.Provider>;
 }
 
 function useAuth() {
@@ -907,8 +888,10 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const [password, setPassword] = useState('');
   const [referral, setReferral] = useState(() => new URLSearchParams(window.location.search).get('ref') || '');
   const [error, setError] = useState('');
+  const [loginKey, setLoginKey] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     const cleanEmail = email.trim();
     const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -928,14 +911,18 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
 
     try {
       setError('');
+      setBusy(true);
       if (mode === 'sign-in') {
-        signIn(cleanEmail, password);
+        await signIn(cleanEmail, password);
+        setLocation('/deposit');
       } else {
-        signUp(cleanUser, cleanEmail, password, referral.trim() || undefined);
+        const generatedKey = await signUp(cleanUser, cleanEmail, password, referral.trim() || undefined);
+        setLoginKey(generatedKey);
       }
-      setLocation('/deposit');
-    } catch {
-      setError('Failed to authenticate session. Please try again.');
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'Failed to authenticate. Please try again.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1017,10 +1004,11 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       )}
 
       {error && <div className="callout error" style={{ marginBottom: 16 }}>{error}</div>}
+      {loginKey && <div className="login-key-card"><strong>Save your one-time login key</strong><code>{loginKey}</code><span>This key is shown once. Store it securely; it cannot be recovered.</span><button type="button" className="button button-soft" onClick={() => void navigator.clipboard?.writeText(loginKey)}>Copy login key</button><Link href="/sign-in" className="button button-primary">Continue to sign in <ArrowRight size={15} /></Link></div>}
 
-      <button className="button button-primary" type="submit" style={{ width: '100%', minHeight: 46 }}>
-        {mode === 'sign-up' ? 'Create Account & Enter' : 'Sign in to Portal'} <ArrowRight size={15} />
-      </button>
+      {!loginKey && <button className="button button-primary" type="submit" style={{ width: '100%', minHeight: 46 }} disabled={busy}>
+        {busy ? 'Securing account…' : mode === 'sign-up' ? 'Create Account & Show Key' : 'Sign in to Portal'} <ArrowRight size={15} />
+      </button>}
 
       <p style={{ textAlign: 'center', marginTop: 20, fontSize: 13, color: 'var(--silver-dark)' }}>
         {mode === 'sign-up' ? 'Already have an account?' : 'New to Bitnoir?'}{' '}

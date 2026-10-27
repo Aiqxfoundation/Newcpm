@@ -1257,6 +1257,7 @@ a {
 }
 
 /* AUTHENTICATION */
+.login-key-card{display:flex;flex-direction:column;gap:10px;margin:18px 0;padding:16px;border:1px solid rgba(0,245,155,.35);border-radius:14px;background:linear-gradient(145deg,rgba(0,245,155,.1),rgba(11,13,18,.92));color:#dfe8e3}.login-key-card strong{font-size:13px;color:var(--neon-green)}.login-key-card code{display:block;overflow:auto;padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:#080a0e;color:#fff;font:600 13px var(--app-font-mono);letter-spacing:.08em}.login-key-card span{font-size:11px;color:var(--silver-medium);line-height:1.5}.login-key-card .button{width:100%}
 .auth-stage {
   min-height: 100dvh;
   display: grid;
