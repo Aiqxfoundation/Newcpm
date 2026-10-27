@@ -677,12 +677,26 @@ a {
 }
 
 /* APP SHELL & MEMBER PORTAL */
-.app-layout {
+  .app-layout {
   min-height: 100dvh;
+  width: 100%;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
+  overflow-x: clip;
   background: var(--bg-deep);
-}
+  }
+
+  .main-area,
+  .page-wrap,
+  .content-card,
+  .panel {
+  min-width: 0;
+  }
+
+  .page-wrap {
+  width: 100%;
+  }
 
 .sidebar {
   background: var(--bg-graphite);

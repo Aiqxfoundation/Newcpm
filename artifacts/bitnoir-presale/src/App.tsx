@@ -1084,7 +1084,7 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
   const { user, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const name = user?.name || user?.username || 'Member';
-  const role = admin ? 'Administrator' : 'Protocol Member';
+  const role = admin || user?.isAdmin ? 'Administrator' : 'Protocol Member';
 
   return (
     <div className="app-layout">
@@ -1205,12 +1205,20 @@ function ProtectedGate({ children, admin = false }: { children: (account: UserAc
       </div>
     );
   }
+  const fallbackAccount: UserAccount = {
+    id: user?.id || 'local-member',
+    name: user?.name || user?.username || 'Member',
+    email: '',
+    role: user?.isAdmin ? 'admin' : 'user',
+    referralCode: '',
+    referredBy: null,
+    xp: 0,
+    balances: { purchased: 0, staked: 0, claimable: 0, swapAvailable: 0 },
+    createdAt: new Date().toISOString(),
+  };
   if (accountQuery.isError || !accountQuery.data) {
-    return (
-      <div className="app-layout">
-        <main className="main-area"><PageError retry={() => void accountQuery.refetch()} /></main>
-      </div>
-    );
+    if (admin && !user?.isAdmin) return <Redirect to="/deposit" />;
+    return <>{children(fallbackAccount)}</>;
   }
   if (admin && !user?.isAdmin && accountQuery.data.role !== 'admin') {
     return <Redirect to="/deposit" />;
@@ -1822,12 +1830,12 @@ function StakingPage({ account }: { account: UserAccount }) {
 // ---------------------------------------------------------------------------
 function PoolPage({ account }: { account: UserAccount }) {
   const [stats, setStats] = useState({
-    totalReserve: 4_200_000,
-    totalDistributed: 342_850,
-    availablePoolBalance: 3_857_150,
-    emissionRatePerHour: 12.4,
-    activeStakers: 1420,
-    userSharePercent: 0.14,
+    totalReserve: 0,
+    totalDistributed: 0,
+    availablePoolBalance: 0,
+    emissionRatePerHour: 0,
+    activeStakers: 0,
+    userSharePercent: 0,
   });
 
   useEffect(() => {
@@ -1839,7 +1847,7 @@ function PoolPage({ account }: { account: UserAccount }) {
       .catch(() => undefined);
   }, []);
 
-  const emissionDistributionPercentage = Math.min(100, (stats.totalDistributed / stats.totalReserve) * 100);
+  const emissionDistributionPercentage = stats.totalReserve > 0 ? Math.min(100, (stats.totalDistributed / stats.totalReserve) * 100) : 0;
 
   return (
     <AppShell active="/pool" admin={account.role === 'admin'}>
