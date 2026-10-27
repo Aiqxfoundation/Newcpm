@@ -122,8 +122,8 @@ const AuthContext = createContext<{
   signOut: () => void;
 }>({
   user: null,
-  signIn: () => undefined,
-  signUp: () => undefined,
+  signIn: async () => undefined,
+  signUp: async () => '',
   signOut: () => undefined,
 });
 
