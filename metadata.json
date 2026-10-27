@@ -1,0 +1,6 @@
+{
+  "name": "Bitnoir",
+  "description": "A multichain abstract layer for Bitcoin-aligned capital, fair launch presale, staking, and member portal.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

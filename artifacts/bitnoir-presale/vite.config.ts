@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
+import { bitnoirApiPlugin } from './src/lib/api-mock-plugin';
 
 const rawPort = process.env.PORT?.trim() || '3000';
 const port = Number(rawPort);
@@ -17,6 +18,7 @@ const basePath = process.env.BASE_PATH ?? '/';
 export default defineConfig({
   base: basePath,
   plugins: [
+    bitnoirApiPlugin(),
     react(),
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
