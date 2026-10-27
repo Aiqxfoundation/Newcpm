@@ -156,7 +156,7 @@ type AuthUser = { id: string; email: string; name: string; username: string };
 const AuthContext = createContext<{
   user: AuthUser | null;
   signIn: (loginKey: string) => Promise<void>;
-  signUp: (username: string, email: string, password: string, referral?: string) => Promise<string>;
+  signUp: (username: string, password: string, referral?: string) => Promise<string>;
   signOut: () => void;
 }>({
   user: null,
@@ -193,9 +193,9 @@ function AuthProvider({ children }: { children: ReactNode }) {
     if (authResult.error) throw new Error('Invalid login key.');
   };
 
-  const signUp = async (username: string, email: string, password: string, referral?: string) => {
+  const signUp = async (username: string, password: string, referral?: string) => {
     const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    const cleanEmail = email.trim().toLowerCase();
+    const internalEmail = `${cleanUsername}@accounts.bitnoir.internal`;
     const randomBytes = new Uint8Array(32);
     crypto.getRandomValues(randomBytes);
     const loginKey = `0x${Array.from(randomBytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -204,14 +204,20 @@ function AuthProvider({ children }: { children: ReactNode }) {
     const loginKeyHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
     if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
     const { data, error } = await supabase.auth.signUp({
-      email: cleanEmail,
+      email: internalEmail,
       password: loginKey,
       options: {
         data: { username: cleanUsername, name: cleanUsername, login_key_hash: loginKeyHash, referral_username: referral?.trim().toLowerCase().replace(/[^a-z0-9]/g, '') || null },
         emailRedirectTo: import.meta.env.VITE_SUPABASE_REDIRECT_URL || import.meta.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/sign-in`,
       },
     });
-    if (error) throw new Error(error.message.includes('already') ? 'Unable to create this account. Check the details and try again.' : 'Unable to create your account. Please try again.');
+    if (error) {
+      if (error.message.includes('over_email_send_rate_limit') || error.message.includes('email rate limit')) throw new Error('Email confirmation is temporarily rate-limited. Wait a few minutes before trying again, or use a different email address.');
+      if (error.message.includes('email_address_invalid')) throw new Error('Enter a valid email address.');
+      if (error.message.includes('already')) throw new Error('Unable to create this account. Check the details and try again.');
+      if (error.message.includes('password')) throw new Error('Choose a stronger password with at least 8 characters.');
+      throw new Error('Unable to create your account. Please try again.');
+    }
     if (data.session) await hydrate(data.user);
     return loginKey;
   };
@@ -930,7 +936,6 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const [, setLocation] = useLocation();
   const { signIn, signUp } = useAuth();
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [referral, setReferral] = useState(() => new URLSearchParams(window.location.search).get('ref') || '');
   const [error, setError] = useState('');
@@ -939,16 +944,11 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const cleanEmail = email.trim();
     const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const cleanKey = password.trim();
 
     if (mode === 'sign-up' && cleanUser.length < 3) {
       setError('Username must be at least 3 letters or numbers.');
-      return;
-    }
-    if (mode === 'sign-up' && (!cleanEmail || !cleanEmail.includes('@'))) {
-      setError('Please enter a valid email address.');
       return;
     }
     if (mode === 'sign-in' && cleanKey.length < 16) {
@@ -967,7 +967,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
         await signIn(cleanKey);
         setLocation('/deposit');
       } else {
-        const generatedKey = await signUp(cleanUser, cleanEmail, password, referral.trim() || undefined);
+        const generatedKey = await signUp(cleanUser, password, referral.trim() || undefined);
         setLoginKey(generatedKey);
       }
     } catch (authError) {
@@ -988,7 +988,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           {mode === 'sign-up' ? 'Create your protocol account' : 'Enter your login key'}
         </h1>
         <p style={{ color: 'var(--silver-medium)', fontSize: 13, margin: 0 }}>
-          {mode === 'sign-up' ? 'Your login key will be generated once after registration.' : 'Use the private login key issued when you created your account.'}
+          {mode === 'sign-up' ? 'Your private login key will be generated once after registration. No email is required.' : 'Use the private login key issued when you created your account.'}
         </p>
       </div>
 
@@ -1007,19 +1007,6 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     
         </div>
       )}
-
-      {mode === 'sign-up' && <div className="field-wrap">
-        <label className="field-label" htmlFor="auth-email">Email Address</label>
-        <input
-          id="auth-email"
-          className="field"
-          type="email"
-          placeholder="name@domain.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-      </div>}
 
       <div className="field-wrap">
         <label className="field-label" htmlFor="auth-password">{mode === 'sign-up' ? 'Password (Minimum 8 characters)' : 'Private Login Key'}</label>
