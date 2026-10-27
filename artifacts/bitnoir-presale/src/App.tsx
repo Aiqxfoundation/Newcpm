@@ -211,7 +211,13 @@ function AuthProvider({ children }: { children: ReactNode }) {
         emailRedirectTo: import.meta.env.VITE_SUPABASE_REDIRECT_URL || import.meta.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/sign-in`,
       },
     });
-    if (error) throw new Error(error.message.includes('already') ? 'Unable to create this account. Check the details and try again.' : 'Unable to create your account. Please try again.');
+    if (error) {
+      if (error.message.includes('over_email_send_rate_limit') || error.message.includes('email rate limit')) throw new Error('Email confirmation is temporarily rate-limited. Wait a few minutes before trying again, or use a different email address.');
+      if (error.message.includes('email_address_invalid')) throw new Error('Enter a valid email address.');
+      if (error.message.includes('already')) throw new Error('Unable to create this account. Check the details and try again.');
+      if (error.message.includes('password')) throw new Error('Choose a stronger password with at least 8 characters.');
+      throw new Error('Unable to create your account. Please try again.');
+    }
     if (data.session) await hydrate(data.user);
     return loginKey;
   };
