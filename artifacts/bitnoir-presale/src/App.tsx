@@ -1224,7 +1224,7 @@ function DepositsPage({ account }: { account: UserAccount }) {
   const numericAmount = Number(amount) || 0;
   const estimatedBits = Math.round(numericAmount * 10); // 100 USDT = 1,000 Bits
 
-  const balances = (account.balances as Record<string, number>) || {};
+  const balances = (account.balances as unknown as Record<string, number>) || {};
   const purchasedBits = balances.purchased || 0;
   const stakedBits = balances.staked || 0;
   const burnedBits = balances.burned || stakedBits; // Burned corresponds to cumulative staked
@@ -1524,7 +1524,7 @@ function StakingPage({ account }: { account: UserAccount }) {
   const [duration, setDuration] = useState<number>(60);
   const [open, setOpen] = useState(false);
 
-  const balances = (account.balances as Record<string, number>) || {};
+  const balances = (account.balances as unknown as Record<string, number>) || {};
   const purchasedBits = balances.purchased || 0;
   const stakedBits = balances.staked || 0;
   const burnedBits = balances.burned || stakedBits;
@@ -1917,7 +1917,7 @@ function PoolPage({ account }: { account: UserAccount }) {
           <div style={{ display: 'grid', gap: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '1px solid var(--border-subtle)' }}>
               <span style={{ color: 'var(--silver-dark)' }}>Your Active Stake</span>
-              <strong style={{ color: '#fff' }}>{number((account.balances as Record<string, number>)?.staked || 0)} Bits</strong>
+              <strong style={{ color: '#fff' }}>{number((account.balances as unknown as Record<string, number>)?.staked || 0)} Bits</strong>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '1px solid var(--border-subtle)' }}>
@@ -1980,7 +1980,7 @@ function ReferralsPage({ account }: { account: UserAccount }) {
     apply.mutate(
       { data: { code: code.trim().toUpperCase() } },
       {
-        onSuccess: (result) => {
+        onSuccess: (result: { message?: string }) => {
           setCode('');
           notify(result.message || 'Referral code linked!');
           void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
@@ -2322,7 +2322,7 @@ function AdminPage({ account }: { account: UserAccount }) {
       { data: { ...launch, [key]: value } },
       {
         onSuccess: () => {
-          notify(`Launch setting ${key} updated.`);
+          notify(`Launch setting ${String(key)} updated.`);
           void client.invalidateQueries({ queryKey: getGetPresaleOverviewQueryKey() });
         },
       }
@@ -2540,7 +2540,7 @@ function WithdrawPage({ account }: { account: UserAccount }) {
   const [submitted, setSubmitted] = useState(false);
   const { notify, notice } = useNotice();
 
-  const balances = (account.balances as Record<string, number>) || {};
+  const balances = (account.balances as unknown as Record<string, number>) || {};
   const claimableTokens = balances.claimable || 0;
   const claimableUsdtValue = claimableTokens * BITNOIR_REFERENCE_PRICE;
 
