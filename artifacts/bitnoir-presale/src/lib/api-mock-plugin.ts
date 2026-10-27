@@ -463,7 +463,7 @@ export function bitnoirApiPlugin(): Plugin {
           id: Date.now(),
           kind: 'deposit',
           title: 'Deposit Rejected',
-          detail: dep.rejectionReason,
+          detail: dep.rejectionReason || 'Payment could not be verified.',
           createdAt: new Date().toISOString(),
         });
       }
