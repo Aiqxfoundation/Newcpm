@@ -20,6 +20,8 @@ import {
 import type { AdminDeposit, Chain, Deposit, DepositAddress, LaunchSettingsInput, PresaleOverview, UserAccount } from '@workspace/api-client-react';
 import { Link, Redirect, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { Toaster } from '@/components/ui/toaster';
+import { toast } from '@/hooks/use-toast';
 import NotFound from '@/pages/not-found';
 import { supabase } from './lib/supabase';
 import '@/index.css';
@@ -28,6 +30,42 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 15_000 } },
 });
 const basePath = import.meta.env.BASE_PATH ? import.meta.env.BASE_PATH.replace(/\/$/, '') : '';
+
+function readableError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === 'string' && error.trim()) return error;
+  return fallback;
+}
+
+function FeedbackMonitor() {
+  const client = useQueryClient();
+
+  useEffect(() => {
+    const showError = (error: unknown, fallback: string) => {
+      toast({ title: 'Action failed', description: readableError(error, fallback), variant: 'destructive' });
+    };
+    const unsubscribeQueries = client.getQueryCache().subscribe((event) => {
+      if (event.type === 'updated' && event.action.type === 'error') showError(event.query.state.error, 'Unable to load this information. Please try again.');
+    });
+    const unsubscribeMutations = client.getMutationCache().subscribe((event) => {
+      if (event.type !== 'updated') return;
+      if (event.action.type === 'error') showError(event.mutation.state.error, 'Unable to complete that action. Please try again.');
+      if (event.action.type === 'success') toast({ title: 'Action completed', description: 'Your change was saved successfully.' });
+    });
+    const onError = (event: ErrorEvent) => showError(event.error || event.message, 'An unexpected application error occurred.');
+    const onRejection = (event: PromiseRejectionEvent) => showError(event.reason, 'An unexpected request error occurred.');
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      unsubscribeQueries();
+      unsubscribeMutations();
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, [client]);
+
+  return <Toaster />;
+}
 
 // Official Bitnoir Economic Constants
 const BITNOIR_REFERENCE_PRICE = 50; // $50.00 Protocol Accounting Valuation
@@ -2660,8 +2698,9 @@ function WithdrawPage({ account }: { account: UserAccount }) {
 function App() {
   return (
     <AuthProvider>
-      <QueryClientProvider client={queryClient}>
-        <WouterRouter base={basePath}>
+  <QueryClientProvider client={queryClient}>
+  <FeedbackMonitor />
+  <WouterRouter base={basePath}>
           <RoutedErrorBoundary>
             <Switch>
               <Route path="/" component={HomePage} />
