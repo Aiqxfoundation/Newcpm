@@ -117,7 +117,7 @@ function BitsMark({ size = 20 }: { size?: number }) {
 type AuthUser = { id: string; email: string; name: string; username: string };
 const AuthContext = createContext<{
   user: AuthUser | null;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (loginKey: string) => Promise<void>;
   signUp: (username: string, email: string, password: string, referral?: string) => Promise<string>;
   signOut: () => void;
 }>({
@@ -144,24 +144,29 @@ function AuthProvider({ children }: { children: ReactNode }) {
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
-    if (error) throw new Error('Invalid email or password.');
+  const signIn = async (loginKey: string) => {
+    const normalizedKey = loginKey.trim().toLowerCase();
+    const { data, error } = await supabase.rpc('resolve_login_key', { p_login_key: normalizedKey });
+    if (error || !data?.email) throw new Error('Invalid login key.');
+    const authResult = await supabase.auth.signInWithPassword({ email: data.email, password: normalizedKey });
+    if (authResult.error) throw new Error('Invalid login key.');
   };
 
   const signUp = async (username: string, email: string, password: string, referral?: string) => {
     const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const cleanEmail = email.trim().toLowerCase();
-    const loginKey = `BN-${crypto.randomUUID().replaceAll('-', '').slice(0, 24).toUpperCase()}`;
+    const randomBytes = new Uint8Array(32);
+    crypto.getRandomValues(randomBytes);
+    const loginKey = `0x${Array.from(randomBytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
     const keyBytes = new TextEncoder().encode(loginKey);
     const digest = await crypto.subtle.digest('SHA-256', keyBytes);
     const loginKeyHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-    if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toUpperCase());
+    if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
     const { data, error } = await supabase.auth.signUp({
       email: cleanEmail,
-      password,
+      password: loginKey,
       options: {
-        data: { username: cleanUsername, name: cleanUsername, login_key_hash: loginKeyHash },
+        data: { username: cleanUsername, name: cleanUsername, login_key_hash: loginKeyHash, referral_username: referral?.trim().toLowerCase().replace(/[^a-z0-9]/g, '') || null },
         emailRedirectTo: import.meta.env.VITE_SUPABASE_REDIRECT_URL || import.meta.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/sign-in`,
       },
     });
@@ -895,16 +900,21 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     event.preventDefault();
     const cleanEmail = email.trim();
     const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanKey = password.trim();
 
     if (mode === 'sign-up' && cleanUser.length < 3) {
-      setError('Username must be at least 3 alphanumeric characters.');
+      setError('Username must be at least 3 letters or numbers.');
       return;
     }
-    if (!cleanEmail || !cleanEmail.includes('@')) {
+    if (mode === 'sign-up' && (!cleanEmail || !cleanEmail.includes('@'))) {
       setError('Please enter a valid email address.');
       return;
     }
-    if (password.length < 8) {
+    if (mode === 'sign-in' && cleanKey.length < 16) {
+      setError('Enter your complete login key.');
+      return;
+    }
+    if (mode === 'sign-up' && password.length < 8) {
       setError('Password must contain at least 8 characters.');
       return;
     }
@@ -913,7 +923,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       setError('');
       setBusy(true);
       if (mode === 'sign-in') {
-        await signIn(cleanEmail, password);
+        await signIn(cleanKey);
         setLocation('/deposit');
       } else {
         const generatedKey = await signUp(cleanUser, cleanEmail, password, referral.trim() || undefined);
@@ -934,34 +944,30 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           {mode === 'sign-up' ? 'NEW MEMBER REGISTRATION' : 'MEMBER ACCESS'}
         </div>
         <h1 style={{ font: '700 28px var(--app-font-serif)', margin: '0 0 6px', color: '#fff' }}>
-          {mode === 'sign-up' ? 'Join the Fair Launch' : 'Welcome Back'}
+          {mode === 'sign-up' ? 'Create your protocol account' : 'Enter your login key'}
         </h1>
         <p style={{ color: 'var(--silver-medium)', fontSize: 13, margin: 0 }}>
-          {mode === 'sign-up' ? 'Create your unique node handle and protocol account.' : 'Sign in to access your assets and staking positions.'}
+          {mode === 'sign-up' ? 'Your login key will be generated once after registration.' : 'Use the private login key issued when you created your account.'}
         </p>
       </div>
 
       {mode === 'sign-up' && (
         <div className="field-wrap">
-          <label className="field-label" htmlFor="auth-username">Unique Username (Creates your Referral Code)</label>
+          <label className="field-label" htmlFor="auth-username">Username</label>
           <input
             id="auth-username"
             className="field mono"
-            placeholder="e.g. satoshinode"
+            placeholder="Choose a username"
             value={username}
             onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
             maxLength={20}
             required
           />
-          {username && (
-            <div style={{ fontSize: 11, color: 'var(--neon-green)', marginTop: 4, fontFamily: 'var(--app-font-mono)' }}>
-              Your referral code will be: BITS-{username.toUpperCase()}
-            </div>
-          )}
+    
         </div>
       )}
 
-      <div className="field-wrap">
+      {mode === 'sign-up' && <div className="field-wrap">
         <label className="field-label" htmlFor="auth-email">Email Address</label>
         <input
           id="auth-email"
@@ -972,15 +978,15 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           onChange={(e) => setEmail(e.target.value)}
           required
         />
-      </div>
+      </div>}
 
       <div className="field-wrap">
-        <label className="field-label" htmlFor="auth-password">Password (Minimum 8 characters)</label>
+        <label className="field-label" htmlFor="auth-password">{mode === 'sign-up' ? 'Password (Minimum 8 characters)' : 'Private Login Key'}</label>
         <input
           id="auth-password"
           className="field"
-          type="password"
-          placeholder="••••••••"
+          type={mode === 'sign-up' ? 'password' : 'text'}
+          placeholder={mode === 'sign-up' ? 'Choose a password' : '0x...'}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           minLength={8}
@@ -991,14 +997,14 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       {mode === 'sign-up' && (
         <div className="field-wrap">
           <label className="field-label" htmlFor="auth-referral">
-            Inviter Referral Code <span style={{ color: 'var(--silver-dark)' }}>(Optional)</span>
+            Inviter Username <span style={{ color: 'var(--silver-dark)' }}>(Optional)</span>
           </label>
           <input
             id="auth-referral"
             className="field mono"
             value={referral}
             onChange={(e) => setReferral(e.target.value)}
-            placeholder="e.g. BITS-GENESIS"
+            placeholder="Enter the inviter's username"
           />
         </div>
       )}

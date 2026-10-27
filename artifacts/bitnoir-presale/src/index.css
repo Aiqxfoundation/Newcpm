@@ -1257,7 +1257,7 @@ a {
 }
 
 /* AUTHENTICATION */
-.login-key-card{display:flex;flex-direction:column;gap:10px;margin:18px 0;padding:16px;border:1px solid rgba(0,245,155,.35);border-radius:14px;background:linear-gradient(145deg,rgba(0,245,155,.1),rgba(11,13,18,.92));color:#dfe8e3}.login-key-card strong{font-size:13px;color:var(--neon-green)}.login-key-card code{display:block;overflow:auto;padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:#080a0e;color:#fff;font:600 13px var(--app-font-mono);letter-spacing:.08em}.login-key-card span{font-size:11px;color:var(--silver-medium);line-height:1.5}.login-key-card .button{width:100%}
+.login-key-card{display:flex;flex-direction:column;gap:12px;margin:20px 0;padding:20px;border:1px solid rgba(0,245,155,.35);border-radius:16px;background:linear-gradient(145deg,rgba(16,26,30,.98),rgba(7,10,14,.98));color:#dfe8e3;box-shadow:inset 0 1px rgba(255,255,255,.06),0 18px 45px rgba(0,0,0,.28)}.login-key-card strong{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--neon-green)}.login-key-card code{display:block;overflow:auto;padding:16px;border:1px solid rgba(255,255,255,.16);border-radius:10px;background:#05070a;color:#f3fff9;font:600 13px/1.8 var(--app-font-mono);letter-spacing:.12em;word-break:break-all;box-shadow:inset 0 0 0 1px rgba(0,245,155,.06)}.login-key-card span{font-size:11px;color:var(--silver-medium);line-height:1.6}.login-key-card .button{width:100%}
 .auth-stage {
   min-height: 100dvh;
   display: grid;
