@@ -83,7 +83,7 @@ function Brand({ showBadge = true, size = 'md' }: { showBadge?: boolean; size?: 
   return (
     <span className="brand" style={{ fontSize: textSize }}>
       <div className="brand-icon-wrap" style={{ width: iconSize, height: iconSize }}>
-        <img src="/bitnoir-token.png" alt="Bitnoir Token" />
+        <img src="/bitnoir-token.webp" alt="Bitnoir Token" />
       </div>
       <span>bitnoir</span>
       {showBadge && <span className="brand-badge">BITS</span>}
@@ -95,7 +95,7 @@ function Brand({ showBadge = true, size = 'md' }: { showBadge?: boolean; size?: 
 function TokenMark({ size = 20 }: { size?: number }) {
   return (
     <img
-      src="/bitnoir-token.png"
+      src="/bitnoir-token.webp"
       alt="Bitnoir Token"
       style={{ width: size, height: size, borderRadius: '50%', display: 'inline-block', verticalAlign: 'middle' }}
     />
@@ -105,7 +105,7 @@ function TokenMark({ size = 20 }: { size?: number }) {
 function BitsMark({ size = 20 }: { size?: number }) {
   return (
     <img
-      src="/bits-coin.png"
+      src="/bits-coin.webp"
       alt="Bits"
       style={{ width: size, height: size, borderRadius: '50%', display: 'inline-block', verticalAlign: 'middle' }}
     />
@@ -334,11 +334,11 @@ function HomePage() {
               <div className="hero-orbit-ring-inner" />
 
               <div className="hero-token-card">
-                <img src="/bitnoir-token.png" alt="Bitnoir Token (BITS)" />
+                <img src="/bitnoir-token.webp" alt="Bitnoir Token (BITS)" />
               </div>
 
               <div className="hero-secondary-coin" title="Bits (Staking Units)">
-                <img src="/bits-coin.png" alt="Bits Staking Unit" />
+                <img src="/bits-coin.webp" alt="Bits Staking Unit" />
               </div>
 
               <div className="hero-stat-badge">
