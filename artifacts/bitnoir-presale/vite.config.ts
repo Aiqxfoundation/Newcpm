@@ -21,8 +21,8 @@ export default defineConfig({
   plugins: [
     bitnoirApiPlugin(),
     react(),
-    tailwindcss({ optimize: false }),
-    runtimeErrorOverlay(),
+    tailwindcss({ optimize: true }),
+    ...(process.env.NODE_ENV !== 'production' ? [runtimeErrorOverlay()] : []),
     ...(process.env.NODE_ENV !== 'production' &&
     process.env.REPL_ID !== undefined
       ? [
