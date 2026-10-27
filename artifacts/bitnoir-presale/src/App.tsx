@@ -278,7 +278,7 @@ function PublicHeader() {
   return (
     <header className="topbar">
       <Link href="/" aria-label="Bitnoir Home">
-        <Brand />
+<Brand showBadge={false} />
       </Link>
       <nav className="nav-links" aria-label="Main Navigation">
         <Link href="/" className={location === '/' ? 'active' : ''}>Overview</Link>
@@ -312,9 +312,9 @@ function HomePage() {
   const data = overview.data;
   const batches = asArray<PresaleOverview['batches'][number]>(data?.batches);
   const allocations = asArray<PresaleOverview['allocations'][number]>(data?.allocations);
-  const sold = Number(data?.totalTokensSold) || 4_825_000;
-  const cap = data?.publicSaleSupply || 8_400_000;
-  const percentage = Math.min(100, (sold / cap) * 100);
+  const sold = Number(data?.totalTokensSold) || 0;
+  const cap = Number(data?.publicSaleSupply) || 0;
+  const percentage = cap > 0 ? Math.min(100, (sold / cap) * 100) : 0;
 
   return (
     <div className="site-shell">
@@ -369,7 +369,7 @@ function HomePage() {
               </div>
 
               <div className="hero-stat-badge">
-                <strong>{money(data?.totalRaisedUsdt || 482500)}</strong>
+                <strong>{data ? money(data.totalRaisedUsdt) : '—'}</strong>
                 <span>Protocol Capital Raised</span>
               </div>
             </div>
@@ -414,7 +414,7 @@ function HomePage() {
               <div className="sale-numbers">
                 <div>
                   <span className="small-label">Raised to Date</span>
-                  <strong>{money(data?.totalRaisedUsdt || 482500)}</strong>
+                  <strong>{data ? money(data.totalRaisedUsdt) : '—'}</strong>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <span className="small-label">Public Sale Cap</span>
@@ -1071,6 +1071,7 @@ function SignUpPage() {
 // ---------------------------------------------------------------------------
 const navMain = [
   { href: '/deposit', label: 'Wallet & Assets', description: 'Deposits, balances & history', icon: Wallet },
+  { href: '/withdraw', label: 'Withdrawals', description: 'Request Bitnoir rewards', icon: ArrowUpRight },
   { href: '/staking', label: 'Staking Protocol', description: '30–90d lockup & burns', icon: Layers3 },
   { href: '/pool', label: 'Mining Pool', description: 'Reserve & live emissions', icon: Coins },
   { href: '/referrals', label: 'XP & Airdrop', description: 'Reputation & referrals', icon: Gift },
@@ -1082,7 +1083,7 @@ const navMain = [
 function AppShell({ children, active, admin = false }: { children: ReactNode; active: string; admin?: boolean }) {
   const { user, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
-  const name = user?.name || user?.username || 'SatoshiNode';
+  const name = user?.name || user?.username || 'Member';
   const role = admin ? 'Administrator' : 'Protocol Member';
 
   return (
@@ -1211,10 +1212,13 @@ function ProtectedGate({ children, admin = false }: { children: (account: UserAc
       </div>
     );
   }
-  if (admin && accountQuery.data.role !== 'admin') {
+  if (admin && !user?.isAdmin && accountQuery.data.role !== 'admin') {
     return <Redirect to="/deposit" />;
   }
-  return <>{children(accountQuery.data)}</>;
+  const account = user?.isAdmin && accountQuery.data.role !== 'admin'
+    ? { ...accountQuery.data, role: 'admin' as const }
+    : accountQuery.data;
+  return <>{children(account)}</>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1235,7 +1239,7 @@ function DepositsPage({ account }: { account: UserAccount }) {
 
   const depositRows = asArray<Deposit>(deposits.data);
   const addressRows = asArray<DepositAddress>(receiveAddresses.data);
-  const verifiedAddress = addressRows.find((item) => item.chain === 'bnb' && item.active)?.address || '0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db';
+  const verifiedAddress = addressRows.find((item) => item.chain === 'bnb' && item.active)?.address || '';
 
   const numericAmount = Number(amount) || 0;
   const estimatedBits = Math.round(numericAmount * 10); // 100 USDT = 1,000 Bits
@@ -1316,9 +1320,12 @@ function DepositsPage({ account }: { account: UserAccount }) {
             Deposit BEP-20 USDT, review Bits balances, burn into staking positions, and claim protocol farming rewards.
           </p>
         </div>
-        <div className="top-actions">
-          <Link href="/staking" className="button button-primary">
-            <Flame size={14} /> Stake & Burn Bits
+        <div className="top-actions wallet-actions">
+          <a href="#deposit-amount" className="button button-primary">
+            <ArrowDownLeft size={14} /> Deposit USDT
+          </a>
+          <Link href="/withdraw" className="button button-ghost">
+            <ArrowUpRight size={14} /> Withdraw Bitnoir
           </Link>
         </div>
       </div>
@@ -1357,7 +1364,7 @@ function DepositsPage({ account }: { account: UserAccount }) {
             <span className="metric-label">Claimable Farming</span>
             <TokenMark size={22} />
           </div>
-          <div className="metric-value">{claimableTokens.toFixed(4)} <small style={{ fontSize: 13, color: 'var(--silver-dark)' }}>BITS</small></div>
+          <div className="metric-value">{claimableTokens.toFixed(4)} <small style={{ fontSize: 13, color: 'var(--silver-dark)' }}>Bitnoir</small></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
             <span className="metric-foot">{money(claimableUsdtValue)} value</span>
             <button
@@ -1414,29 +1421,31 @@ function DepositsPage({ account }: { account: UserAccount }) {
           <div className="field-wrap">
             <label className="field-label">Verified Protocol Receiving Address</label>
             <div className="address-box">
-              <span>{verifiedAddress}</span>
-              <button
-                type="button"
-                className="address-copy"
-                aria-label="Copy Address"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(verifiedAddress);
-                  notify('BNB Smart Chain receiving address copied.');
-                }}
-              >
-                <Copy size={14} />
-              </button>
+              <span>{verifiedAddress || 'Receiving address not configured yet.'}</span>
+              {verifiedAddress && (
+                <button
+                  type="button"
+                  className="address-copy"
+                  aria-label="Copy Address"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(verifiedAddress);
+                    notify('BNB Smart Chain receiving address copied.');
+                  }}
+                >
+                  <Copy size={14} />
+                </button>
+              )}
             </div>
           </div>
 
           <div className="callout info" style={{ marginBottom: 18 }}>
-            Send BEP-20 USDT only to the verified protocol address above. After broadcast, submit your deposit request.
+            {verifiedAddress ? 'Send BEP-20 USDT only to the verified protocol address above. After broadcast, submit your deposit request.' : 'Deposits are unavailable until an active receiving address is configured by an administrator.'}
             Approved deposits credit your available Bits immediately.
           </div>
 
           {formError && <div className="callout error" style={{ marginBottom: 16 }}>{formError}</div>}
 
-          <button className="button button-primary" type="submit" disabled={create.isPending || numericAmount <= 0} style={{ width: '100%' }}>
+          <button className="button button-primary" type="submit" disabled={create.isPending || numericAmount <= 0 || !verifiedAddress} style={{ width: '100%' }}>
             {create.isPending ? 'Submitting Request…' : 'Submit Deposit Request'} <ArrowRight size={14} />
           </button>
         </form>
@@ -1766,7 +1775,7 @@ function StakingPage({ account }: { account: UserAccount }) {
                 <div>
                   <span className="small-label">Farming Accrued</span>
                   <div style={{ font: '700 20px var(--app-font-serif)', color: 'var(--neon-green)', marginTop: 4 }}>
-                    {claimableTokens.toFixed(4)} BITS
+                    {claimableTokens.toFixed(4)} Bitnoir
                   </div>
                   <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>{money(claimableUsdtValue)} value</span>
                 </div>
@@ -2590,7 +2599,7 @@ function WithdrawPage({ account }: { account: UserAccount }) {
           </div>
 
           <div className="callout info" style={{ marginBottom: 18 }}>
-            Available Claimable Rewards: <strong>{claimableTokens.toFixed(4)} BITS ({money(claimableUsdtValue)})</strong>.
+            Available Claimable Rewards: <strong>{claimableTokens.toFixed(4)} Bitnoir ({money(claimableUsdtValue)})</strong>.
             Minimum withdrawal: <strong>$2.00 worth of Bitnoir</strong>.
           </div>
 

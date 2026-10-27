@@ -1556,8 +1556,38 @@ a {
   }
 
   .main-area {
+    min-width: 0;
     padding: 0 24px 60px;
     padding-top: 84px;
+  }
+
+  .app-top {
+    min-width: 0;
+    padding-left: 64px;
+    gap: 12px;
+  }
+
+  .app-top .top-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .page-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .page-title {
+    font-size: clamp(28px, 8vw, 36px);
+  }
+
+  .wallet-actions {
+    width: 100%;
+  }
+
+  .wallet-actions .button {
+    flex: 1;
   }
 
   .whitepaper-layout {
@@ -1578,6 +1608,23 @@ a {
 }
 
 @media (max-width: 768px) {
+  .main-area {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .app-top {
+    height: auto;
+    min-height: 72px;
+    margin-bottom: 24px;
+  }
+
+  .app-top .top-actions .button {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
   .hero {
     grid-template-columns: 1fr;
     min-height: auto;
@@ -1620,6 +1667,22 @@ a {
 
   .cards-4 {
     grid-template-columns: 1fr;
+  }
+
+  .content-card {
+    padding: 20px;
+  }
+
+  .card-heading {
+    align-items: flex-start;
+  }
+
+  .data-table {
+    min-width: 620px;
+  }
+
+  .address-box {
+    align-items: flex-start;
   }
 
   .whitepaper-hero {

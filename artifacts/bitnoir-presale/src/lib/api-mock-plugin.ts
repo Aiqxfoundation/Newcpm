@@ -14,11 +14,7 @@ export function bitnoirApiPlugin(): Plugin {
     swapsOpen: false,
   };
 
-  const depositAddresses: Array<{ id: number; chain: string; address: string; active: boolean }> = [
-    { id: 1, chain: 'bnb', address: '0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db', active: true },
-    { id: 2, chain: 'ethereum', address: '0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db', active: true },
-    { id: 3, chain: 'polygon', address: '0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db', active: true },
-  ];
+  const depositAddresses: Array<{ id: number; chain: string; address: string; active: boolean }> = [];
 
   const batches = [
     { id: 1, name: 'Genesis', pricePerToken: 0.10, tokenSupply: 2100000, tokensSold: 2100000, status: 'complete' },
@@ -37,11 +33,11 @@ export function bitnoirApiPlugin(): Plugin {
     referredBy: null as string | null,
     xp: 350,
     balances: {
-      purchased: 4500, // Available Bits
-      staked: 2000, // Currently active staked Bits
-      burned: 2000, // Bits burned permanently upon staking
-      claimable: 0.084, // Accrued farming reward in Bitnoir tokens ($4.20 value)
-      claimed: 0.12, // Bitnoir tokens claimed to date ($6.00 value)
+      purchased: 0,
+      staked: 0,
+      burned: 0,
+      claimable: 0,
+      claimed: 0,
       swapAvailable: 0,
     },
     createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
@@ -59,45 +55,11 @@ export function bitnoirApiPlugin(): Plugin {
     createdAt: string;
     unlocksAt: string;
     status: 'active' | 'matured' | 'claimed';
-  }> = [
-    {
-      id: 1,
-      stakedBits: 2000,
-      lockupDays: 60,
-      rewardRate: 0.16,
-      accruedReward: 0.084,
-      principalReturnTokens: (2000 * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE, // 4 Bitnoir tokens ($200)
-      createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
-      unlocksAt: new Date(Date.now() + 46 * 86400000).toISOString(),
-      status: 'active',
-    },
-  ];
+  }> = [];
 
-  const activityList = [
-    {
-      id: 1,
-      kind: 'stake',
-      title: 'Bits Staked & Burned',
-      detail: '2,000 Bits burned for a 60-day staking position at 16% reward rate.',
-      createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
-    },
-    {
-      id: 2,
-      kind: 'deposit',
-      title: 'USDT Deposit Confirmed',
-      detail: '200 USDT received on BNB Smart Chain. 2,000 Bits credited.',
-      createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
-    },
-    {
-      id: 3,
-      kind: 'welcome',
-      title: 'Welcome to Bitnoir',
-      detail: '100 XP awarded to your protocol reputation.',
-      createdAt: new Date(Date.now() - 15 * 86400000).toISOString(),
-    },
-  ];
+  const activityList: Array<{ id: number; kind: string; title: string; detail: string; createdAt: string }> = [];
 
-  let nextDepositId = 2;
+  let nextDepositId = 1;
   const depositsList: Array<{
     id: number;
     userId: string;
@@ -115,26 +77,7 @@ export function bitnoirApiPlugin(): Plugin {
     tokensCredited: number | null;
     rejectionReason: string | null;
     createdAt: string;
-  }> = [
-    {
-      id: 1,
-      userId: userAccount.id,
-      userName: userAccount.name,
-      userEmail: userAccount.email,
-      batchId: 3,
-      chain: 'bnb',
-      amountUsdt: 200,
-      pricePerToken: 0.1,
-      estimatedTokens: 2000,
-      status: 'approved',
-      reference: 'BNO-7C91E44A',
-      receiveAddress: '0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db',
-      txHash: '0x8b394d21e84a20b0857319f074d20c57f9202bd2e6f477011d88478491d90432',
-      tokensCredited: 2000,
-      rejectionReason: null,
-      createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
-    },
-  ];
+  }> = [];
 
   function parseBody(req: any): Promise<any> {
     return new Promise((resolve) => {
@@ -422,10 +365,10 @@ export function bitnoirApiPlugin(): Plugin {
         .reduce((sum, d) => sum + d.amountUsdt, 482500);
 
       return sendJson(res, 200, {
-        users: 1420,
-        pendingDeposits: pendingCount,
-        totalRaisedUsdt: totalRaised,
-        tokensSold: 4825000,
+    users: 0,
+    pendingDeposits: pendingCount,
+    totalRaisedUsdt: totalRaised,
+    tokensSold: 0,
         activeAddresses: depositAddresses.filter((a) => a.active).length,
         saleOpen: launchSettings.saleOpen,
       });
