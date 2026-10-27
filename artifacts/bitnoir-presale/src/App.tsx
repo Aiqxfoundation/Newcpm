@@ -152,7 +152,7 @@ function BitsMark({ size = 20 }: { size?: number }) {
 }
 
 // AUTH CONTEXT with Username & Session Persistence
-type AuthUser = { id: string; email: string; name: string; username: string };
+type AuthUser = { id: string; email: string; name: string; username: string; isAdmin?: boolean };
 const AuthContext = createContext<{
   user: AuthUser | null;
   signIn: (loginKey: string) => Promise<void>;
@@ -165,64 +165,58 @@ const AuthContext = createContext<{
   signOut: () => undefined,
 });
 
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
 
-  const hydrate = async (sessionUser: { id: string; email?: string; user_metadata?: { username?: string; name?: string } } | null) => {
-    if (!sessionUser) { setUser(null); return; }
-    const email = sessionUser.email || '';
-    const username = sessionUser.user_metadata?.username || email.split('@')[0] || 'member';
-    setUser({ id: sessionUser.id, email, username, name: sessionUser.user_metadata?.name || username });
-  };
-
   useEffect(() => {
-    let active = true;
-    supabase.auth.getSession().then(({ data }) => { if (active) void hydrate(data.session?.user || null); });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { if (active) void hydrate(session?.user || null); });
-    return () => { active = false; listener.subscription.unsubscribe(); };
+    const token = sessionStorage.getItem('bitnoir-session-token');
+    if (!token) return;
+    void sha256(token).then((tokenHash) => supabase.rpc('custom_session', { p_session_token_hash: tokenHash })).then(({ data }) => {
+      if (data?.user_id) setUser({ id: data.user_id, email: '', username: data.username, name: data.username, isAdmin: data.is_admin });
+      else sessionStorage.removeItem('bitnoir-session-token');
+    });
   }, []);
 
   const signIn = async (loginKey: string) => {
     const normalizedKey = loginKey.trim().toLowerCase();
-    const keyBytes = new TextEncoder().encode(normalizedKey);
-    const digest = await crypto.subtle.digest('SHA-256', keyBytes);
-    const loginKeyHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-    const { data, error } = await supabase.rpc('resolve_login_key', { p_login_key: normalizedKey, p_login_key_hash: loginKeyHash });
-    if (error || !data?.email) throw new Error('Invalid login key.');
-    const authResult = await supabase.auth.signInWithPassword({ email: data.email, password: normalizedKey });
-    if (authResult.error) throw new Error('Invalid login key.');
+    const sessionToken = crypto.randomUUID() + crypto.randomUUID();
+    const { data, error } = await supabase.rpc('custom_login', {
+      p_login_key_hash: await sha256(normalizedKey),
+      p_session_token_hash: await sha256(sessionToken),
+    });
+    if (error || !data?.user_id) throw new Error(error?.message?.includes('invalid_login_key') ? 'Invalid login key.' : 'Unable to sign in. Please try again.');
+    sessionStorage.setItem('bitnoir-session-token', sessionToken);
+    setUser({ id: data.user_id, email: '', username: data.username, name: data.username, isAdmin: data.is_admin });
   };
 
   const signUp = async (username: string, password: string, referral?: string) => {
-    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    const internalEmail = `${cleanUsername}@accounts.bitnoir.internal`;
+    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
     const randomBytes = new Uint8Array(32);
     crypto.getRandomValues(randomBytes);
     const loginKey = `0x${Array.from(randomBytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
-    const keyBytes = new TextEncoder().encode(loginKey);
-    const digest = await crypto.subtle.digest('SHA-256', keyBytes);
-    const loginKeyHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-    if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
-    const { data, error } = await supabase.auth.signUp({
-      email: internalEmail,
-      password: loginKey,
-      options: {
-        data: { username: cleanUsername, name: cleanUsername, login_key_hash: loginKeyHash, referral_username: referral?.trim().toLowerCase().replace(/[^a-z0-9]/g, '') || null },
-        emailRedirectTo: import.meta.env.VITE_SUPABASE_REDIRECT_URL || import.meta.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/sign-in`,
-      },
+    const { data, error } = await supabase.rpc('custom_signup', {
+      p_username: cleanUsername,
+      p_password: password,
+      p_login_key_hash: await sha256(loginKey),
     });
-    if (error) {
-      if (error.message.includes('over_email_send_rate_limit') || error.message.includes('email rate limit')) throw new Error('Email confirmation is temporarily rate-limited. Wait a few minutes before trying again, or use a different email address.');
-      if (error.message.includes('email_address_invalid')) throw new Error('Enter a valid email address.');
-      if (error.message.includes('already')) throw new Error('Unable to create this account. Check the details and try again.');
-      if (error.message.includes('password')) throw new Error('Choose a stronger password with at least 8 characters.');
-      throw new Error('Unable to create your account. Please try again.');
+    if (error || !data?.user_id) {
+      const message = error?.message || '';
+      if (message.includes('username_taken')) throw new Error('That username is already taken.');
+      if (message.includes('weak_password')) throw new Error('Choose a stronger password with at least 8 characters.');
+      if (message.includes('invalid_username')) throw new Error('Username may contain only letters, numbers, and underscores.');
+      if (message.includes('invalid_login_key')) throw new Error('Unable to generate a secure login key. Please try again.');
+      throw new Error(message || 'Unable to create your account. Please try again.');
     }
-    if (data.session) await hydrate(data.user);
+    if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toLowerCase().replace(/[^a-z0-9_]/g, ''));
     return loginKey;
   };
 
-  const signOut = () => { void supabase.auth.signOut(); setUser(null); };
+  const signOut = () => { sessionStorage.removeItem('bitnoir-session-token'); setUser(null); };
   return <AuthContext.Provider value={{ user, signIn, signUp, signOut }}>{children}</AuthContext.Provider>;
 }
 
@@ -944,7 +938,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
     const cleanKey = password.trim();
 
     if (mode === 'sign-up' && cleanUser.length < 3) {
@@ -1000,7 +994,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
             className="field mono"
             placeholder="Choose a username"
             value={username}
-            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
+            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
             maxLength={20}
             required
           />
