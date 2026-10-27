@@ -16,6 +16,7 @@ if (!Number.isInteger(port) || port <= 0 || port > 65535) {
 const basePath = process.env.BASE_PATH ?? '/';
 
 export default defineConfig({
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   base: basePath,
   plugins: [
     bitnoirApiPlugin(),
