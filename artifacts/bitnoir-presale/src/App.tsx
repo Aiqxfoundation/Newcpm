@@ -173,6 +173,15 @@ async function sha256(value: string) {
 function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
 
+  useEffect(() => {
+    const token = sessionStorage.getItem('bitnoir-session-token');
+    if (!token) return;
+    void sha256(token).then((tokenHash) => supabase.rpc('custom_session', { p_session_token_hash: tokenHash })).then(({ data }) => {
+      if (data?.user_id) setUser({ id: data.user_id, email: '', username: data.username, name: data.username, isAdmin: data.is_admin });
+      else sessionStorage.removeItem('bitnoir-session-token');
+    });
+  }, []);
+
   const signIn = async (loginKey: string) => {
     const normalizedKey = loginKey.trim().toLowerCase();
     const sessionToken = crypto.randomUUID() + crypto.randomUUID();
@@ -199,7 +208,9 @@ function AuthProvider({ children }: { children: ReactNode }) {
       const message = error?.message || '';
       if (message.includes('username_taken')) throw new Error('That username is already taken.');
       if (message.includes('weak_password')) throw new Error('Choose a stronger password with at least 8 characters.');
-      throw new Error('Unable to create your account. Please try again.');
+      if (message.includes('invalid_username')) throw new Error('Username may contain only letters, numbers, and underscores.');
+      if (message.includes('invalid_login_key')) throw new Error('Unable to generate a secure login key. Please try again.');
+      throw new Error(message || 'Unable to create your account. Please try again.');
     }
     if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toLowerCase().replace(/[^a-z0-9_]/g, ''));
     return loginKey;
@@ -927,7 +938,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
     const cleanKey = password.trim();
 
     if (mode === 'sign-up' && cleanUser.length < 3) {
@@ -983,7 +994,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
             className="field mono"
             placeholder="Choose a username"
             value={username}
-            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
+            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
             maxLength={20}
             required
           />
