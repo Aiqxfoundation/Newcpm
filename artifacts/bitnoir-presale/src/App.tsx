@@ -146,7 +146,10 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (loginKey: string) => {
     const normalizedKey = loginKey.trim().toLowerCase();
-    const { data, error } = await supabase.rpc('resolve_login_key', { p_login_key: normalizedKey });
+    const keyBytes = new TextEncoder().encode(normalizedKey);
+    const digest = await crypto.subtle.digest('SHA-256', keyBytes);
+    const loginKeyHash = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    const { data, error } = await supabase.rpc('resolve_login_key', { p_login_key: normalizedKey, p_login_key_hash: loginKeyHash });
     if (error || !data?.email) throw new Error('Invalid login key.');
     const authResult = await supabase.auth.signInWithPassword({ email: data.email, password: normalizedKey });
     if (authResult.error) throw new Error('Invalid login key.');
