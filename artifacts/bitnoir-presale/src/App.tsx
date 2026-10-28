@@ -122,10 +122,10 @@ function Brand({ showBadge = true, size = 'md' }: { showBadge?: boolean; size?: 
   return (
     <span className="brand" style={{ fontSize: textSize }}>
       <div className="brand-icon-wrap" style={{ width: iconSize, height: iconSize }}>
-        <img src="/bitnoir-token.webp" alt="Bitnoir Token" />
+        <img className="bitnoir-logo" src="/bitnoir-logo-orange.webp" alt="Bitnoir orange token" />
       </div>
       <span>bitnoir</span>
-      {showBadge && <span className="brand-badge">BITS</span>}
+      {showBadge && <span className="brand-badge">BITS POINTS</span>}
     </span>
   );
 }
@@ -144,7 +144,7 @@ function TokenMark({ size = 20 }: { size?: number }) {
 function BitsMark({ size = 20 }: { size?: number }) {
   return (
     <img
-      src="/bits-coin.webp"
+      src="/bits-logo-green.webp"
       alt="Bits"
       style={{ width: size, height: size, borderRadius: '50%', display: 'inline-block', verticalAlign: 'middle' }}
     />
@@ -365,7 +365,7 @@ function HomePage() {
               </div>
 
               <div className="hero-secondary-coin" title="Bits (Staking Units)">
-                <img src="/bits-coin.webp" alt="Bits Staking Unit" />
+                <img src="/bits-logo-green.webp" alt="Bits Staking Unit" />
               </div>
 
 
@@ -552,7 +552,7 @@ function HomePage() {
 
       <footer className="footer">
         <Brand size="sm" />
-        <span>Bitnoir Protocol · BITS · 21,000,000 Fixed Cap</span>
+        <span>Bitnoir Protocol · Bits Points · 21,000,000 Fixed Cap</span>
         <span>Participation involves market and smart-contract risk. Review disclosures carefully.</span>
       </footer>
     </div>
