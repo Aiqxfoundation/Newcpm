@@ -271,7 +271,7 @@ function PageError({ retry }: { retry: () => void }) {
 }
 
 // Navigation Bar
-function PublicHeader() {
+function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
   const [location] = useLocation();
   const { user } = useAuth();
 
@@ -293,7 +293,7 @@ function PublicHeader() {
           </Link>
         ) : (
           <>
-            <Link href="/sign-in" className="button button-ghost">Sign in</Link>
+            {!hideSignIn && <Link href="/sign-in" className="button button-ghost">Sign in</Link>}
             <Link href="/sign-up" className="button button-primary">
               Enter Fair Launch <ArrowRight size={14} />
             </Link>
@@ -318,7 +318,7 @@ function HomePage() {
 
   return (
     <div className="site-shell">
-      <PublicHeader />
+      <PublicHeader hideSignIn />
       <main>
         {/* HERO SECTION */}
         <section className="hero">

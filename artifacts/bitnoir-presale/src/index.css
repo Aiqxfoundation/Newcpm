@@ -34,6 +34,7 @@
   --silver-dark: #637189;
   --gold-bits: #f5a623;
   --gold-bits-glow: rgba(245, 166, 35, 0.2);
+  --token-orange: #ff8b2f;
   --danger: #ff5252;
 
   --app-font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -95,11 +96,11 @@ a {
   align-items: center;
   font: 700 20px var(--app-font-serif);
   letter-spacing: -0.04em;
-  color: #fff;
+  color: var(--token-orange);
   transition: opacity 0.2s;
-}
+  }
 
-.brand:hover {
+  .brand:hover {
   opacity: 0.92;
 }
 
@@ -111,8 +112,8 @@ a {
   place-items: center;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 0 16px var(--neon-green-glow);
-  border: 1px solid var(--border-neon);
+  box-shadow: 0 0 18px rgba(255, 139, 47, 0.42);
+  border: 1px solid var(--token-orange);
 }
 
 .brand-icon-wrap img {
