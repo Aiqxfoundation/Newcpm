@@ -434,7 +434,7 @@ function HomePage() {
                       <strong style={{ color: '#fff' }}>{batch.name}</strong>
                     </span>
                     <span className="mono" style={{ color: 'var(--neon-green)' }}>
-                      ${Number(batch.pricePerToken).toFixed(3)} / BITS
+                      ${Number(batch.pricePerToken).toFixed(3)} / Bitnoir
                     </span>
                     <span className="mono" style={{ color: 'var(--silver-medium)' }}>
                       {compact(batch.tokensSold)} / {compact(batch.tokenSupply)}
@@ -654,7 +654,7 @@ function DocsPage() {
                 <div className="panel content-card" style={{ borderColor: 'rgba(245, 166, 35, 0.3)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                     <BitsMark size={28} />
-                    <h3 style={{ margin: 0, fontSize: 18, color: 'var(--gold-bits)' }}>Bits (Accounting Credit)</h3>
+                    <h3 style={{ margin: 0, fontSize: 18, color: 'var(--neon-green)' }}>Bits (Points)</h3>
                   </div>
                   <p style={{ fontSize: 13, color: 'var(--silver-medium)', margin: 0 }}>
                     Internal protocol units credited upon verified USDT deposits on BNB Smart Chain.
@@ -664,10 +664,10 @@ function DocsPage() {
                   </p>
                 </div>
 
-                <div className="panel content-card" style={{ borderColor: 'var(--border-neon)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                    <TokenMark size={28} />
-                    <h3 style={{ margin: 0, fontSize: 18, color: 'var(--neon-green)' }}>Bitnoir Token (BITS)</h3>
+<div className="panel content-card" style={{ borderColor: 'rgba(255, 139, 47, 0.35)' }}>
+  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+  <TokenMark size={28} />
+  <h3 style={{ margin: 0, fontSize: 18, color: 'var(--token-orange)' }}>Bitnoir Token</h3>
                   </div>
                   <p style={{ fontSize: 13, color: 'var(--silver-medium)', margin: 0 }}>
                     The native cryptographic token of the ecosystem with a hard cap of <strong>21,000,000 BITS</strong>.
@@ -1637,10 +1637,10 @@ function StakingPage({ account }: { account: UserAccount }) {
 
         <article className="metric-card">
           <div className="metric-card-head">
-            <span className="metric-label">Claimable Farming</span>
-            <TokenMark size={20} />
+<span className="metric-label">Claimable Bitnoir</span>
+  <TokenMark size={20} />
           </div>
-          <div className="metric-value">{claimableTokens.toFixed(4)} <small style={{ fontSize: 12 }}>BITS</small></div>
+          <div className="metric-value">{claimableTokens.toFixed(4)} <small style={{ fontSize: 12 }}>Bitnoir</small></div>
           <div className="metric-foot">{money(claimableUsdtValue)} (Min $2.00 threshold)</div>
         </article>
       </div>
