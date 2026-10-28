@@ -276,7 +276,7 @@ function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
   const { user } = useAuth();
 
   return (
-    <header className="topbar">
+    <header className="topbar" data-page-header>
       <Link href="/" aria-label="Bitnoir Home">
 <Brand showBadge={false} />
       </Link>
@@ -337,8 +337,8 @@ function HomePage() {
               and redeem principal Bitnoir tokens upon maturity.
             </p>
             <div className="hero-actions">
-              <Link href="/deposit" className="button button-primary">
-                Enter Protocol <ArrowRight size={15} />
+              <Link href="/sign-up" className="button button-primary hero-primary-action">
+                Enter Fair Launch <ArrowRight size={15} />
               </Link>
               <Link href="/docs" className="button button-ghost">
                 Read Whitepaper <BookOpen size={15} />
@@ -361,7 +361,7 @@ function HomePage() {
               <div className="hero-orbit-ring-inner" />
 
               <div className="hero-token-card">
-                <img src="/bitnoir-token.webp" alt="Bitnoir Token (BITS)" />
+                <img src="/bitnoir-token.webp" alt="Bitnoir orange token" />
               </div>
 
               <div className="hero-secondary-coin" title="Bits (Staking Units)">
