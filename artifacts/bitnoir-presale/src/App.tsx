@@ -368,10 +368,7 @@ function HomePage() {
                 <img src="/bits-coin.webp" alt="Bits Staking Unit" />
               </div>
 
-              <div className="hero-stat-badge">
-                <strong>{data ? money(data.totalRaisedUsdt) : '—'}</strong>
-                <span>Protocol Capital Raised</span>
-              </div>
+
             </div>
           </div>
         </section>
