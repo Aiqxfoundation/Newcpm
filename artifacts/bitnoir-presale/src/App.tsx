@@ -111,17 +111,14 @@ function asArray<T>(value: unknown): T[] {
 }
 
 // Brand Component with official artwork
-function Brand({ showBadge = true, size = 'md' }: { showBadge?: boolean; size?: 'sm' | 'md' | 'lg' }) {
-  const iconSize = size === 'sm' ? 26 : size === 'lg' ? 44 : 34;
-  const textSize = size === 'sm' ? 17 : size === 'lg' ? 26 : 20;
+function Brand({ showBadge = false, size = 'md' }: { showBadge?: boolean; size?: 'sm' | 'md' | 'lg' }) {
+  const textSize = size === 'sm' ? 18 : size === 'lg' ? 28 : 22;
 
   return (
     <span className="brand" style={{ fontSize: textSize }}>
-      <div className="brand-icon-wrap" style={{ width: iconSize, height: iconSize }}>
-        <img src="/bitnoir-token.webp" alt="Bitnoir Token" />
-      </div>
-      <span>bitnoir</span>
-      {showBadge && <span className="brand-badge">BITS</span>}
+      <img className="bitnoir-logo" src="/bits-logo-green.webp" alt="Bitnoir orange token" />
+      <span>Bitnoir</span>
+      {showBadge && <span className="brand-badge">BITS POINTS</span>}
     </span>
   );
 }
@@ -130,7 +127,7 @@ function Brand({ showBadge = true, size = 'md' }: { showBadge?: boolean; size?: 
 function TokenMark({ size = 20 }: { size?: number }) {
   return (
     <img
-      src="/bitnoir-token.webp"
+      src="/bits-logo-green.webp"
       alt="Bitnoir Token"
       style={{ width: size, height: size, borderRadius: '50%', display: 'inline-block', verticalAlign: 'middle' }}
     />
@@ -140,7 +137,7 @@ function TokenMark({ size = 20 }: { size?: number }) {
 function BitsMark({ size = 20 }: { size?: number }) {
   return (
     <img
-      src="/bits-coin.webp"
+      src="/bitnoir-logo-orange.webp"
       alt="Bits"
       style={{ width: size, height: size, borderRadius: '50%', display: 'inline-block', verticalAlign: 'middle' }}
     />
@@ -257,15 +254,28 @@ function Skeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
+function PageError({ retry }: { retry: () => void }) {
+return (
+<div className="empty-state">
+<ShieldAlert size={28} color="var(--danger)" style={{ margin: '0 auto 12px' }} />
+<p style={{ color: '#fff', fontSize: 14 }}>Connection temporarily unavailable.</p>
+<p style={{ color: 'var(--silver-medium)', fontSize: 12 }}>Check your network status and try again.</p>
+<button className="button button-soft" onClick={retry} style={{ marginTop: 16 }}>
+<RefreshCw size={14} /> Retry
+</button>
+</div>
+);
+}
+
 // Navigation Bar for Landing & Docs
-function PublicHeader() {
+function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
   const [location] = useLocation();
   const { user } = useAuth();
 
   return (
-    <header className="topbar">
+    <header className="topbar" data-page-header>
       <Link href="/" aria-label="Bitnoir Home">
-        <Brand showBadge={false} />
+        <Brand />
       </Link>
       <nav className="nav-links" aria-label="Main Navigation">
         <Link href="/" className={location === '/' ? 'active' : ''}>Overview</Link>
@@ -281,7 +291,7 @@ function PublicHeader() {
           </Link>
         ) : (
           <>
-            <Link href="/sign-in" className="button button-ghost">Sign in</Link>
+            {!hideSignIn && <Link href="/sign-in" className="button button-ghost">Sign in</Link>}
             <Link href="/sign-up" className="button button-primary">
               Enter Fair Launch <ArrowRight size={14} />
             </Link>
@@ -306,7 +316,7 @@ function HomePage() {
 
   return (
     <div className="site-shell">
-      <PublicHeader />
+      <PublicHeader hideSignIn />
       <main>
         {/* HERO SECTION */}
         <section className="hero">
@@ -325,8 +335,8 @@ function HomePage() {
               and redeem principal Bitnoir tokens upon maturity.
             </p>
             <div className="hero-actions">
-              <Link href="/wallet" className="button button-primary">
-                Open Wallet <ArrowRight size={15} />
+<Link href="/sign-up" className="button button-primary hero-primary-action">
+Enter Fair Launch <ArrowRight size={15} />
               </Link>
               <Link href="/docs" className="button button-ghost">
                 Read Whitepaper <BookOpen size={15} />
@@ -349,17 +359,14 @@ function HomePage() {
               <div className="hero-orbit-ring-inner" />
 
               <div className="hero-token-card">
-                <img src="/bitnoir-token.webp" alt="Bitnoir Token (BITS)" />
+                <img src="/bits-logo-green.webp" alt="Bitnoir orange token" />
               </div>
 
               <div className="hero-secondary-coin" title="Bits (Staking Units)">
-                <img src="/bits-coin.webp" alt="Bits Staking Unit" />
+                <img src="/bitnoir-logo-orange.webp" alt="Bits Staking Unit" />
               </div>
 
-              <div className="hero-stat-badge">
-                <strong>{data ? money(data.totalRaisedUsdt) : '—'}</strong>
-                <span>Protocol Capital Raised</span>
-              </div>
+
             </div>
           </div>
         </section>
@@ -425,7 +432,7 @@ function HomePage() {
                       <strong style={{ color: '#fff' }}>{batch.name}</strong>
                     </span>
                     <span className="mono" style={{ color: 'var(--neon-green)' }}>
-                      ${Number(batch.pricePerToken).toFixed(3)} / BITS
+                      ${Number(batch.pricePerToken).toFixed(3)} / Bitnoir
                     </span>
                     <span className="mono" style={{ color: 'var(--silver-medium)' }}>
                       {compact(batch.tokensSold)} / {compact(batch.tokenSupply)}
@@ -457,7 +464,7 @@ function HomePage() {
 
       <footer className="footer">
         <Brand size="sm" />
-        <span>Bitnoir Protocol · BITS · 21,000,000 Fixed Cap</span>
+        <span>Bitnoir Protocol · Bits Points · 21,000,000 Fixed Cap</span>
         <span>Participation involves market and smart-contract risk. Review disclosures carefully.</span>
       </footer>
     </div>
@@ -542,7 +549,7 @@ function DocsPage() {
                 <div className="panel content-card" style={{ borderColor: 'rgba(245, 166, 35, 0.3)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                     <BitsMark size={28} />
-                    <h3 style={{ margin: 0, fontSize: 18, color: 'var(--gold-bits)' }}>Bits (Accounting Credit)</h3>
+                    <h3 style={{ margin: 0, fontSize: 18, color: 'var(--neon-green)' }}>Bits (Points)</h3>
                   </div>
                   <p style={{ fontSize: 13, color: 'var(--silver-medium)', margin: 0 }}>
                     Internal protocol units credited upon verified USDT deposits on BNB Smart Chain.
@@ -552,10 +559,10 @@ function DocsPage() {
                   </p>
                 </div>
 
-                <div className="panel content-card" style={{ borderColor: 'var(--border-neon)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                    <TokenMark size={28} />
-                    <h3 style={{ margin: 0, fontSize: 18, color: 'var(--neon-green)' }}>Bitnoir Token (BITS)</h3>
+<div className="panel content-card" style={{ borderColor: 'rgba(255, 139, 47, 0.35)' }}>
+  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+  <TokenMark size={28} />
+  <h3 style={{ margin: 0, fontSize: 18, color: 'var(--token-orange)' }}>Bitnoir Token</h3>
                   </div>
                   <p style={{ fontSize: 13, color: 'var(--silver-medium)', margin: 0 }}>
                     The native cryptographic token of the ecosystem with a hard cap of <strong>21,000,000 BITS</strong>.
@@ -803,7 +810,7 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
     <div className="app-layout">
       {/* MOBILE TRIGGER */}
       <button
-        className="mobile-menu-button"
+        className={`mobile-menu-button ${menuOpen ? 'menu-open' : ''}`}
         type="button"
         aria-label={menuOpen ? 'Close Menu' : 'Open Menu'}
         onClick={() => setMenuOpen(!menuOpen)}
@@ -884,19 +891,6 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
 
       {/* MAIN CONTENT AREA */}
       <main className="main-area">
-        <div className="app-top">
-          <span className="breadcrumbs">
-            BITNOIR / {active.replace('/', '').toUpperCase() || 'WALLET'}
-          </span>
-          <div className="top-actions">
-            <Link href="/" className="button button-soft" style={{ minHeight: 34, fontSize: 12 }}>
-              Public Site <ExternalLink size={12} />
-            </Link>
-            <Link href="/docs" className="button button-ghost" style={{ minHeight: 34, fontSize: 12 }}>
-              Whitepaper <BookOpen size={12} />
-            </Link>
-          </div>
-        </div>
         <div className="page-wrap">{children}</div>
       </main>
     </div>
@@ -988,7 +982,7 @@ function DepositModal({
     }
     setError('');
     create.mutate(
-      { data: { chain: selectedChain, amountUsdt: numericAmount, txHash: txHash.trim() || undefined } },
+      { data: { chain: selectedChain, amountUsdt: numericAmount } },
       {
         onSuccess: () => {
           toast({
@@ -1485,7 +1479,7 @@ function WalletPage({ account }: { account: UserAccount }) {
         <div className="asset-row">
           <div className="asset-identity">
             <div className="asset-icon-box">
-              <img src="/bits-coin.webp" alt="Bits" />
+              <img src="/bitnoir-logo-orange.webp" alt="Bits" />
             </div>
             <div className="asset-names">
               <div className="asset-primary-name">
@@ -1534,7 +1528,7 @@ function WalletPage({ account }: { account: UserAccount }) {
         <div className="asset-row">
           <div className="asset-identity">
             <div className="asset-icon-box">
-              <img src="/bitnoir-token.webp" alt="Bitnoir Token" />
+              <img src="/bits-logo-green.webp" alt="Bitnoir Token" />
             </div>
             <div className="asset-names">
               <div className="asset-primary-name">
@@ -2208,10 +2202,10 @@ function StakingPage({ account }: { account: UserAccount }) {
 
         <article className="metric-card">
           <div className="metric-card-head">
-            <span className="metric-label">Claimable Farming</span>
-            <TokenMark size={20} />
+<span className="metric-label">Claimable Bitnoir</span>
+  <TokenMark size={20} />
           </div>
-          <div className="metric-value">{claimableTokens.toFixed(4)} <small style={{ fontSize: 12 }}>BITS</small></div>
+          <div className="metric-value">{claimableTokens.toFixed(4)} <small style={{ fontSize: 12 }}>Bitnoir</small></div>
           <div className="metric-foot">{money(claimableUsdtValue)} (Min $2.00 threshold)</div>
         </article>
       </div>

@@ -223,7 +223,7 @@ export function bitnoirApiPlugin(): Plugin {
     if (url === '/api/presale/overview' && req.method === 'GET') {
       const totalRaised = depositsList
         .filter((d) => d.status === 'approved')
-        .reduce((sum, d) => sum + d.amountUsdt, 482500);
+        .reduce((sum, d) => sum + d.amountUsdt, 0);
       const totalSold = batches.reduce((sum, b) => sum + b.tokensSold, 0);
 
       return sendJson(res, 200, {
@@ -550,7 +550,7 @@ export function bitnoirApiPlugin(): Plugin {
       const pendingCount = depositsList.filter((d) => d.status === 'pending').length;
       const totalRaised = depositsList
         .filter((d) => d.status === 'approved')
-        .reduce((sum, d) => sum + d.amountUsdt, 482500);
+        .reduce((sum, d) => sum + d.amountUsdt, 0);
 
       return sendJson(res, 200, {
     users: 0,

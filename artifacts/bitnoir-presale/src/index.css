@@ -34,6 +34,7 @@
   --silver-dark: #637189;
   --gold-bits: #f5a623;
   --gold-bits-glow: rgba(245, 166, 35, 0.2);
+  --token-orange: #ff8b2f;
   --danger: #ff5252;
 
   --app-font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -91,11 +92,12 @@ a {
 /* BRANDING & LOGOS */
 .brand {
   display: inline-flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  font: 700 20px var(--app-font-serif);
-  letter-spacing: -0.04em;
-  color: #fff;
+  font: 700 22px var(--app-font-serif);
+  letter-spacing: -0.035em;
+  color: var(--token-orange);
+  white-space: nowrap;
   transition: opacity 0.2s;
 }
 
@@ -103,22 +105,15 @@ a {
   opacity: 0.92;
 }
 
-.brand-icon-wrap {
+.brand > img.bitnoir-logo {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 0 16px var(--neon-green-glow);
-  border: 1px solid var(--border-neon);
-}
-
-.brand-icon-wrap img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  flex: 0 0 34px;
+  display: block;
+  object-fit: contain;
+  border-radius: 50%;
+  filter: none;
+  mix-blend-mode: normal;
 }
 
 .brand-badge {
@@ -437,31 +432,9 @@ a {
   border-radius: 50%;
 }
 
-.hero-stat-badge {
-  position: absolute;
-  z-index: 4;
-  left: 0;
-  top: 40px;
-  padding: 10px 16px;
-  background: rgba(18, 22, 32, 0.85);
-  border: 1px solid var(--border-metallic);
-  border-radius: 12px;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-}
 
-.hero-stat-badge strong {
-  display: block;
-  font: 700 16px var(--app-font-serif);
-  color: #fff;
-}
 
-.hero-stat-badge span {
-  font: 500 10px var(--app-font-mono);
-  color: var(--neon-green);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
+
 
 /* STATS STRIP */
 .landing-stats {
@@ -830,21 +803,7 @@ a {
   padding: 0 40px 60px;
 }
 
-.app-top {
-  height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 36px;
-}
 
-.breadcrumbs {
-  font: 500 11px var(--app-font-mono);
-  color: var(--silver-dark);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
 
 .page-wrap {
   max-width: 1240px;
@@ -1525,7 +1484,13 @@ a {
   }
 
   .sidebar.mobile-open {
-    transform: translateX(0);
+  transform: translateX(0);
+  z-index: 60;
+  }
+
+  .mobile-menu-button.menu-open {
+  opacity: 0;
+  pointer-events: none;
   }
 
   .mobile-menu-button {
@@ -1570,9 +1535,9 @@ a {
   }
 
   .main-area {
-    min-width: 0;
-    padding: 0 24px 60px;
-    padding-top: 84px;
+  min-width: 0;
+  padding: 0 24px 60px;
+  padding-top: 82px;
   }
 
   .app-top {
@@ -1709,6 +1674,188 @@ a {
     text-align: center;
     padding: 32px 20px;
   }
+}
+
+/* Landing page layout contract: the header owns its row, the hero owns its grid,
+   and the artwork never participates in text flow or pushes actions off-screen. */
+.site-shell {
+  overflow-x: clip;
+}
+
+.site-shell .topbar {
+  width: min(100%, 1360px);
+  min-height: 80px;
+  height: auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+}
+
+.site-shell .topbar > a:first-child {
+  min-width: max-content;
+}
+
+.site-shell .nav-links {
+  justify-content: center;
+  min-width: 0;
+}
+
+.site-shell .top-actions {
+  justify-content: flex-end;
+  min-width: max-content;
+}
+
+.site-shell .hero {
+  width: min(100%, 1360px);
+  min-width: 0;
+}
+
+.site-shell .hero-copy,
+.site-shell .hero-art {
+  min-width: 0;
+}
+
+.site-shell .hero-copy > p {
+  text-wrap: pretty;
+}
+
+.site-shell .hero-primary-action {
+  min-width: 172px;
+}
+
+.site-shell .trustline {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1024px) {
+  .site-shell .topbar {
+    grid-template-columns: auto auto;
+    justify-content: space-between;
+    gap: 16px;
+    padding-inline: 24px;
+  }
+
+  .site-shell .nav-links {
+    display: none;
+  }
+
+  .site-shell .hero {
+    grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
+    gap: 28px;
+    padding-inline: 24px;
+  }
+}
+
+@media (max-width: 768px) {
+  .site-shell .topbar {
+    min-height: 72px;
+    padding: 12px 16px;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .site-shell .brand {
+    gap: 8px;
+    font-size: 18px !important;
+  }
+
+  .site-shell .brand-icon-wrap {
+    width: 30px !important;
+    height: 30px !important;
+  }
+
+  .site-shell .top-actions .button {
+    min-height: 38px;
+    padding-inline: 14px;
+    font-size: 12px;
+  }
+
+  .site-shell .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 36px;
+    min-height: 0;
+    padding: 44px 20px 64px;
+  }
+
+  .site-shell .hero-copy {
+    text-align: center;
+  }
+
+  .site-shell .eyebrow {
+    max-width: 100%;
+    justify-content: center;
+    text-align: center;
+    line-height: 1.4;
+  }
+
+  .site-shell .hero-copy h1 {
+    font-size: clamp(42px, 13vw, 64px);
+    line-height: 0.98;
+    margin: 20px 0 18px;
+  }
+
+  .site-shell .hero-copy h1 br {
+    display: none;
+  }
+
+  .site-shell .hero-copy > p {
+    max-width: 620px;
+    font-size: 15px;
+    line-height: 1.7;
+    margin-bottom: 26px;
+  }
+
+  .site-shell .hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: min(100%, 360px);
+    margin-inline: auto;
+    gap: 10px;
+  }
+
+  .site-shell .hero-actions .button {
+    width: 100%;
+  }
+
+  .site-shell .trustline {
+    justify-content: center;
+    gap: 10px 18px;
+    margin-top: 28px;
+    line-height: 1.4;
+  }
+
+  .site-shell .hero-art {
+    order: 2;
+    width: 100%;
+  }
+
+  .site-shell .hero-coin-stage {
+    width: min(330px, 82vw);
+  }
+
+  .site-shell .hero-secondary-coin {
+    width: 64px;
+    height: 64px;
+  }
+
+}
+
+@media (max-width: 420px) {
+  .site-shell .top-actions .button {
+    padding-inline: 10px;
+    font-size: 11px;
+  }
+
+  .site-shell .hero {
+    padding-inline: 16px;
+  }
+
+  .site-shell .hero-copy h1 {
+    font-size: clamp(38px, 14vw, 54px);
+  }
+
 }
 
 @media (min-width: 1025px) {
