@@ -2431,9 +2431,112 @@ a {
   to { opacity: 1; transform: scale(1); }
 }
 
+.coinbase-liquid-col {
+  text-align: right;
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--neon-green);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @media (max-width: 768px) {
+  .coinbase-wallet-hero {
+    padding: 24px 20px;
+  }
   .coinbase-balance-meta {
     flex-direction: column;
+  }
+  .coinbase-liquid-col {
+    text-align: left;
+  }
+  .segmented-control {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .segmented-control::-webkit-scrollbar {
+    display: none;
+  }
+  .search-input-wrap {
+    min-width: 0;
+    width: 100%;
+  }
+  .section-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .landing-stat,
+  .landing-stat:first-child {
+    padding: 16px 12px;
+  }
+  .landing-stat strong {
+    font-size: 22px;
+  }
+  .batch-row {
+    grid-template-columns: 1fr auto;
+    row-gap: 4px;
+  }
+  .batch-row > :nth-child(1) { grid-column: 1; grid-row: 1; }
+  .batch-row > :nth-child(2) { grid-column: 1; grid-row: 2; }
+  .batch-row > :nth-child(3) { grid-column: 2; grid-row: 2; text-align: right; }
+  .batch-row > :nth-child(4) { grid-column: 2; grid-row: 1; justify-self: end; }
+  .data-table.stack-mobile,
+  .data-table.stack-mobile tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .data-table.stack-mobile td {
+    width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .data-table.stack-mobile thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .data-table.stack-mobile tr {
+    display: block;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .data-table.stack-mobile td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    padding: 4px 0;
+    border: none;
+    text-align: right;
+  }
+  .data-table.stack-mobile td:first-child {
+    padding-bottom: 8px;
+    text-align: left;
+  }
+  .data-table.stack-mobile td[data-label]::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    color: var(--silver-dark);
+    font: 500 11px var(--app-font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .data-table.stack-mobile tr:hover td {
+    background: transparent;
   }
   .asset-row {
     grid-template-columns: 1fr auto;

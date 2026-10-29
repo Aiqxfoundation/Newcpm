@@ -50,7 +50,6 @@ function FeedbackMonitor() {
     const unsubscribeMutations = client.getMutationCache().subscribe((event) => {
       if (event.type !== 'updated') return;
       if (event.action.type === 'error') showError(event.mutation.state.error, 'Unable to complete that action. Please try again.');
-      if (event.action.type === 'success') toast({ title: 'Action completed', description: 'Your change was saved successfully.' });
     });
     const onError = (event: ErrorEvent) => showError(event.error || event.message, 'An unexpected application error occurred.');
     const onRejection = (event: PromiseRejectionEvent) => showError(event.reason, 'An unexpected request error occurred.');
@@ -148,11 +147,13 @@ function BitsMark({ size = 20 }: { size?: number }) {
 type AuthUser = { id: string; email: string; name: string; username: string; isAdmin?: boolean };
 const AuthContext = createContext<{
   user: AuthUser | null;
+  ready: boolean;
   signIn: (loginKey: string) => Promise<void>;
   signUp: (username: string, password: string, referral?: string) => Promise<string>;
   signOut: () => void;
 }>({
   user: null,
+  ready: false,
   signIn: async () => undefined,
   signUp: async () => '',
   signOut: () => undefined,
@@ -165,18 +166,25 @@ async function sha256(value: string) {
 
 function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    const demoUser: AuthUser = { id: 'member-alpha', email: 'node@bitnoir.io', username: 'satoshinode', name: 'SatoshiNode', isAdmin: true };
     const token = sessionStorage.getItem('bitnoir-session-token');
     if (!token) {
       // Default initial session for immediate access
-      setUser({ id: 'member-alpha', email: 'node@bitnoir.io', username: 'satoshinode', name: 'SatoshiNode', isAdmin: true });
+      setUser(demoUser);
+      setReady(true);
       return;
     }
-    void sha256(token).then((tokenHash) => supabase.rpc('custom_session', { p_session_token_hash: tokenHash })).then(({ data }) => {
-      if (data?.user_id) setUser({ id: data.user_id, email: '', username: data.username, name: data.username, isAdmin: data.is_admin });
-      else setUser({ id: 'member-alpha', email: 'node@bitnoir.io', username: 'satoshinode', name: 'SatoshiNode', isAdmin: true });
-    });
+    void sha256(token)
+      .then((tokenHash) => supabase.rpc('custom_session', { p_session_token_hash: tokenHash }))
+      .then(({ data }) => {
+        if (data?.user_id) setUser({ id: data.user_id, email: '', username: data.username, name: data.username, isAdmin: data.is_admin });
+        else setUser(demoUser);
+      })
+      .catch(() => setUser(demoUser))
+      .finally(() => setReady(true));
   }, []);
 
   const signIn = async (loginKey: string) => {
@@ -209,12 +217,12 @@ function AuthProvider({ children }: { children: ReactNode }) {
       if (message.includes('invalid_login_key')) throw new Error('Unable to generate a secure login key. Please try again.');
       throw new Error(message || 'Unable to create your account. Please try again.');
     }
-    if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toLowerCase().replace(/[^a-z0-9_]/g, ''));
+    if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, ''));
     return loginKey;
   };
 
   const signOut = () => { sessionStorage.removeItem('bitnoir-session-token'); setUser(null); };
-  return <AuthContext.Provider value={{ user, signIn, signUp, signOut }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, ready, signIn, signUp, signOut }}>{children}</AuthContext.Provider>;
 }
 
 function useAuth() {
@@ -730,14 +738,16 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       {mode === 'sign-up' && (
         <div className="field-wrap">
           <label className="field-label" htmlFor="auth-referral">
-            Inviter Username <span style={{ color: 'var(--silver-dark)' }}>(Optional)</span>
+            Referral Code <span style={{ color: 'var(--silver-dark)' }}>(Optional)</span>
           </label>
           <input
             id="auth-referral"
             className="field mono"
             value={referral}
-            onChange={(e) => setReferral(e.target.value)}
-            placeholder="Enter the inviter's username"
+            onChange={(e) => setReferral(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ''))}
+            placeholder="e.g. BITS-SATOSHINODE"
+            autoComplete="off"
+            spellCheck={false}
           />
         </div>
       )}
@@ -898,16 +908,16 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
 }
 
 function ProtectedGate({ children, admin = false }: { children: (account: UserAccount) => ReactNode; admin?: boolean }) {
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
   const isSignedIn = Boolean(user);
   const accountQuery = useGetMyAccount({ query: { enabled: isSignedIn, queryKey: getGetMyAccountQueryKey() } });
 
-  if (!isSignedIn) return <Redirect to="/sign-in" />;
-  if (accountQuery.isLoading) {
+  if (ready && !isSignedIn) return <Redirect to="/sign-in" />;
+  if (!ready || accountQuery.isLoading) {
     return (
       <div className="app-layout">
-        <div className="sidebar" />
-        <main className="main-area" style={{ paddingTop: 80 }}><Skeleton rows={6} /></main>
+        <div className="sidebar" aria-hidden="true" />
+        <main className="main-area" style={{ paddingTop: 80 }} aria-busy="true"><Skeleton rows={6} /></main>
       </div>
     );
   }
@@ -1390,6 +1400,8 @@ function WalletPage({ account }: { account: UserAccount }) {
         notify(`Successfully claimed ${claimableBitnoir.toFixed(4)} Bitnoir tokens!`);
         void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
         void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
+      } else {
+        notify('Claim operation could not be completed. Please try again.');
       }
     } catch {
       notify('Claim operation could not be completed.');
@@ -1405,14 +1417,12 @@ function WalletPage({ account }: { account: UserAccount }) {
             <div className="coinbase-balance-label">Total Portfolio Balance</div>
             <div className="coinbase-balance-primary">{money(totalPortfolioValueUsd)}</div>
             <div className="coinbase-balance-sub">
-              <span className="coinbase-trend-badge">+4.8% past 24h</span>
-              <span>·</span>
               <span>2 Protocol Assets</span>
-              <span>·</span>
+              <span aria-hidden="true">·</span>
               <span>BNB Smart Chain</span>
             </div>
           </div>
-          <div style={{ textAlign: 'right' }}>
+          <div className="coinbase-liquid-col">
             <span className="coinbase-balance-label">Liquid Available</span>
             <div className="mono" style={{ fontSize: 20, color: 'var(--neon-green)', fontWeight: 700 }}>
               {money(bitsValueUsd + bitnoirValueUsd)}
@@ -1486,7 +1496,7 @@ function WalletPage({ account }: { account: UserAccount }) {
                 Bits
                 <span className="brand-badge" style={{ margin: 0 }}>ENTRY</span>
               </div>
-              <span className="asset-symbol-sub">BITS · Staking Accounting Unit</span>
+              <span className="asset-symbol-sub">Points · Staking Accounting Unit</span>
             </div>
           </div>
 
@@ -1619,13 +1629,13 @@ function WalletPage({ account }: { account: UserAccount }) {
 
       {/* RECENT TRANSACTIONS PREVIEW (WITH DIRECT SEPARATE PAGE LINK) */}
       <div className="history-section-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <div>
             <h3 style={{ margin: 0, font: '700 18px var(--app-font-serif)', color: '#fff' }}>Recent Activity</h3>
             <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>Latest blockchain and protocol transactions</p>
           </div>
           <Link href="/activity" className="button button-ghost" style={{ minHeight: 32, fontSize: 12 }}>
-            View Full Transaction History <ArrowRight size={13} />
+            View Full History <ArrowRight size={13} />
           </Link>
         </div>
 
@@ -1633,7 +1643,7 @@ function WalletPage({ account }: { account: UserAccount }) {
           <div className="empty-state">No recent activity. Transactions will appear here.</div>
         ) : (
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table stack-mobile">
               <thead>
                 <tr>
                   <th>Event</th>
@@ -1653,9 +1663,9 @@ function WalletPage({ account }: { account: UserAccount }) {
                         <strong style={{ color: '#fff' }}>{item.title}</strong>
                       </div>
                     </td>
-                    <td style={{ color: 'var(--silver-medium)', fontSize: 13 }}>{item.detail}</td>
-                    <td className="mono" style={{ fontSize: 12, color: 'var(--silver-dark)' }}>{shortDate(item.createdAt)}</td>
-                    <td>
+                    <td data-label="Description" style={{ color: 'var(--silver-medium)', fontSize: 13 }}>{item.detail}</td>
+                    <td data-label="Date" className="mono" style={{ fontSize: 12, color: 'var(--silver-dark)' }}>{shortDate(item.createdAt)}</td>
+                    <td data-label="Action">
                       <Link href={item.title.toLowerCase().includes('bits') ? '/asset/bits' : '/asset/bitnoir'} style={{ fontSize: 12, color: 'var(--neon-green)' }}>
                         Asset Details →
                       </Link>
@@ -2045,7 +2055,7 @@ function TransactionsPage({ account }: { account: UserAccount }) {
           </div>
         ) : (
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table stack-mobile">
               <thead>
                 <tr>
                   <th>Event</th>
@@ -2065,9 +2075,9 @@ function TransactionsPage({ account }: { account: UserAccount }) {
                         <strong style={{ color: '#fff' }}>{item.title}</strong>
                       </div>
                     </td>
-                    <td style={{ color: 'var(--silver-medium)', fontSize: 13 }}>{item.detail}</td>
-                    <td className="mono" style={{ fontSize: 12, color: 'var(--silver-dark)' }}>{shortDate(item.createdAt)}</td>
-                    <td>
+                    <td data-label="Summary" style={{ color: 'var(--silver-medium)', fontSize: 13 }}>{item.detail}</td>
+                    <td data-label="Date" className="mono" style={{ fontSize: 12, color: 'var(--silver-dark)' }}>{shortDate(item.createdAt)}</td>
+                    <td data-label="Status">
                       <span className="status approved">Confirmed</span>
                     </td>
                   </tr>
@@ -2475,7 +2485,7 @@ function PoolPage({ account }: { account: UserAccount }) {
             <div style={{ font: '700 24px var(--app-font-serif)', color: 'var(--neon-green)', marginTop: 4 }}>
               {stats.emissionRatePerHour} BITS / hr
             </div>
-            <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Shared across {stats.activeStakers} stakers</span>
+            <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Shared across {number(stats.activeStakers)} stakers</span>
           </div>
         </div>
 
@@ -2622,12 +2632,12 @@ function ReferralsPage({ account }: { account: UserAccount }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button className="button button-primary" onClick={() => copy(referralUrl, 'Referral Link')}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+            <button type="button" className="button button-primary" onClick={() => copy(referralUrl, 'Referral Link')}>
               <Copy size={14} /> Copy Invite Link
             </button>
-            <button className="button button-ghost" onClick={() => copy(referralCode, 'Referral Code')}>
-              <LinkIcon size={14} /> Copy Code: {referralCode}
+            <button type="button" className="button button-ghost" style={{ minWidth: 0, maxWidth: '100%' }} onClick={() => copy(referralCode, 'Referral Code')}>
+              <LinkIcon size={14} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Copy Code: {referralCode}</span>
             </button>
           </div>
         </div>
