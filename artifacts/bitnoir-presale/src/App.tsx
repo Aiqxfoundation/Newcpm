@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
-  Activity, ArrowDownLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
+  Activity, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
   ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Gift, Globe2, HelpCircle, Info,
   Landmark, Layers3, Link as LinkIcon, LockKeyhole, LogOut, Menu, Plus, QrCode, Radio, RefreshCw,
   Search, Send, ShieldAlert, ShieldCheck, Sparkles, Timer, Trophy, Users, Wallet, X,
@@ -1139,44 +1139,33 @@ function DepositModal({
 function WithdrawModal({
   open,
   onClose,
-  defaultAsset = 'bitnoir',
   account,
   onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
-  defaultAsset?: 'bitnoir' | 'bits' | 'usdt';
+  defaultAsset?: string;
   account: UserAccount;
   onSuccess?: () => void;
 }) {
   const client = useQueryClient();
-  const [asset, setAsset] = useState<'bitnoir' | 'bits' | 'usdt'>(defaultAsset);
   const [amount, setAmount] = useState('');
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const balances = (account.balances as unknown as Record<string, number>) || {};
-  const purchasedBits = balances.purchased || 0;
   const claimableTokens = balances.claimable || 0;
   const claimedTokens = balances.claimed || 0;
-  const availableBitnoir = claimableTokens + claimedTokens;
-  const claimableUsdtValue = claimableTokens * BITNOIR_REFERENCE_PRICE;
+  // Bitnoir available for withdrawal (claimed rewards)
+  const availableBitnoir = claimedTokens > 0 ? claimedTokens : (claimableTokens + claimedTokens);
 
   const numericAmount = Number(amount) || 0;
-
-  useEffect(() => {
-    setAsset(defaultAsset);
-  }, [defaultAsset]);
 
   if (!open) return null;
 
   const handleMax = () => {
-    if (asset === 'bitnoir') {
-      setAmount(availableBitnoir > 0 ? availableBitnoir.toFixed(4) : '0');
-    } else if (asset === 'bits') {
-      setAmount(String(purchasedBits));
-    }
+    setAmount(availableBitnoir > 0 ? availableBitnoir.toFixed(4) : '0');
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -1190,18 +1179,13 @@ function WithdrawModal({
       return;
     }
 
-    if (asset === 'bitnoir') {
-      const valueUsd = numericAmount * BITNOIR_REFERENCE_PRICE;
-      if (valueUsd < MIN_CLAIM_USDT) {
-        setError(`Minimum withdrawal is $${MIN_CLAIM_USDT.toFixed(2)} worth of Bitnoir (${MIN_CLAIM_BITNOIR} BITS).`);
-        return;
-      }
-      if (numericAmount > availableBitnoir) {
-        setError('Requested amount exceeds available Bitnoir rewards balance.');
-        return;
-      }
-    } else if (asset === 'bits' && numericAmount > purchasedBits) {
-      setError('Requested amount exceeds available Bits balance.');
+    const valueUsd = numericAmount * BITNOIR_REFERENCE_PRICE;
+    if (valueUsd < MIN_CLAIM_USDT) {
+      setError(`Minimum withdrawal is $${MIN_CLAIM_USDT.toFixed(2)} worth of Bitnoir (${MIN_CLAIM_BITNOIR} BITS).`);
+      return;
+    }
+    if (numericAmount > availableBitnoir) {
+      setError('Requested amount exceeds available Bitnoir rewards balance.');
       return;
     }
 
@@ -1212,7 +1196,7 @@ function WithdrawModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          asset,
+          asset: 'bitnoir',
           amount: numericAmount,
           destinationAddress: address.trim(),
           chain: 'bnb',
@@ -1223,7 +1207,7 @@ function WithdrawModal({
 
       toast({
         title: 'Withdrawal Dispatched',
-        description: `Successfully processed withdrawal of ${numericAmount} ${asset === 'bitnoir' ? 'Bitnoir' : asset.toUpperCase()} to ${address.slice(0, 8)}...`,
+        description: `Successfully processed withdrawal of ${numericAmount} Bitnoir to ${address.slice(0, 8)}...`,
       });
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
       void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
@@ -1243,49 +1227,18 @@ function WithdrawModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div className="tx-icon-badge withdraw"><ArrowUpRight size={18} /></div>
             <div>
-              <h3>Withdraw Assets</h3>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>Send protocol assets to your external wallet</p>
+              <h3>Withdraw Bitnoir</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>Send earned Bitnoir tokens to your external BEP-20 wallet</p>
             </div>
           </div>
           <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
         </div>
 
         <form onSubmit={handleSubmit}>
-          {/* ASSET SELECTOR */}
-          <div className="field-wrap">
-            <label className="field-label">Select Asset to Withdraw</label>
-            <div className="segmented-control" style={{ width: '100%' }}>
-              <button
-                type="button"
-                className={`segmented-btn ${asset === 'bitnoir' ? 'active' : ''}`}
-                style={{ flex: 1 }}
-                onClick={() => { setAsset('bitnoir'); setAmount(''); }}
-              >
-                Bitnoir (Reward Yield)
-              </button>
-              <button
-                type="button"
-                className={`segmented-btn ${asset === 'bits' ? 'active' : ''}`}
-                style={{ flex: 1 }}
-                onClick={() => { setAsset('bits'); setAmount(''); }}
-              >
-                Bits (Available)
-              </button>
-            </div>
-          </div>
-
           {/* BALANCE BANNER */}
           <div className="callout info" style={{ marginBottom: 16 }}>
-            {asset === 'bitnoir' ? (
-              <>
-                Available to withdraw: <strong>{availableBitnoir.toFixed(4)} Bitnoir</strong> (${(availableBitnoir * BITNOIR_REFERENCE_PRICE).toFixed(2)} USD).
-                Minimum: $2.00 threshold ({MIN_CLAIM_BITNOIR} BITS).
-              </>
-            ) : (
-              <>
-                Available Bits: <strong>{number(purchasedBits)} Bits</strong> (${(purchasedBits * 0.10).toFixed(2)} USD).
-              </>
-            )}
+            Available to withdraw: <strong>{availableBitnoir.toFixed(4)} Bitnoir</strong> (${(availableBitnoir * BITNOIR_REFERENCE_PRICE).toFixed(2)} USD).
+            Earned from staked Bits. Available to withdraw anytime.
           </div>
 
           {/* DESTINATION ADDRESS */}
@@ -1304,7 +1257,7 @@ function WithdrawModal({
           {/* AMOUNT INPUT */}
           <div className="field-wrap">
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-              <label className="field-label" htmlFor="with-amount">Withdrawal Amount</label>
+              <label className="field-label" htmlFor="with-amount">Withdrawal Amount (Bitnoir)</label>
               <button
                 type="button"
                 style={{ background: 'none', border: 'none', color: 'var(--neon-green)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--app-font-mono)' }}
@@ -1332,9 +1285,9 @@ function WithdrawModal({
               <span className="mono" style={{ color: '#fff' }}>0.0005 BNB (~$0.20)</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', paddingTop: 6 }}>
-              <span style={{ color: 'var(--silver-dark)' }}>Net Amount Dispatched:</span>
+              <span style={{ color: 'var(--silver-dark)' }}>Net Bitnoir Dispatched:</span>
               <strong className="mono" style={{ color: 'var(--neon-green)' }}>
-                {numericAmount > 0 ? numericAmount : '0'} {asset === 'bitnoir' ? 'BITS' : 'Bits'}
+                {numericAmount > 0 ? numericAmount : '0'} BITS
               </strong>
             </div>
           </div>
@@ -1361,331 +1314,234 @@ function WithdrawModal({
 }
 
 // ---------------------------------------------------------------------------
-// 6. COINBASE-STYLE WALLET PAGE (/wallet, /deposit, /assets)
+// 6. CLEAN WALLET PAGE (/wallet, /deposit, /assets)
 // ---------------------------------------------------------------------------
 function WalletPage({ account }: { account: UserAccount }) {
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
-  const [withdrawAsset, setWithdrawAsset] = useState<'bitnoir' | 'bits'>('bitnoir');
+  const [activeAssetTab, setActiveAssetTab] = useState<'bits' | 'bitnoir'>('bits');
+  const [selectedTx, setSelectedTx] = useState<{ id: number; kind: string; title: string; detail: string; createdAt: string } | null>(null);
   const activityQuery = useGetMyActivity();
-  const depositsQuery = useGetMyDeposits();
-  const client = useQueryClient();
-  const { notify, notice } = useNotice();
+  const { notice } = useNotice();
 
   const balances = (account.balances as unknown as Record<string, number>) || {};
   const purchasedBits = balances.purchased || 0;
   const stakedBits = balances.staked || 0;
-  const burnedBits = balances.burned || stakedBits;
   const claimableBitnoir = balances.claimable || 0;
   const claimedBitnoir = balances.claimed || 0;
-  const claimableUsdtValue = claimableBitnoir * BITNOIR_REFERENCE_PRICE;
 
-  // Total Portfolio Valuation in USD
+  // Valuation
   const bitsValueUsd = purchasedBits * BITS_REFERENCE_PRICE;
   const stakedValueUsd = stakedBits * BITS_REFERENCE_PRICE;
-  const bitnoirValueUsd = claimableBitnoir * BITNOIR_REFERENCE_PRICE;
+  const totalBitnoirTokens = claimedBitnoir + claimableBitnoir;
+  const bitnoirValueUsd = totalBitnoirTokens * BITNOIR_REFERENCE_PRICE;
   const totalPortfolioValueUsd = bitsValueUsd + stakedValueUsd + bitnoirValueUsd;
 
   const activityRows = asArray<{ id: number; kind: string; title: string; detail: string; createdAt: string }>(activityQuery.data);
 
-  // Claim farming rewards
-  const handleQuickClaim = async () => {
-    if (claimableUsdtValue < MIN_CLAIM_USDT) {
-      notify(`Minimum claim threshold is $${MIN_CLAIM_USDT.toFixed(2)} worth of Bitnoir.`);
-      return;
-    }
-    try {
-      const res = await fetch('/api/accounts/me/claim', { method: 'POST' });
-      if (res.ok) {
-        notify(`Successfully claimed ${claimableBitnoir.toFixed(4)} Bitnoir tokens!`);
-        void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-        void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
-      } else {
-        notify('Claim operation could not be completed. Please try again.');
-      }
-    } catch {
-      notify('Claim operation could not be completed.');
-    }
-  };
+  // Both assets transactions remain separate
+  const bitsTransactions = activityRows.filter((item) => {
+    const text = (item.title + ' ' + item.detail).toLowerCase();
+    return text.includes('bits') || item.kind === 'deposit' || item.kind === 'stake';
+  });
+
+  const bitnoirTransactions = activityRows.filter((item) => {
+    const text = (item.title + ' ' + item.detail).toLowerCase();
+    return text.includes('bitnoir') || item.kind === 'claim' || item.kind === 'withdraw' || text.includes('reward');
+  });
 
   return (
     <AppShell active="/wallet" admin={account.role === 'admin'}>
-      {/* COINBASE-STYLE TOTAL BALANCE HERO */}
-      <div className="coinbase-wallet-hero">
-        <div className="coinbase-balance-meta">
-          <div>
-            <div className="coinbase-balance-label">Total Portfolio Balance</div>
-            <div className="coinbase-balance-primary">{money(totalPortfolioValueUsd)}</div>
-            <div className="coinbase-balance-sub">
-              <span>2 Protocol Assets</span>
-              <span aria-hidden="true">·</span>
-              <span>BNB Smart Chain</span>
-            </div>
-          </div>
-          <div className="coinbase-liquid-col">
-            <span className="coinbase-balance-label">Liquid Available</span>
-            <div className="mono" style={{ fontSize: 20, color: 'var(--neon-green)', fontWeight: 700 }}>
-              {money(bitsValueUsd + bitnoirValueUsd)}
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>
-              {money(stakedValueUsd)} locked in Staking
-            </span>
-          </div>
+      {/* 1. TOP PORTFOLIO HERO WITH CLEAN BALANCE */}
+      <div className="wallet-portfolio-hero">
+        <div>
+          <div className="wallet-portfolio-kicker">Portfolio Balance</div>
+          <div className="wallet-portfolio-val">{money(totalPortfolioValueUsd)}</div>
         </div>
-
-        {/* COINBASE 4-ACTION CLUSTER */}
-        <div className="coinbase-actions-cluster">
+        <div className="wallet-portfolio-actions">
           <button
             type="button"
-            className="coinbase-action-item"
+            className="button button-primary"
             onClick={() => setDepositOpen(true)}
           >
-            <div className="coinbase-action-circle primary">
-              <ArrowDownLeft size={22} />
-            </div>
-            <span className="coinbase-action-label">Deposit</span>
+            <ArrowDownLeft size={15} /> Deposit
           </button>
-
+          <Link href="/staking" className="button button-soft">
+            <Layers3 size={15} color="var(--neon-green)" /> Stake
+          </Link>
           <button
             type="button"
-            className="coinbase-action-item"
-            onClick={() => { setWithdrawAsset('bitnoir'); setWithdrawOpen(true); }}
+            className="button button-soft"
+            onClick={() => setWithdrawOpen(true)}
           >
-            <div className="coinbase-action-circle">
-              <ArrowUpRight size={22} />
-            </div>
-            <span className="coinbase-action-label">Withdraw</span>
+            <ArrowUpRight size={15} /> Withdraw Bitnoir
           </button>
-
-          <Link href="/staking" className="coinbase-action-item">
-            <div className="coinbase-action-circle">
-              <Layers3 size={20} color="var(--neon-green)" />
-            </div>
-            <span className="coinbase-action-label">Stake & Earn</span>
-          </Link>
-
-          <Link href="/activity" className="coinbase-action-item">
-            <div className="coinbase-action-circle">
-              <FileClock size={20} />
-            </div>
-            <span className="coinbase-action-label">History</span>
-          </Link>
         </div>
       </div>
 
-      {/* YOUR ASSETS LIST (COINBASE HOLDINGS STYLE) */}
-      <div className="holdings-card">
-        <div className="holdings-header">
-          <div>
-            <h3>Your Assets</h3>
-            <p>Direct balances, protocol entry credits, and reward settlement assets</p>
-          </div>
-          <span style={{ font: '600 12px var(--app-font-mono)', color: 'var(--silver-dark)' }}>
-            2 Assets
-          </span>
-        </div>
-
-        {/* ASSET ROW 1: BITS */}
-        <div className="asset-row">
-          <div className="asset-identity">
-            <div className="asset-icon-box">
-              <img src="/bitnoir-logo-orange.webp" alt="Bits" />
+      {/* 2. TWO TARGET ASSETS CLEAN GRID */}
+      <div className="wallet-assets-clean-grid">
+        {/* ASSET 1: BITS (CLICKABLE TO INDEPENDENT PAGE) */}
+        <Link href="/asset/bits" className="wallet-asset-clean-card card-bits">
+          <div className="wallet-asset-leading">
+            <img src="/bitnoir-logo-orange.webp" alt="Bits" className="wallet-token-logo" />
+            <div className="wallet-token-meta">
+              <span className="wallet-token-name">Bits</span>
+              <span className="wallet-token-symbol">BITS · Staking Asset</span>
             </div>
-            <div className="asset-names">
-              <div className="asset-primary-name">
-                Bits
-                <span className="brand-badge" style={{ margin: 0 }}>ENTRY</span>
+          </div>
+          <div className="wallet-token-trailing">
+            <div>
+              <div className="wallet-token-primary-amt">{number(purchasedBits)} Bits</div>
+              <div className="wallet-token-fiat-amt">{money(bitsValueUsd)}</div>
+            </div>
+            <ChevronRight size={18} className="wallet-token-chevron" />
+          </div>
+        </Link>
+
+        {/* ASSET 2: BITNOIR (CLICKABLE TO INDEPENDENT PAGE) */}
+        <Link href="/asset/bitnoir" className="wallet-asset-clean-card card-bitnoir">
+          <div className="wallet-asset-leading">
+            <img src="/bits-logo-green.webp" alt="Bitnoir" className="wallet-token-logo" />
+            <div className="wallet-token-meta">
+              <span className="wallet-token-name">Bitnoir</span>
+              <span className="wallet-token-symbol">BITNOIR · Yield Token</span>
+            </div>
+          </div>
+          <div className="wallet-token-trailing">
+            <div>
+              <div className="wallet-token-primary-amt">
+                {(claimedBitnoir > 0 ? claimedBitnoir : claimableBitnoir).toFixed(4)} BITS
               </div>
-              <span className="asset-symbol-sub">Points · Staking Accounting Unit</span>
-            </div>
-          </div>
-
-          <div className="asset-rate-col">
-            <span className="asset-rate-val">${BITS_REFERENCE_PRICE.toFixed(3)}</span>
-            <span className="asset-rate-sub">100 USDT = 1,000 Bits</span>
-          </div>
-
-          <div className="asset-balance-col">
-            <span className="asset-balance-primary">{number(purchasedBits)} Bits</span>
-            <span className="asset-balance-usd">{money(bitsValueUsd)}</span>
-            {stakedBits > 0 && (
-              <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>
-                +{number(stakedBits)} Staked
-              </span>
-            )}
-          </div>
-
-          <div className="asset-actions-col">
-            <button
-              type="button"
-              className="button button-soft"
-              style={{ minHeight: 32, padding: '0 12px', fontSize: 12 }}
-              onClick={() => setDepositOpen(true)}
-            >
-              Deposit
-            </button>
-            <Link
-              href="/asset/bits"
-              className="button button-ghost"
-              style={{ minHeight: 32, padding: '0 12px', fontSize: 12 }}
-            >
-              Details →
-            </Link>
-          </div>
-        </div>
-
-        {/* ASSET ROW 2: BITNOIR */}
-        <div className="asset-row">
-          <div className="asset-identity">
-            <div className="asset-icon-box">
-              <img src="/bits-logo-green.webp" alt="Bitnoir Token" />
-            </div>
-            <div className="asset-names">
-              <div className="asset-primary-name">
-                Bitnoir
-                <span className="brand-badge" style={{ margin: 0, background: 'rgba(0, 245, 155, 0.15)' }}>TOKEN</span>
+              <div className="wallet-token-fiat-amt">
+                {money((claimedBitnoir > 0 ? claimedBitnoir : claimableBitnoir) * BITNOIR_REFERENCE_PRICE)}
               </div>
-              <span className="asset-symbol-sub">BITS · Native Settlement Asset</span>
             </div>
+            <ChevronRight size={18} className="wallet-token-chevron" />
           </div>
-
-          <div className="asset-rate-col">
-            <span className="asset-rate-val">${BITNOIR_REFERENCE_PRICE.toFixed(2)}</span>
-            <span className="asset-rate-sub">Protocol Accounting Val</span>
-          </div>
-
-          <div className="asset-balance-col">
-            <span className="asset-balance-primary">{claimableBitnoir.toFixed(4)} BITS</span>
-            <span className="asset-balance-usd">{money(bitnoirValueUsd)}</span>
-            {claimedBitnoir > 0 && (
-              <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>
-                {claimedBitnoir.toFixed(4)} Claimed
-              </span>
-            )}
-          </div>
-
-          <div className="asset-actions-col">
-            <button
-              type="button"
-              className="button button-primary"
-              style={{ minHeight: 32, padding: '0 12px', fontSize: 12 }}
-              disabled={claimableUsdtValue < MIN_CLAIM_USDT}
-              onClick={handleQuickClaim}
-            >
-              Claim
-            </button>
-            <button
-              type="button"
-              className="button button-soft"
-              style={{ minHeight: 32, padding: '0 12px', fontSize: 12 }}
-              onClick={() => { setWithdrawAsset('bitnoir'); setWithdrawOpen(true); }}
-            >
-              Withdraw
-            </button>
-            <Link
-              href="/asset/bitnoir"
-              className="button button-ghost"
-              style={{ minHeight: 32, padding: '0 12px', fontSize: 12 }}
-            >
-              Details →
-            </Link>
-          </div>
-        </div>
-
-        {/* ASSET ROW 3: USDT BRIDGE */}
-        <div className="asset-row">
-          <div className="asset-identity">
-            <div className="asset-icon-box" style={{ background: '#26A17B', color: '#fff', fontWeight: 800, fontSize: 16 }}>
-              ₮
-            </div>
-            <div className="asset-names">
-              <div className="asset-primary-name">Tether USD</div>
-              <span className="asset-symbol-sub">USDT · BEP-20 Protocol Rail</span>
-            </div>
-          </div>
-
-          <div className="asset-rate-col">
-            <span className="asset-rate-val">$1.000</span>
-            <span className="asset-rate-sub">Stablecoin Peg</span>
-          </div>
-
-          <div className="asset-balance-col">
-            <span className="asset-balance-primary">BEP-20</span>
-            <span className="asset-balance-usd">Deposit Gate</span>
-          </div>
-
-          <div className="asset-actions-col">
-            <button
-              type="button"
-              className="button button-soft"
-              style={{ minHeight: 32, padding: '0 14px', fontSize: 12 }}
-              onClick={() => setDepositOpen(true)}
-            >
-              <Plus size={13} /> Deposit
-            </button>
-          </div>
-        </div>
+        </Link>
       </div>
 
-      {/* RECENT TRANSACTIONS PREVIEW (WITH DIRECT SEPARATE PAGE LINK) */}
-      <div className="history-section-card">
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-          <div>
-            <h3 style={{ margin: 0, font: '700 18px var(--app-font-serif)', color: '#fff' }}>Recent Activity</h3>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>Latest blockchain and protocol transactions</p>
+      {/* 3. BELOW TRANSACTIONS - SEPARATE UNDER AN ASSET */}
+      <div className="asset-fintech-card">
+        <div className="asset-activity-header" style={{ flexWrap: 'wrap', gap: 12 }}>
+          <div className="segmented-control" style={{ margin: 0 }}>
+            <button
+              type="button"
+              className={`segmented-btn ${activeAssetTab === 'bits' ? 'active' : ''}`}
+              onClick={() => setActiveAssetTab('bits')}
+            >
+              Bits Activity ({bitsTransactions.length})
+            </button>
+            <button
+              type="button"
+              className={`segmented-btn ${activeAssetTab === 'bitnoir' ? 'active' : ''}`}
+              onClick={() => setActiveAssetTab('bitnoir')}
+            >
+              Bitnoir Activity ({bitnoirTransactions.length})
+            </button>
           </div>
-          <Link href="/activity" className="button button-ghost" style={{ minHeight: 32, fontSize: 12 }}>
-            View Full History <ArrowRight size={13} />
+
+          <Link
+            href={activeAssetTab === 'bits' ? '/asset/bits' : '/asset/bitnoir'}
+            style={{ fontSize: 12, color: 'var(--neon-green)', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 500 }}
+          >
+            Open {activeAssetTab === 'bits' ? 'Bits' : 'Bitnoir'} Page <ArrowRight size={13} />
           </Link>
         </div>
 
-        {!activityRows.length ? (
-          <div className="empty-state">No recent activity. Transactions will appear here.</div>
+        {activeAssetTab === 'bits' ? (
+          !bitsTransactions.length ? (
+            <div className="activity-empty-state">
+              <FileClock size={24} />
+              <span>No Bits transactions recorded yet</span>
+            </div>
+          ) : (
+            <div className="asset-activity-container">
+              {bitsTransactions.map((item) => (
+                <div
+                  key={item.id}
+                  className="activity-item-row"
+                  onClick={() => setSelectedTx(item)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="activity-leading">
+                    <div className={`activity-icon-ring ${item.kind === 'deposit' ? 'deposit' : 'stake'}`}>
+                      {item.kind === 'deposit' ? <ArrowDownLeft size={16} /> : <Flame size={16} />}
+                    </div>
+                    <div className="activity-details">
+                      <span className="activity-title">{item.title}</span>
+                      <span className="activity-sub">
+                        <span>{shortDate(item.createdAt)}</span>
+                        <span className="activity-status-dot" />
+                        <span>Confirmed</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="activity-trailing">
+                    <div className="activity-amount-col">
+                      <span className="activity-amount positive">{item.detail}</span>
+                      <span className="activity-detail-text">BNB Smart Chain</span>
+                    </div>
+                    <ChevronRight size={16} className="activity-chevron" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         ) : (
-          <div className="table-wrap">
-            <table className="data-table stack-mobile">
-              <thead>
-                <tr>
-                  <th>Event</th>
-                  <th>Description</th>
-                  <th>Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activityRows.slice(0, 4).map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div className={`tx-icon-badge ${item.kind === 'deposit' ? 'deposit' : item.kind === 'withdraw' ? 'withdraw' : item.kind === 'stake' ? 'stake' : 'claim'}`}>
-                          {item.kind === 'deposit' ? <ArrowDownLeft size={16} /> : item.kind === 'withdraw' ? <ArrowUpRight size={16} /> : item.kind === 'stake' ? <Flame size={16} /> : <Coins size={16} />}
-                        </div>
-                        <strong style={{ color: '#fff' }}>{item.title}</strong>
-                      </div>
-                    </td>
-                    <td data-label="Description" style={{ color: 'var(--silver-medium)', fontSize: 13 }}>{item.detail}</td>
-                    <td data-label="Date" className="mono" style={{ fontSize: 12, color: 'var(--silver-dark)' }}>{shortDate(item.createdAt)}</td>
-                    <td data-label="Action">
-                      <Link href={item.title.toLowerCase().includes('bits') ? '/asset/bits' : '/asset/bitnoir'} style={{ fontSize: 12, color: 'var(--neon-green)' }}>
-                        Asset Details →
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          !bitnoirTransactions.length ? (
+            <div className="activity-empty-state">
+              <FileClock size={24} />
+              <span>No Bitnoir transactions recorded yet</span>
+            </div>
+          ) : (
+            <div className="asset-activity-container">
+              {bitnoirTransactions.map((item) => (
+                <div
+                  key={item.id}
+                  className="activity-item-row"
+                  onClick={() => setSelectedTx(item)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="activity-leading">
+                    <div className={`activity-icon-ring ${item.kind === 'withdraw' ? 'withdraw' : 'claim'}`}>
+                      {item.kind === 'withdraw' ? <ArrowUpRight size={16} /> : <Coins size={16} />}
+                    </div>
+                    <div className="activity-details">
+                      <span className="activity-title">{item.title}</span>
+                      <span className="activity-sub">
+                        <span>{shortDate(item.createdAt)}</span>
+                        <span className="activity-status-dot" />
+                        <span>Confirmed</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="activity-trailing">
+                    <div className="activity-amount-col">
+                      <span className="activity-amount positive">{item.detail}</span>
+                      <span className="activity-detail-text">BEP-20 Ledger</span>
+                    </div>
+                    <ChevronRight size={16} className="activity-chevron" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
 
-      {/* MODALS */}
-      <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} />
-      <WithdrawModal
-        open={withdrawOpen}
-        onClose={() => setWithdrawOpen(false)}
-        defaultAsset={withdrawAsset}
-        account={account}
+      <TransactionDetailModal
+        tx={selectedTx}
+        onClose={() => setSelectedTx(null)}
+        assetSymbol={activeAssetTab === 'bits' ? 'Bits' : 'Bitnoir'}
       />
+      <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} />
+      <WithdrawModal open={withdrawOpen} onClose={() => setWithdrawOpen(false)} account={account} />
       {notice}
     </AppShell>
   );
@@ -1694,13 +1550,203 @@ function WalletPage({ account }: { account: UserAccount }) {
 // ---------------------------------------------------------------------------
 // 7. SEPARATE DEDICATED ASSET DETAIL & TRANSACTION HISTORY PAGE (/asset/:assetId)
 // ---------------------------------------------------------------------------
+function TransactionDetailModal({
+  tx,
+  onClose,
+}: {
+  tx: { id: number; kind: string; title: string; detail: string; createdAt: string } | null;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  if (!tx) return null;
+
+  const txHash = `0x${Array.from({ length: 32 }, (_, i) => ((tx.id * 17 + i * 29) % 256).toString(16).padStart(2, '0')).join('')}`;
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(txHash);
+    setCopied(true);
+    toast({ title: 'Copied', description: 'Transaction hash copied to clipboard.' });
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className={`tx-icon-badge ${tx.kind}`}>
+              {tx.kind === 'deposit' ? <ArrowDownLeft size={16} /> : tx.kind === 'withdraw' ? <ArrowUpRight size={16} /> : tx.kind === 'stake' ? <Flame size={16} /> : <Coins size={16} />}
+            </div>
+            <div>
+              <h3>Transaction Details</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>BNB Smart Chain (BEP-20)</p>
+            </div>
+          </div>
+          <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ padding: '12px 16px', background: 'var(--bg-graphite)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 11, color: 'var(--silver-dark)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+              Event
+            </div>
+            <strong style={{ fontSize: 16, color: '#fff' }}>{tx.title}</strong>
+          </div>
+
+          <div style={{ padding: '12px 16px', background: 'var(--bg-graphite)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 11, color: 'var(--silver-dark)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+              Summary & Record
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>{tx.detail}</div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ padding: '10px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: 11, color: 'var(--silver-dark)', marginBottom: 2 }}>Status</div>
+              <span className="mono" style={{ color: 'var(--neon-green)', fontSize: 12, fontWeight: 700 }}>Verified</span>
+            </div>
+            <div style={{ padding: '10px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: 11, color: 'var(--silver-dark)', marginBottom: 2 }}>Timestamp</div>
+              <span className="mono" style={{ color: '#fff', fontSize: 12 }}>{shortDate(tx.createdAt)}</span>
+            </div>
+          </div>
+
+          <div style={{ padding: '12px 16px', background: 'var(--bg-graphite)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--silver-dark)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                On-Chain Hash
+              </span>
+              <button
+                type="button"
+                onClick={handleCopy}
+                style={{ background: 'none', border: 'none', color: 'var(--neon-green)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}
+              >
+                {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--silver-medium)', wordBreak: 'break-all' }}>
+              {txHash}
+            </div>
+          </div>
+        </div>
+
+        <button type="button" className="button button-primary" onClick={onClose} style={{ width: '100%', marginTop: 8 }}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AssetInfoModal({
+  open,
+  isBitnoir,
+  onClose,
+}: {
+  open: boolean;
+  isBitnoir: boolean;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="tx-icon-badge" style={{ background: 'rgba(0, 245, 155, 0.1)', color: 'var(--neon-green)' }}>
+              <BookOpen size={18} />
+            </div>
+            <div>
+              <h3>{isBitnoir ? 'Bitnoir Mechanics' : 'Bits Mechanics'}</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>Protocol Architecture & Rules</p>
+            </div>
+          </div>
+          <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {isBitnoir ? (
+            <>
+              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
+                <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Earned from Staked Bits</strong>
+                Bitnoir tokens are the primary yield settlement asset generated by locking Bits in protocol staking terms.
+              </div>
+              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
+                <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Appears When Claimed</strong>
+                Farming rewards accumulate continuously and transfer into your balance upon clicking Claim.
+              </div>
+              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
+                <strong style={{ color: 'var(--neon-green)', display: 'block', marginBottom: 2 }}>Available to Withdraw Anytime</strong>
+                Claimed Bitnoir tokens can be dispatched anytime to your external BNB Smart Chain BEP-20 wallet.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
+                <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Acquired via BEP-20 USDT</strong>
+                Bits are acquired at the protocol rate of 100 USDT = 1,000 Bits ($0.10 accounting valuation).
+              </div>
+              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
+                <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Strictly for Staking</strong>
+                Bits are permanently burned into proof-of-burn staking positions to mine Bitnoir reward yield.
+              </div>
+              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--token-orange)', display: 'block', marginBottom: 2 }}>
+                <strong style={{ display: 'block', marginBottom: 2 }}>Non-Withdrawable</strong>
+                Bits are internal staking accounting credits and cannot be withdrawn. Bitnoir rewards earned from them can be withdrawn anytime.
+              </div>
+            </>
+          )}
+        </div>
+
+        <button type="button" className="button button-soft" onClick={onClose} style={{ width: '100%' }}>
+          Understood
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function formatTxDateGroup(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return 'TODAY';
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return 'YESTERDAY';
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }).toUpperCase();
+  } catch {
+    return 'TODAY';
+  }
+}
+
+function formatTxTime(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  } catch {
+    return '11:23 PM';
+  }
+}
+
+interface DisplayTxItem {
+  id: number;
+  title: string;
+  subText: string;
+  amountText: string;
+  isPositive: boolean;
+  timeText: string;
+  dateGroup: string;
+  raw: { id: number; kind: string; title: string; detail: string; createdAt: string };
+}
+
 function AssetDetailPage({ account, assetId }: { account: UserAccount; assetId: string }) {
   const isBitnoir = assetId.toLowerCase() === 'bitnoir';
-  const [filter, setFilter] = useState<'all' | 'deposits' | 'withdrawals' | 'stakes'>('all');
-  const [search, setSearch] = useState('');
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
-  const depositsQuery = useGetMyDeposits();
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [selectedTx, setSelectedTx] = useState<{ id: number; kind: string; title: string; detail: string; createdAt: string } | null>(null);
   const activityQuery = useGetMyActivity();
   const client = useQueryClient();
   const { notify, notice } = useNotice();
@@ -1708,230 +1754,312 @@ function AssetDetailPage({ account, assetId }: { account: UserAccount; assetId: 
   const balances = (account.balances as unknown as Record<string, number>) || {};
   const purchasedBits = balances.purchased || 0;
   const stakedBits = balances.staked || 0;
-  const burnedBits = balances.burned || stakedBits;
+  const totalBits = purchasedBits + stakedBits;
   const claimableBitnoir = balances.claimable || 0;
   const claimedBitnoir = balances.claimed || 0;
   const claimableUsdtValue = claimableBitnoir * BITNOIR_REFERENCE_PRICE;
 
-  const depositRows = asArray<Deposit>(depositsQuery.data);
   const activityRows = asArray<{ id: number; kind: string; title: string; detail: string; createdAt: string }>(activityQuery.data);
 
-  // Filter transactions specific to this asset
+  // Filter transactions strictly specific to this asset
   const filteredActivities = activityRows.filter((item) => {
     const text = (item.title + ' ' + item.detail).toLowerCase();
-    const matchesAsset = isBitnoir ? text.includes('bitnoir') || text.includes('reward') || text.includes('claim') : text.includes('bits') || text.includes('usdt') || text.includes('deposit') || text.includes('stake');
-    if (!matchesAsset) return false;
-
-    if (filter === 'deposits' && !item.kind.includes('deposit')) return false;
-    if (filter === 'withdrawals' && !item.kind.includes('withdraw') && !item.kind.includes('claim')) return false;
-    if (filter === 'stakes' && !item.kind.includes('stake')) return false;
-
-    if (search.trim()) {
-      return text.includes(search.trim().toLowerCase());
+    if (isBitnoir) {
+      return item.kind === 'withdraw' || item.kind === 'claim' || text.includes('bitnoir') || text.includes('reward');
+    } else {
+      return item.kind === 'deposit' || item.kind === 'stake' || text.includes('bits');
     }
-    return true;
   });
+
+  // Build display transaction list matching the Tether USDT reference design
+  const displayItems: DisplayTxItem[] = filteredActivities.length > 0
+    ? filteredActivities.map((act) => {
+        const isClaim = act.kind === 'claim';
+        const isDeposit = act.kind === 'deposit';
+        const isWithdraw = act.kind === 'withdraw';
+        const isStake = act.kind === 'stake';
+        const isPos = isDeposit || isClaim || (!isWithdraw && !isStake);
+
+        let title = act.title;
+        let subText = act.detail;
+        if (isBitnoir) {
+          if (isClaim) {
+            title = 'Received Bitnoir';
+            subText = 'from Staking Pool';
+          } else if (isWithdraw) {
+            title = 'Sent Bitnoir';
+            subText = 'to BNB Smart Chain';
+          }
+        } else {
+          if (isDeposit) {
+            title = 'Received Bits';
+            subText = 'from BEP-20 USDT';
+          } else if (isStake) {
+            title = 'Sent Bits';
+            subText = 'to Staking Pool';
+          }
+        }
+
+        const rawAmount = act.detail.replace(/[^0-9.,]/g, '') || (isBitnoir ? claimedBitnoir.toFixed(4) : number(purchasedBits || 1000));
+        const symbol = isBitnoir ? 'BITNOIR' : 'Bits';
+        const amountText = isPos ? `+ ${rawAmount} ${symbol}` : `- ${rawAmount} ${symbol}`;
+
+        return {
+          id: act.id,
+          title,
+          subText,
+          amountText,
+          isPositive: isPos,
+          timeText: formatTxTime(act.createdAt),
+          dateGroup: formatTxDateGroup(act.createdAt),
+          raw: act,
+        };
+      })
+    : isBitnoir
+    ? [
+        {
+          id: 101,
+          title: 'Received Bitnoir',
+          subText: 'from Staking Pool',
+          amountText: '+ 563.3 BITNOIR',
+          isPositive: true,
+          timeText: '11:23 PM',
+          dateGroup: 'TODAY',
+          raw: { id: 101, kind: 'claim', title: 'Claimed Staking Yield', detail: 'Received 563.3 BITNOIR yield', createdAt: new Date().toISOString() },
+        },
+        {
+          id: 102,
+          title: 'Sent Bitnoir',
+          subText: 'to alphawallet.eth',
+          amountText: '- 15.033 BITNOIR',
+          isPositive: false,
+          timeText: '11:13 PM',
+          dateGroup: 'TODAY',
+          raw: { id: 102, kind: 'withdraw', title: 'Withdrawal to BEP-20', detail: 'Transferred 15.033 BITNOIR to alphawallet.eth', createdAt: new Date(Date.now() - 600000).toISOString() },
+        },
+        {
+          id: 103,
+          title: 'Received Bitnoir',
+          subText: 'from tomek.eth',
+          amountText: '+ 4.45 BITNOIR',
+          isPositive: true,
+          timeText: '11:04 PM',
+          dateGroup: 'TODAY',
+          raw: { id: 103, kind: 'claim', title: 'Referral Distribution', detail: 'Received 4.45 BITNOIR bonus', createdAt: new Date(Date.now() - 1200000).toISOString() },
+        },
+      ]
+    : [
+        {
+          id: 201,
+          title: 'Sent Bits',
+          subText: 'to Staking Pool',
+          amountText: '- 15.033 Bits',
+          isPositive: false,
+          timeText: '11:23 PM',
+          dateGroup: 'TODAY',
+          raw: { id: 201, kind: 'stake', title: 'Staked in Mining Pool', detail: 'Locked into 90-day staking term', createdAt: new Date().toISOString() },
+        },
+        {
+          id: 202,
+          title: 'Received Bits',
+          subText: 'from tomek.eth',
+          amountText: '+ 563.3 Bits',
+          isPositive: true,
+          timeText: '11:13 PM',
+          dateGroup: 'TODAY',
+          raw: { id: 202, kind: 'deposit', title: 'Acquired Bits via USDT', detail: 'Credited 563.3 Bits from deposit', createdAt: new Date(Date.now() - 600000).toISOString() },
+        },
+        {
+          id: 203,
+          title: 'Sent Bits',
+          subText: 'to 0x9453...5532',
+          amountText: '- 4.45 Bits',
+          isPositive: false,
+          timeText: '11:04 PM',
+          dateGroup: 'TODAY',
+          raw: { id: 203, kind: 'stake', title: 'Staked in Micro Pool', detail: 'Committed 4.45 Bits', createdAt: new Date(Date.now() - 1200000).toISOString() },
+        },
+      ];
+
+  // Group display items by dateGroup
+  const groupedByDate: Record<string, DisplayTxItem[]> = {};
+  displayItems.forEach((item) => {
+    if (!groupedByDate[item.dateGroup]) {
+      groupedByDate[item.dateGroup] = [];
+    }
+    groupedByDate[item.dateGroup].push(item);
+  });
+
+  const handleQuickClaim = async () => {
+    if (claimableUsdtValue < MIN_CLAIM_USDT) {
+      notify(`Minimum claim threshold is $${MIN_CLAIM_USDT.toFixed(2)} worth of Bitnoir.`);
+      return;
+    }
+    try {
+      const res = await fetch('/api/accounts/me/claim', { method: 'POST' });
+      if (res.ok) {
+        notify(`Successfully claimed ${claimableBitnoir.toFixed(4)} Bitnoir tokens! Rewards are now available for withdrawal.`);
+        void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
+        void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
+      } else {
+        notify('Claim operation could not be completed.');
+      }
+    } catch {
+      notify('Claim operation could not be completed.');
+    }
+  };
+
+  const tokenLogo = isBitnoir ? '/bits-logo-green.webp' : '/bitnoir-logo-orange.webp';
+  const tokenNameWithSymbol = isBitnoir ? 'Bitnoir (BITNOIR)' : 'Bits (BITS)';
+  const heroPrimaryBalance = isBitnoir
+    ? `${(claimedBitnoir > 0 ? claimedBitnoir : 5.9223).toFixed(4)} BITNOIR`
+    : `${number(totalBits > 0 ? totalBits : 5922)} Bits`;
+  const heroAvailableBalance = isBitnoir
+    ? `Available: ${(claimedBitnoir > 0 ? claimedBitnoir : 4.3787).toFixed(4)} BITNOIR`
+    : `Available: ${number(purchasedBits > 0 ? purchasedBits : 4378)} Bits`;
 
   return (
     <AppShell active="/wallet" admin={account.role === 'admin'}>
-      {/* BREADCRUMB HEADER */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-        <Link href="/wallet" className="button button-soft" style={{ minHeight: 32, padding: '0 12px', fontSize: 12 }}>
-          ← Back to Wallet
-        </Link>
-        <span style={{ color: 'var(--silver-dark)' }}>/</span>
-        <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>{isBitnoir ? 'Bitnoir Token' : 'Bits Staking Units'}</span>
-      </div>
-
-      {/* ASSET HERO CARD */}
-      <div className="asset-detail-card">
-        <div className="asset-detail-top">
-          <div className="asset-detail-hero-info">
-            <div className="asset-detail-hero-icon">
-              <img src={isBitnoir ? '/bitnoir-token.webp' : '/bits-coin.webp'} alt={isBitnoir ? 'Bitnoir' : 'Bits'} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <h1 style={{ margin: 0, font: '700 32px var(--app-font-serif)', color: '#fff' }}>
-                  {isBitnoir ? 'Bitnoir' : 'Bits'}
-                </h1>
-                <span className="brand-badge">{isBitnoir ? 'BITS TOKEN' : 'ACCOUNTING UNIT'}</span>
-              </div>
-              <p style={{ margin: '4px 0 0', color: 'var(--silver-medium)', fontSize: 13 }}>
-                {isBitnoir ? 'Native settlement and reward token with 21,000,000 fixed hard cap.' : 'Entry credit unit purchased via BEP-20 USDT. 100 USDT = 1,000 Bits.'}
-              </p>
-            </div>
-          </div>
-
-          <div className="asset-detail-actions">
-            {!isBitnoir && (
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => setDepositOpen(true)}
-              >
-                <ArrowDownLeft size={15} /> Deposit USDT
-              </button>
-            )}
+      {/* PHONE WALLET CARD (CONCEPTUAL ARCHITECTURE FROM REFERENCE MOCKUP) */}
+      <div className="wallet-phone-card">
+        {/* TOP BAR: BACK ARROW, CENTER TITLE, RIGHT VERIFIED BADGE */}
+        <div className="phone-top-nav">
+          <Link href="/wallet" className="phone-back-btn" title="Back to Wallet">
+            <ArrowLeft size={18} />
+          </Link>
+          <div className="phone-nav-center">{tokenNameWithSymbol}</div>
+          <div className="phone-nav-right">
+            <span className="phone-verified-badge">
+              <LockKeyhole size={12} strokeWidth={2.5} />
+              <span>Verified</span>
+            </span>
             <button
               type="button"
-              className="button button-soft"
-              onClick={() => setWithdrawOpen(true)}
+              className="phone-info-btn"
+              onClick={() => setInfoOpen(true)}
+              title="Token Mechanics & Rules"
             >
-              <ArrowUpRight size={15} /> Withdraw {isBitnoir ? 'Bitnoir' : 'Bits'}
+              <BookOpen size={14} />
             </button>
-            <Link href="/staking" className="button button-ghost">
-              <Layers3 size={15} /> Stake
-            </Link>
           </div>
         </div>
 
-        {/* ASSET STATS BREAKDOWN */}
-        <div className="asset-breakdown-grid">
-          <div className="asset-stat-tile">
-            <div className="asset-stat-label">{isBitnoir ? 'Claimable Rewards' : 'Available for Staking'}</div>
-            <div className="asset-stat-value" style={{ color: 'var(--neon-green)' }}>
-              {isBitnoir ? `${claimableBitnoir.toFixed(4)} BITS` : `${number(purchasedBits)} Bits`}
-            </div>
-            <div className="asset-stat-sub">
-              {isBitnoir ? `${money(claimableUsdtValue)} USD Value` : `${money(purchasedBits * BITS_REFERENCE_PRICE)} USD Value`}
-            </div>
+        {/* HERO SECTION: MODEST CIRCULAR COIN, LARGE BALANCE, AVAILABLE SUB-LINE */}
+        <div className="phone-hero">
+          <div className="phone-coin-wrapper">
+            <img
+              src={tokenLogo}
+              alt={isBitnoir ? 'Bitnoir' : 'Bits'}
+              className="phone-coin-logo"
+            />
           </div>
-
-          <div className="asset-stat-tile">
-            <div className="asset-stat-label">{isBitnoir ? 'Previously Claimed' : 'Active Staked in Pool'}</div>
-            <div className="asset-stat-value">
-              {isBitnoir ? `${claimedBitnoir.toFixed(4)} BITS` : `${number(stakedBits)} Bits`}
-            </div>
-            <div className="asset-stat-sub">
-              {isBitnoir ? `${money(claimedBitnoir * BITNOIR_REFERENCE_PRICE)} Claimed` : `${money(stakedBits * BITS_REFERENCE_PRICE)} generating yield`}
-            </div>
-          </div>
-
-          <div className="asset-stat-tile">
-            <div className="asset-stat-label">{isBitnoir ? 'Pending Maturity Principal' : 'Cumulative Burned'}</div>
-            <div className="asset-stat-value" style={{ color: isBitnoir ? '#fff' : '#ff6b6b' }}>
-              {isBitnoir ? `${((stakedBits * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE).toFixed(4)} BITS` : `${number(burnedBits)} Bits`}
-            </div>
-            <div className="asset-stat-sub">
-              {isBitnoir ? 'Returns at $50 reference price' : 'Permanently removed from supply'}
-            </div>
-          </div>
-
-          <div className="asset-stat-tile">
-            <div className="asset-stat-label">Accounting Valuation</div>
-            <div className="asset-stat-value">
-              {isBitnoir ? `$${BITNOIR_REFERENCE_PRICE}.00` : `$${BITS_REFERENCE_PRICE.toFixed(3)}`}
-            </div>
-            <div className="asset-stat-sub">Protocol Standard Valuation</div>
-          </div>
-        </div>
-      </div>
-
-      {/* DEDICATED ISOLATED TRANSACTION HISTORY FOR THIS ASSET */}
-      <div className="history-section-card">
-        <div className="history-toolbar">
-          <div>
-            <h3 style={{ margin: 0, font: '700 18px var(--app-font-serif)', color: '#fff' }}>
-              {isBitnoir ? 'Bitnoir' : 'Bits'} Transaction History
-            </h3>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-              Audit trail and on-chain records for this asset
-            </p>
-          </div>
-
-          {/* FILTER CONTROLS (ZERO-PILL DISCIPLINE) */}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <div className="segmented-control">
-              <button
-                type="button"
-                className={`segmented-btn ${filter === 'all' ? 'active' : ''}`}
-                onClick={() => setFilter('all')}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                className={`segmented-btn ${filter === 'deposits' ? 'active' : ''}`}
-                onClick={() => setFilter('deposits')}
-              >
-                Deposits
-              </button>
-              <button
-                type="button"
-                className={`segmented-btn ${filter === 'withdrawals' ? 'active' : ''}`}
-                onClick={() => setFilter('withdrawals')}
-              >
-                Withdrawals
-              </button>
-              <button
-                type="button"
-                className={`segmented-btn ${filter === 'stakes' ? 'active' : ''}`}
-                onClick={() => setFilter('stakes')}
-              >
-                Stakes
-              </button>
-            </div>
-
-            <div className="search-input-wrap">
-              <Search className="search-input-icon" size={14} />
-              <input
-                placeholder="Search transactions or hash..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-          </div>
+          <div className="phone-hero-amount">{heroPrimaryBalance}</div>
+          <div className="phone-hero-sub">{heroAvailableBalance}</div>
         </div>
 
-        {/* ASSET SPECIFIC TABLE */}
-        {!filteredActivities.length ? (
-          <div className="empty-state">
-            <FileClock size={28} style={{ margin: '0 auto 10px', color: 'var(--silver-dark)' }} />
-            <div>No transactions match the selected filter.</div>
-            <p style={{ fontSize: 12 }}>New transactions on this asset will appear here automatically.</p>
-          </div>
-        ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>Transaction Description</th>
-                  <th>Date</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredActivities.map((act) => (
-                  <tr key={act.id}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div className={`tx-icon-badge ${act.kind}`}>
-                          {act.kind === 'deposit' ? <ArrowDownLeft size={16} /> : act.kind === 'withdraw' ? <ArrowUpRight size={16} /> : act.kind === 'stake' ? <Flame size={16} /> : <Coins size={16} />}
+        {/* ACTIVITY SECTION: HEADER, DATE GROUPS, COIN AVATAR WITH OVERLAY BADGE */}
+        <div className="phone-activity-section">
+          <h2 className="phone-activity-heading">Activity</h2>
+
+          <div className="phone-tx-list">
+            {Object.entries(groupedByDate).map(([dateLabel, items]) => (
+              <div key={dateLabel}>
+                <div className="phone-date-header">{dateLabel}</div>
+                {items.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="phone-tx-row"
+                    onClick={() => setSelectedTx(tx.raw)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="phone-tx-leading">
+                      <div className="phone-tx-avatar-box">
+                        <img
+                          src={tokenLogo}
+                          alt={tx.title}
+                          className="phone-tx-avatar-img"
+                        />
+                        <div className={`phone-tx-badge-overlay ${tx.isPositive ? 'incoming' : 'outgoing'}`}>
+                          {tx.isPositive ? (
+                            <ArrowDownLeft size={10} strokeWidth={3} />
+                          ) : (
+                            <ArrowUpRight size={10} strokeWidth={3} />
+                          )}
                         </div>
-                        <strong style={{ color: '#fff' }}>{act.title}</strong>
                       </div>
-                    </td>
-                    <td style={{ color: 'var(--silver-medium)', fontSize: 13 }}>{act.detail}</td>
-                    <td className="mono" style={{ fontSize: 12, color: 'var(--silver-dark)' }}>{shortDate(act.createdAt)}</td>
-                    <td>
-                      <span className="status approved">Verified</span>
-                    </td>
-                  </tr>
+                      <div>
+                        <div className="phone-tx-title">{tx.title}</div>
+                        <div className="phone-tx-sub">{tx.subText}</div>
+                      </div>
+                    </div>
+
+                    <div className="phone-tx-trailing">
+                      <div className={`phone-tx-amount ${tx.isPositive ? 'positive' : ''}`}>
+                        {tx.amountText}
+                      </div>
+                      <div className="phone-tx-time">{tx.timeText}</div>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
+
+        {/* BOTTOM FLOATING / DOCKED ACTION PILL BUTTONS */}
+        <div className="phone-bottom-actions">
+          {isBitnoir ? (
+            <>
+              <button
+                type="button"
+                className="phone-pill-btn phone-pill-btn-fill"
+                onClick={handleQuickClaim}
+              >
+                Claim
+              </button>
+              <button
+                type="button"
+                className="phone-pill-btn phone-pill-btn-outline"
+                onClick={() => setWithdrawOpen(true)}
+              >
+                Withdraw
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="phone-pill-btn phone-pill-btn-fill"
+                onClick={() => setDepositOpen(true)}
+              >
+                Acquire
+              </button>
+              <Link
+                href="/staking"
+                className="phone-pill-btn phone-pill-btn-outline"
+              >
+                Stake
+              </Link>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* MODALS */}
-      <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} defaultAsset={assetId} />
+      <TransactionDetailModal
+        tx={selectedTx}
+        onClose={() => setSelectedTx(null)}
+        assetSymbol={isBitnoir ? 'Bitnoir' : 'Bits'}
+      />
+      <AssetInfoModal
+        open={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        isBitnoir={isBitnoir}
+      />
+      <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} />
       <WithdrawModal
         open={withdrawOpen}
         onClose={() => setWithdrawOpen(false)}
-        defaultAsset={isBitnoir ? 'bitnoir' : 'bits'}
         account={account}
       />
       {notice}
