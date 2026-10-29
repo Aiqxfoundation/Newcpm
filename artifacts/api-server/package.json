@@ -12,8 +12,8 @@
   "dependencies": {
     "@clerk/express": "^2.1.83",
     "@clerk/shared": "^4.41.1",
-    "@workspace/api-zod": "workspace:*",
-    "@workspace/db": "workspace:*",
+    "@workspace/api-zod": "*",
+    "@workspace/db": "*",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "drizzle-orm": "^0.45.2",
