@@ -1506,7 +1506,13 @@ a {
   }
 
   .sidebar.mobile-open {
-    transform: translateX(0);
+  transform: translateX(0);
+  z-index: 60;
+  }
+
+  .mobile-menu-button.menu-open {
+  opacity: 0;
+  pointer-events: none;
   }
 
   .mobile-menu-button {

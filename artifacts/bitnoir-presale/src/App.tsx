@@ -813,7 +813,7 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
     <div className="app-layout">
       {/* MOBILE TRIGGER */}
       <button
-        className="mobile-menu-button"
+        className={`mobile-menu-button ${menuOpen ? 'menu-open' : ''}`}
         type="button"
         aria-label={menuOpen ? 'Close Menu' : 'Open Menu'}
         onClick={() => setMenuOpen(!menuOpen)}
