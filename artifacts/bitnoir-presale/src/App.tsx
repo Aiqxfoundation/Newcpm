@@ -111,16 +111,13 @@ function asArray<T>(value: unknown): T[] {
 }
 
 // Brand Component with official artwork
-function Brand({ showBadge = true, size = 'md' }: { showBadge?: boolean; size?: 'sm' | 'md' | 'lg' }) {
-  const iconSize = size === 'sm' ? 26 : size === 'lg' ? 44 : 34;
-  const textSize = size === 'sm' ? 17 : size === 'lg' ? 26 : 20;
+function Brand({ showBadge = false, size = 'md' }: { showBadge?: boolean; size?: 'sm' | 'md' | 'lg' }) {
+  const textSize = size === 'sm' ? 18 : size === 'lg' ? 28 : 22;
 
   return (
     <span className="brand" style={{ fontSize: textSize }}>
-      <div className="brand-icon-wrap" style={{ width: iconSize, height: iconSize }}>
-        <img className="bitnoir-logo" src="/bitnoir-logo-orange.webp" alt="Bitnoir orange token" />
-      </div>
-      <span>bitnoir</span>
+      <img className="bitnoir-logo" src="/bitnoir-logo-orange.webp" alt="Bitnoir orange token" />
+      <span>Bitnoir</span>
       {showBadge && <span className="brand-badge">BITS POINTS</span>}
     </span>
   );
@@ -278,7 +275,7 @@ function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
   return (
     <header className="topbar" data-page-header>
       <Link href="/" aria-label="Bitnoir Home">
-        <Brand showBadge={false} />
+        <Brand />
       </Link>
       <nav className="nav-links" aria-label="Main Navigation">
         <Link href="/" className={location === '/' ? 'active' : ''}>Overview</Link>
