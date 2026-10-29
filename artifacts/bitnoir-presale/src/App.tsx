@@ -116,7 +116,7 @@ function Brand({ showBadge = false, size = 'md' }: { showBadge?: boolean; size?:
 
   return (
     <span className="brand" style={{ fontSize: textSize }}>
-      <img className="bitnoir-logo" src="/bitnoir-logo-orange.webp" alt="Bitnoir orange token" />
+      <img className="bitnoir-logo" src="/bits-logo-green.webp" alt="Bitnoir orange token" />
       <span>Bitnoir</span>
       {showBadge && <span className="brand-badge">BITS POINTS</span>}
     </span>
@@ -127,7 +127,7 @@ function Brand({ showBadge = false, size = 'md' }: { showBadge?: boolean; size?:
 function TokenMark({ size = 20 }: { size?: number }) {
   return (
     <img
-      src="/bitnoir-token.webp"
+      src="/bits-logo-green.webp"
       alt="Bitnoir Token"
       style={{ width: size, height: size, borderRadius: '50%', display: 'inline-block', verticalAlign: 'middle' }}
     />
@@ -137,7 +137,7 @@ function TokenMark({ size = 20 }: { size?: number }) {
 function BitsMark({ size = 20 }: { size?: number }) {
   return (
     <img
-      src="/bits-logo-green.webp"
+      src="/bitnoir-logo-orange.webp"
       alt="Bits"
       style={{ width: size, height: size, borderRadius: '50%', display: 'inline-block', verticalAlign: 'middle' }}
     />
@@ -359,11 +359,11 @@ Enter Fair Launch <ArrowRight size={15} />
               <div className="hero-orbit-ring-inner" />
 
               <div className="hero-token-card">
-                <img src="/bitnoir-token.webp" alt="Bitnoir orange token" />
+                <img src="/bits-logo-green.webp" alt="Bitnoir orange token" />
               </div>
 
               <div className="hero-secondary-coin" title="Bits (Staking Units)">
-                <img src="/bits-logo-green.webp" alt="Bits Staking Unit" />
+                <img src="/bitnoir-logo-orange.webp" alt="Bits Staking Unit" />
               </div>
 
 
@@ -1492,7 +1492,7 @@ function WalletPage({ account }: { account: UserAccount }) {
         <div className="asset-row">
           <div className="asset-identity">
             <div className="asset-icon-box">
-              <img src="/bits-coin.webp" alt="Bits" />
+              <img src="/bitnoir-logo-orange.webp" alt="Bits" />
             </div>
             <div className="asset-names">
               <div className="asset-primary-name">
@@ -1541,7 +1541,7 @@ function WalletPage({ account }: { account: UserAccount }) {
         <div className="asset-row">
           <div className="asset-identity">
             <div className="asset-icon-box">
-              <img src="/bitnoir-token.webp" alt="Bitnoir Token" />
+              <img src="/bits-logo-green.webp" alt="Bitnoir Token" />
             </div>
             <div className="asset-names">
               <div className="asset-primary-name">
