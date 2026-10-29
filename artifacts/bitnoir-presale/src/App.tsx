@@ -998,7 +998,7 @@ function DepositModal({
     }
     setError('');
     create.mutate(
-      { data: { chain: selectedChain, amountUsdt: numericAmount, txHash: txHash.trim() || undefined } },
+      { data: { chain: selectedChain, amountUsdt: numericAmount } },
       {
         onSuccess: () => {
           toast({
