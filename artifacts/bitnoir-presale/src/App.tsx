@@ -891,19 +891,6 @@ function AppShell({ children, active, admin = false }: { children: ReactNode; ac
 
       {/* MAIN CONTENT AREA */}
       <main className="main-area">
-        <div className="app-top">
-          <span className="breadcrumbs">
-            BITNOIR / {active.replace('/', '').toUpperCase() || 'WALLET'}
-          </span>
-          <div className="top-actions">
-            <Link href="/" className="button button-soft" style={{ minHeight: 34, fontSize: 12 }}>
-              Public Site <ExternalLink size={12} />
-            </Link>
-            <Link href="/docs" className="button button-ghost" style={{ minHeight: 34, fontSize: 12 }}>
-              Whitepaper <BookOpen size={12} />
-            </Link>
-          </div>
-        </div>
         <div className="page-wrap">{children}</div>
       </main>
     </div>

@@ -803,21 +803,7 @@ a {
   padding: 0 40px 60px;
 }
 
-.app-top {
-  height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 36px;
-}
 
-.breadcrumbs {
-  font: 500 11px var(--app-font-mono);
-  color: var(--silver-dark);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
 
 .page-wrap {
   max-width: 1240px;
@@ -1551,7 +1537,7 @@ a {
   .main-area {
     min-width: 0;
     padding: 0 24px 60px;
-    padding-top: 84px;
+    padding-top: 24px;
   }
 
   .app-top {
