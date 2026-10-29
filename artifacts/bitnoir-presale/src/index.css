@@ -1535,9 +1535,9 @@ a {
   }
 
   .main-area {
-    min-width: 0;
-    padding: 0 24px 60px;
-    padding-top: 24px;
+  min-width: 0;
+  padding: 0 24px 60px;
+  padding-top: 82px;
   }
 
   .app-top {
