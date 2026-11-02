@@ -1100,7 +1100,7 @@ function DepositModal({
           onSuccess?.();
           onClose();
         },
-        onError: (err) => setError(readableError(err, 'Failed to submit deposit request.')),
+        onError: (err: unknown) => setError(readableError(err, 'Failed to submit deposit request.')),
       }
     );
   };
@@ -1510,10 +1510,12 @@ function WalletPage({ account }: { account: UserAccount }) {
 function TransactionDetailModal({
   tx,
   onClose,
-}: {
+  assetSymbol,
+  }: {
   tx: { id: number; kind: string; title: string; detail: string; createdAt: string } | null;
   onClose: () => void;
-}) {
+  assetSymbol?: string;
+  }) {
   const [copied, setCopied] = useState(false);
   if (!tx) return null;
 
