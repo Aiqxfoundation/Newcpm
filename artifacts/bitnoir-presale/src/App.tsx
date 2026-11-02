@@ -4,7 +4,7 @@ import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
   ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Gift, Globe2, HelpCircle, Info,
   Landmark, Layers3, Link as LinkIcon, LockKeyhole, LogOut, Menu, Plus, QrCode, Radio, RefreshCw,
-  Search, Send, ShieldAlert, ShieldCheck, Sparkles, Timer, Trophy, Users, Wallet, X,
+  Search, Send, ShieldAlert, ShieldCheck, Sparkles, Timer, TrendingUp, Trophy, Users, Wallet, X,
 } from 'lucide-react';
 import {
   getGetAdminAddressesQueryKey, getGetAdminDepositsQueryKey, getGetAdminSummaryQueryKey,
@@ -112,51 +112,101 @@ function asArray<T>(value: unknown): T[] {
   return [];
 }
 
+export type StakingPosition = {
+  id: number;
+  stakedBits: number;
+  lockupDays: number;
+  rewardRate: number;
+  accruedReward: number;
+  claimedReward?: number;
+  principalReturnTokens: number;
+  createdAt: string;
+  unlocksAt: string;
+  status: 'active' | 'matured' | 'claimed';
+};
+
+export function readPositions(account: UserAccount): StakingPosition[] {
+  const acc = account as unknown as {
+    position?: StakingPosition;
+    stakingPositions?: StakingPosition[];
+  };
+  const list: StakingPosition[] = [];
+  if (Array.isArray(acc?.stakingPositions)) {
+    list.push(...acc.stakingPositions);
+  }
+  if (acc?.position && !list.some((p) => p.id === acc.position?.id)) {
+    list.unshift(acc.position);
+  }
+  return list;
+}
+
 // Brand Component with official artwork
 function Brand({ showBadge = false, size = 'md' }: { showBadge?: boolean; size?: 'sm' | 'md' | 'lg' }) {
   const textSize = size === 'sm' ? 18 : size === 'lg' ? 28 : 22;
+  const logoPx = size === 'sm' ? 26 : size === 'lg' ? 40 : 34;
 
   return (
     <span className="brand" style={{ fontSize: textSize }}>
-      <img className="bitnoir-logo" src="/asset-bitnoir.png" alt="Bitnoir token" />
+      <img
+        className="bitnoir-logo"
+        src="/asset-bitnoir-md.png"
+        srcSet="/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w, /asset-bitnoir-lg.png 256w, /asset-bitnoir.png 512w"
+        sizes={`${logoPx}px`}
+        alt="Bitnoir token"
+        width={logoPx}
+        height={logoPx}
+        style={{ imageRendering: '-webkit-optimize-contrast' }}
+      />
       <span>Bitnoir</span>
       {showBadge && <span className="brand-badge">BITS POINTS</span>}
     </span>
   );
 }
 
-// Token and Bits Badges (HD artwork, proper color assignment)
+// Token and Bits Badges (HD artwork, razor-sharp multi-resolution srcset, zero downsampling blur)
 function TokenMark({ size = 22, className = '' }: { size?: number; className?: string }) {
+  const defaultSrc = size <= 24 ? '/asset-bitnoir-sm.png' : size <= 48 ? '/asset-bitnoir-md.png' : '/asset-bitnoir.png';
   return (
     <img
-      src="/asset-bitnoir.png"
+      src={defaultSrc}
+      srcSet="/asset-bitnoir-xs.png 32w, /asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w, /asset-bitnoir-lg.png 256w, /asset-bitnoir.png 512w"
+      sizes={`${size}px`}
       alt="Bitnoir"
-      className={className}
+      className={`token-mark-crisp ${className}`}
+      width={size}
+      height={size}
       style={{
         width: size,
         height: size,
         display: 'inline-block',
         verticalAlign: 'middle',
         objectFit: 'contain',
-        filter: 'drop-shadow(0 2px 8px rgba(245, 166, 35, 0.42))',
+        imageRendering: '-webkit-optimize-contrast',
+        flexShrink: 0,
       }}
     />
   );
 }
 
 function BitsMark({ size = 22, className = '' }: { size?: number; className?: string }) {
+  const defaultSrc = size <= 24 ? '/asset-bits-sm.png' : size <= 48 ? '/asset-bits-md.png' : '/asset-bits.png';
   return (
     <img
-      src="/asset-bits.png"
+      src={defaultSrc}
+      srcSet="/asset-bits-xs.png 32w, /asset-bits-sm.png 64w, /asset-bits-md.png 128w, /asset-bits-lg.png 256w, /asset-bits.png 512w"
+      sizes={`${size}px`}
       alt="Bits"
-      className={className}
+      className={`token-mark-crisp ${className}`}
+      width={size}
+      height={size}
       style={{
         width: size,
         height: size,
         display: 'inline-block',
         verticalAlign: 'middle',
         objectFit: 'contain',
-        filter: 'drop-shadow(0 2px 8px rgba(0, 245, 155, 0.42))',
+        imageRendering: '-webkit-optimize-contrast',
+        flexShrink: 0,
       }}
     />
   );
@@ -386,11 +436,25 @@ Enter Fair Launch <ArrowRight size={15} />
               <div className="hero-orbit-ring-inner" />
 
               <div className="hero-token-card">
-                <img src="/asset-bitnoir.png" alt="Bitnoir token" />
+                <img
+                  src="/asset-bitnoir.png"
+                  srcSet="/asset-bitnoir-md.png 128w, /asset-bitnoir-lg.png 256w, /asset-bitnoir.png 512w"
+                  sizes="240px"
+                  alt="Bitnoir token"
+                  width={240}
+                  height={240}
+                />
               </div>
 
               <div className="hero-secondary-coin" title="Bits (Staking Units)">
-                <img src="/asset-bits.png" alt="Bits Staking Unit" />
+                <img
+                  src="/asset-bits-lg.png"
+                  srcSet="/asset-bits-sm.png 64w, /asset-bits-md.png 128w, /asset-bits-lg.png 256w, /asset-bits.png 512w"
+                  sizes="90px"
+                  alt="Bits Staking Unit"
+                  width={90}
+                  height={90}
+                />
               </div>
 
 
@@ -610,18 +674,18 @@ function DocsPage() {
               <div className="cards-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)', margin: '20px 0' }}>
                 <div className="panel content-card">
                   <span className="small-label">30-Day Term</span>
-                  <div style={{ font: '700 24px var(--app-font-serif)', color: 'var(--neon-green)', margin: '8px 0' }}>8.0% Rate</div>
-                  <p style={{ fontSize: 12, color: 'var(--silver-dark)', margin: 0 }}>~97.3% APR equivalent</p>
+                  <div style={{ font: '700 22px var(--app-font-serif)', color: 'var(--neon-green)', margin: '8px 0' }}>Base Tier</div>
+                  <p style={{ fontSize: 12, color: 'var(--silver-dark)', margin: 0 }}>Standard Protocol Allocation</p>
                 </div>
                 <div className="panel content-card">
                   <span className="small-label">60-Day Term</span>
-                  <div style={{ font: '700 24px var(--app-font-serif)', color: 'var(--neon-green)', margin: '8px 0' }}>16.0% Rate</div>
-                  <p style={{ fontSize: 12, color: 'var(--silver-dark)', margin: 0 }}>~97.3% APR equivalent</p>
+                  <div style={{ font: '700 22px var(--app-font-serif)', color: 'var(--neon-green)', margin: '8px 0' }}>Accelerated Tier</div>
+                  <p style={{ fontSize: 12, color: 'var(--silver-dark)', margin: 0 }}>Enhanced Protocol Allocation</p>
                 </div>
                 <div className="panel content-card" style={{ borderColor: 'var(--border-neon)' }}>
                   <span className="small-label">90-Day Term</span>
-                  <div style={{ font: '700 24px var(--app-font-serif)', color: 'var(--neon-green)', margin: '8px 0' }}>28.0% Rate</div>
-                  <p style={{ fontSize: 12, color: 'var(--silver-dark)', margin: 0 }}>~113.5% APR equivalent (Highest Yield)</p>
+                  <div style={{ font: '700 22px var(--app-font-serif)', color: 'var(--neon-green)', margin: '8px 0' }}>Maximum Tier</div>
+                  <p style={{ fontSize: 12, color: 'var(--silver-dark)', margin: 0 }}>Highest Protocol Allocation</p>
                 </div>
               </div>
             </section>
@@ -1210,9 +1274,8 @@ function WithdrawModal({
       return;
     }
 
-    const valueUsd = numericAmount * BITNOIR_REFERENCE_PRICE;
-    if (valueUsd < MIN_CLAIM_USDT) {
-      setError(`Minimum withdrawal is $${MIN_CLAIM_USDT.toFixed(2)} worth of Bitnoir (${MIN_CLAIM_BITNOIR} BITS).`);
+    if (numericAmount < MIN_CLAIM_BITNOIR) {
+      setError(`Minimum withdrawal is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir.`);
       return;
     }
     if (numericAmount > availableBitnoir) {
@@ -1382,7 +1445,15 @@ function WalletPage({ account }: { account: UserAccount }) {
         {/* ASSET 1: BITS (CLICKABLE TO INDEPENDENT PAGE) */}
         <Link href="/asset/bits" className="wallet-asset-clean-card card-bits">
           <div className="wallet-asset-leading">
-            <img src="/asset-bits.png" alt="Bits" className="wallet-token-logo" />
+            <img
+              src="/asset-bits-md.png"
+              srcSet="/asset-bits-sm.png 64w, /asset-bits-md.png 128w, /asset-bits-lg.png 256w, /asset-bits.png 512w"
+              sizes="52px"
+              alt="Bits"
+              className="wallet-token-logo"
+              width={52}
+              height={52}
+            />
             <div className="wallet-token-meta">
               <span className="wallet-token-name">Bits</span>
               <span className="wallet-token-symbol">Internal Staking Asset</span>
@@ -1400,7 +1471,15 @@ function WalletPage({ account }: { account: UserAccount }) {
         {/* ASSET 2: BITNOIR (CLICKABLE TO INDEPENDENT PAGE) */}
         <Link href="/asset/bitnoir" className="wallet-asset-clean-card card-bitnoir">
           <div className="wallet-asset-leading">
-            <img src="/asset-bitnoir.png" alt="Bitnoir" className="wallet-token-logo" />
+            <img
+              src="/asset-bitnoir-md.png"
+              srcSet="/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w, /asset-bitnoir-lg.png 256w, /asset-bitnoir.png 512w"
+              sizes="52px"
+              alt="Bitnoir"
+              className="wallet-token-logo"
+              width={52}
+              height={52}
+            />
             <div className="wallet-token-meta">
               <span className="wallet-token-name">Bitnoir</span>
               <span className="wallet-token-symbol">Settlement & Yield Token</span>
@@ -1768,9 +1847,15 @@ function AssetDetailPage({ account, assetId }: { account: UserAccount; assetId: 
     groupedByDate[item.dateGroup].push(item);
   });
 
+  const positions = readPositions(account);
+  const activePosition = positions.find((p) => p.status === 'active') || (account as unknown as { position?: StakingPosition }).position;
+  const isTermFinished = activePosition
+    ? new Date(activePosition.unlocksAt).getTime() <= Date.now()
+    : true;
+
   const handleQuickClaim = async () => {
-    if (claimableUsdtValue < MIN_CLAIM_USDT) {
-      notify(`Minimum claim threshold is $${MIN_CLAIM_USDT.toFixed(2)} worth of Bitnoir.`);
+    if (!isTermFinished && claimableBitnoir < MIN_CLAIM_BITNOIR) {
+      notify(`Minimum mid-term claim threshold is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir. (Full balance claimable upon maturity)`);
       return;
     }
     try {
@@ -1787,7 +1872,10 @@ function AssetDetailPage({ account, assetId }: { account: UserAccount; assetId: 
     }
   };
 
-  const tokenLogo = isBitnoir ? '/asset-bitnoir.png' : '/asset-bits.png';
+  const tokenLogo = isBitnoir ? '/asset-bitnoir-md.png' : '/asset-bits-md.png';
+  const tokenLogoSrcSet = isBitnoir
+    ? '/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w, /asset-bitnoir-lg.png 256w, /asset-bitnoir.png 512w'
+    : '/asset-bits-sm.png 64w, /asset-bits-md.png 128w, /asset-bits-lg.png 256w, /asset-bits.png 512w';
   const tokenNameWithSymbol = isBitnoir ? 'Bitnoir' : 'Bits';
   
   // Exact protocol accounting balances (no placeholder/dummy fallbacks)
@@ -1851,8 +1939,12 @@ function AssetDetailPage({ account, assetId }: { account: UserAccount; assetId: 
             <div className="phone-coin-wrapper">
               <img
                 src={tokenLogo}
+                srcSet={tokenLogoSrcSet}
+                sizes="56px"
                 alt={isBitnoir ? 'Bitnoir' : 'Bits'}
                 className="phone-coin-logo"
+                width={56}
+                height={56}
               />
             </div>
             <div className="phone-hero-amount">{heroPrimaryAmount}</div>
@@ -1882,8 +1974,8 @@ function AssetDetailPage({ account, assetId }: { account: UserAccount; assetId: 
                   type="button"
                   className="phone-pill-btn phone-pill-btn-fill"
                   onClick={handleQuickClaim}
-                  disabled={claimableBitnoir <= 0}
-                  title={claimableUsdtValue < MIN_CLAIM_USDT ? `Min claim threshold is $${MIN_CLAIM_USDT.toFixed(2)}` : 'Claim farming yield'}
+                  disabled={claimableBitnoir <= 0 || (!isTermFinished && claimableBitnoir < MIN_CLAIM_BITNOIR)}
+                  title={!isTermFinished && claimableBitnoir < MIN_CLAIM_BITNOIR ? `Min claim threshold is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir` : 'Claim farming yield'}
                 >
                   <Sparkles size={15} /> Claim ({claimableBitnoir.toFixed(4)})
                 </button>
@@ -2184,7 +2276,7 @@ function StakingGuideModal({ open, onClose }: { open: boolean; onClose: () => vo
           <div className="guide-section-card">
             <div className="guide-section-head">
               <Timer size={18} />
-              <span>2. Lockup Durations & Reward Rates</span>
+              <span>2. Lockup Durations & Yield Tiers</span>
             </div>
             <p>
               Higher lockup terms provide increased algorithmic rewards funded by the 20% protocol staking reserve.
@@ -2193,7 +2285,7 @@ function StakingGuideModal({ open, onClose }: { open: boolean; onClose: () => vo
               <thead>
                 <tr>
                   <th>Term Period</th>
-                  <th>Reward Rate</th>
+                  <th>Yield Tier</th>
                   <th>Emissions Tier</th>
                   <th>Status</th>
                 </tr>
@@ -2201,20 +2293,20 @@ function StakingGuideModal({ open, onClose }: { open: boolean; onClose: () => vo
               <tbody>
                 <tr>
                   <td>30 Days</td>
-                  <td style={{ color: 'var(--neon-green)' }}>+12.0%</td>
-                  <td>Base Tier</td>
+                  <td style={{ color: 'var(--neon-green)' }}>Base Tier</td>
+                  <td>Standard Emissions</td>
                   <td>Available</td>
                 </tr>
                 <tr>
                   <td>60 Days</td>
-                  <td style={{ color: 'var(--neon-green)' }}>+28.0%</td>
-                  <td>Accelerated Tier</td>
+                  <td style={{ color: 'var(--neon-green)' }}>Accelerated Tier</td>
+                  <td>Enhanced Emissions</td>
                   <td>Recommended</td>
                 </tr>
                 <tr>
                   <td>90 Days</td>
-                  <td style={{ color: 'var(--neon-green)' }}>+60.0%</td>
-                  <td>Max Multiplier Tier</td>
+                  <td style={{ color: 'var(--neon-green)' }}>Maximum Tier</td>
+                  <td>Max Emissions</td>
                   <td>High Yield</td>
                 </tr>
               </tbody>
@@ -2238,7 +2330,7 @@ function StakingGuideModal({ open, onClose }: { open: boolean; onClose: () => vo
             </div>
             <p>
               Upon term completion, your full principal is returned in Bitnoir tokens calculated at the $50 protocol accounting reference valuation.
-              Rewards can be claimed anytime once they reach the minimum threshold of ${MIN_CLAIM_USDT.toFixed(2)}.
+              Rewards can be claimed anytime once they reach {MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir (the threshold is waived completely once your lock term finishes, allowing full final settlement).
             </p>
           </div>
         </div>
@@ -2253,50 +2345,59 @@ function StakingGuideModal({ open, onClose }: { open: boolean; onClose: () => vo
   );
 }
 
-function StakingPage({ account }: { account: UserAccount }) {
+// ---------------------------------------------------------------------------
+// FIXED OVERLAY STAKING POSITION MODAL (DUAL SCROLL LINES: TIME & BITS)
+// ---------------------------------------------------------------------------
+function StakingPositionModal({
+  open,
+  onClose,
+  isStakingActive,
+  purchasedBits,
+  stakedBits,
+  existingPrincipalReturnTokens,
+  existingPrincipalReturnUsd,
+  existingTotalReturnTokens,
+  existingTotalReturnUsd,
+  duration,
+  setDuration,
+  onStakeSuccess,
+  notify,
+  activePositions = [],
+}: {
+  open: boolean;
+  onClose: () => void;
+  isStakingActive: boolean;
+  purchasedBits: number;
+  stakedBits: number;
+  activePositions?: StakingPosition[];
+  existingPrincipalReturnTokens: number;
+  existingPrincipalReturnUsd: number;
+  existingTotalReturnTokens: number;
+  existingTotalReturnUsd: number;
+  duration: number;
+  setDuration: (d: number) => void;
+  onStakeSuccess: () => void;
+  notify: (msg: string) => void;
+}) {
+  const [stakeAmount, setStakeAmount] = useState<string>('');
   const stake = useStakeTokens();
-  const client = useQueryClient();
-  const { notify, notice } = useNotice();
-
-  const balances = (account.balances as unknown as Record<string, number>) || {};
-  const purchasedBits = balances.purchased || 0;
-  const stakedBits = balances.staked || 0;
-  const claimableTokens = balances.claimable || 0;
-  const claimableUsdtValue = claimableTokens * BITNOIR_REFERENCE_PRICE;
-
-  const isStakingActive = stakedBits > 0;
-  const [stakeAmount, setStakeAmount] = useState('');
-  const [duration, setDuration] = useState<number>(60);
-  const [depositOpen, setDepositOpen] = useState(false);
-  const [guideOpen, setGuideOpen] = useState(false);
-  // Calculator only appears when user wants to position themselves
-  const [isPositioningOpen, setIsPositioningOpen] = useState<boolean>(!isStakingActive);
-
-  // Real-time ticking reward state (Stake.coredao.org style continuous live yield streaming)
-  const [liveClaimable, setLiveClaimable] = useState<number>(claimableTokens);
 
   useEffect(() => {
-    setLiveClaimable(claimableTokens);
-  }, [claimableTokens]);
+    if (open) {
+      setStakeAmount('');
+    }
+  }, [open]);
 
-  // Live points/yield increasing ticker when stake is active
-  useEffect(() => {
-    if (stakedBits <= 0) return;
-    const rate = rewardRateForDays(duration);
-    const totalReward = (stakedBits * USDT_PER_BITS * rate) / BITNOIR_REFERENCE_PRICE;
-    const rewardPerSecond = totalReward / (duration * 86400);
-    const tickIntervalMs = 250;
-    const deltaPerTick = Math.max(0.00000005, rewardPerSecond * (tickIntervalMs / 1000));
-
-    const timer = setInterval(() => {
-      setLiveClaimable((prev) => prev + deltaPerTick);
-    }, tickIntervalMs);
-
-    return () => clearInterval(timer);
-  }, [stakedBits, duration]);
+  if (!open) return null;
 
   const numericStake = Number(stakeAmount) || 0;
   const rewardRate = rewardRateForDays(duration);
+
+  const primaryActive = activePositions.find((p) => p.status === 'active') || activePositions[0];
+  const activeTerm = primaryActive?.lockupDays || 60;
+  const isSameTerm = isStakingActive && duration === activeTerm;
+  const isLowerTerm = isStakingActive && duration < activeTerm;
+  const isHigherTerm = isStakingActive && duration > activeTerm;
 
   // Exact rule-based return metrics for the new/additional position
   const newPrincipalReturnTokens = (numericStake * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE;
@@ -2306,13 +2407,6 @@ function StakingPage({ account }: { account: UserAccount }) {
   const newTotalReturnTokens = newPrincipalReturnTokens + newRewardTokens;
   const newTotalReturnUsd = newPrincipalReturnUsd + newRewardUsd;
 
-  // Active existing position metrics
-  const existingPrincipalReturnTokens = (stakedBits * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE;
-  const existingPrincipalReturnUsd = stakedBits * USDT_PER_BITS;
-  const existingRewardTokens = (stakedBits * USDT_PER_BITS * rewardRate) / BITNOIR_REFERENCE_PRICE;
-  const existingTotalReturnTokens = existingPrincipalReturnTokens + existingRewardTokens;
-  const existingTotalReturnUsd = existingPrincipalReturnUsd + (existingRewardTokens * BITNOIR_REFERENCE_PRICE);
-
   // Combined position metrics if increasing
   const combinedBits = stakedBits + numericStake;
   const combinedPrincipalTokens = (combinedBits * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE;
@@ -2321,40 +2415,358 @@ function StakingPage({ account }: { account: UserAccount }) {
   const combinedTotalReturnTokens = combinedPrincipalTokens + combinedRewardTokens;
   const combinedTotalReturnUsd = combinedPrincipalUsd + (combinedRewardTokens * BITNOIR_REFERENCE_PRICE);
 
-  const handleStake = () => {
+  const handleCommit = () => {
     if (numericStake <= 0 || numericStake > purchasedBits) {
       notify('Please enter a valid Bits amount within your available balance.');
       return;
     }
 
     stake.mutate(
-      { data: { amountTokens: numericStake } },
+      { data: { amountTokens: numericStake, lockupDays: duration } as any },
       {
         onSuccess: () => {
-          setStakeAmount('');
-          if (stakedBits > 0) {
-            notify(`Position increased by +${numericStake.toLocaleString()} Bits! Combined total: ${(stakedBits + numericStake).toLocaleString()} Bits.`);
+          if (isStakingActive && isSameTerm) {
+            notify(`Position increased by +${numericStake.toLocaleString()} Bits in your active ${duration}-day term!`);
+          } else if (isStakingActive) {
+            notify(`New independent position opened: ${numericStake.toLocaleString()} Bits locked for ${duration} days!`);
           } else {
             notify(`Successfully staked ${numericStake.toLocaleString()} Bits for ${duration} days!`);
           }
-          setIsPositioningOpen(false);
-          void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-          void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
+          onStakeSuccess();
+          onClose();
         },
         onError: () => notify('Staking transaction failed. Please retry.'),
       }
     );
   };
 
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-dialog staking-overlay-modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 640 }}
+      >
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 12,
+                background: 'rgba(0, 245, 155, 0.12)',
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--neon-green)',
+              }}
+            >
+              <TrendingUp size={20} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: 20, margin: 0, color: '#fff' }}>
+                {isStakingActive ? 'Increase Staking Position' : 'Staking Position Console'}
+              </h2>
+              <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--silver-dark)' }}>
+                Adjust term duration and allocation to preview verified protocol returns
+              </p>
+            </div>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 16 }}>
+          {/* 1. FLEXIBLE TIME LINE (ANY DAY 30 TO 90) */}
+          <div className="slider-line-card">
+            <div className="slider-line-head">
+              <span className="slider-line-label">
+                <Timer size={14} className="slider-icon-green" />
+                <span>Lockup Duration</span>
+              </span>
+              <span className="slider-current-badge">{duration} Days Locked</span>
+            </div>
+
+            <div className="slider-track-wrap">
+              <input
+                type="range"
+                min="30"
+                max="90"
+                step="1"
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="modern-range-line"
+                aria-label="Lock duration in days"
+              />
+            </div>
+
+            <div className="slider-range-endpoints">
+              <span>Min. 30 Days</span>
+              <span className="slider-range-mid">Continuous Term Selection</span>
+              <span>Max. 90 Days</span>
+            </div>
+
+            {isLowerTerm && (
+              <div className="modal-term-notice warning" style={{ marginTop: 12 }}>
+                <strong>⚡ Multi-Term Staking Rule:</strong> You have an active {activeTerm}-Day position. Selecting {duration} Days will open a separate independent <strong>Position #{activePositions.length + 1} ({duration}-Day Term)</strong>. Your existing {activeTerm}-Day position remains locked with its full schedule and rate.
+              </div>
+            )}
+            {isSameTerm && (
+              <div className="modal-term-notice" style={{ marginTop: 12 }}>
+                <strong>⚡ Position Consolidation:</strong> Adding +{number(numericStake)} Bits directly into your active {activeTerm}-day position.
+              </div>
+            )}
+            {isHigherTerm && (
+              <div className="modal-term-notice" style={{ marginTop: 12 }}>
+                <strong>⚡ Multi-Term Extension:</strong> Selecting {duration} Days opens a separate independent <strong>Position #{activePositions.length + 1} ({duration}-Day Term)</strong> at a higher yield rate.
+              </div>
+            )}
+          </div>
+
+          {/* 2. FLEXIBLE BITS COMMITMENT LINE */}
+          <div className="slider-line-card">
+            <div className="slider-line-head">
+              <span className="slider-line-label">
+                <BitsMark size={16} />
+                <span>Commitment Allocation</span>
+              </span>
+              <span className="slider-avail-tag">
+                Available: <strong>{number(purchasedBits)} Bits</strong>
+              </span>
+            </div>
+
+            {/* Exact numeric input box */}
+            <div className="modern-stake-input-box" style={{ marginTop: 6, marginBottom: 12 }}>
+              <div className="input-with-symbol">
+                <BitsMark size={24} />
+                <input
+                  type="number"
+                  min="0"
+                  max={purchasedBits}
+                  placeholder="0"
+                  className="modern-numeric-input"
+                  value={stakeAmount}
+                  onChange={(e) => setStakeAmount(e.target.value)}
+                />
+                <span className="modern-input-ticker">Bits</span>
+              </div>
+              <div className="modern-input-subline">
+                <span>≈ {money(numericStake * USDT_PER_BITS)} USD</span>
+                <button
+                  type="button"
+                  className="quick-max-link"
+                  onClick={() => setStakeAmount(String(purchasedBits))}
+                >
+                  MAX
+                </button>
+              </div>
+            </div>
+
+            {/* Continuous scrubbable Bits range line */}
+            <div className="slider-track-wrap">
+              <input
+                type="range"
+                min="0"
+                max={purchasedBits}
+                step={Math.max(1, Math.floor(purchasedBits / 100))}
+                value={numericStake}
+                onChange={(e) => setStakeAmount(e.target.value)}
+                className="modern-range-line"
+                aria-label="Bits stake amount"
+              />
+            </div>
+
+            {/* Quick ratio presets */}
+            <div className="preset-ratio-pills" style={{ marginTop: 10 }}>
+              {[0.25, 0.5, 0.75, 1.0].map((ratio) => (
+                <button
+                  key={ratio}
+                  type="button"
+                  className="preset-ratio-pill"
+                  onClick={() => setStakeAmount(String(Math.floor(purchasedBits * ratio)))}
+                >
+                  {ratio === 1.0 ? 'MAX' : `${ratio * 100}%`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. FINAL RESULTS RECEIPT TABLE (INSTITUTIONAL PERFECTION - NO REPEATING LOGOS) */}
+          <div className="institutional-receipt-card" style={{ margin: 0 }}>
+            <div className="receipt-title-row">
+              <span className="receipt-badge">POSITION SETTLEMENT RECEIPT</span>
+              <span className="receipt-term-tag">{duration} Days Term</span>
+            </div>
+
+            <div className="receipt-rows">
+              <div className="receipt-row">
+                <span className="receipt-lbl">Stake Commitment</span>
+                <span className="receipt-val">
+                  {number(numericStake)} Bits <span className="receipt-dim">({money(newPrincipalReturnUsd)})</span>
+                </span>
+              </div>
+
+              <div className="receipt-row">
+                <span className="receipt-lbl">Principal Return</span>
+                <span className="receipt-val">
+                  {newPrincipalReturnTokens.toFixed(4)} Bitnoir
+                </span>
+              </div>
+
+              <div className="receipt-row">
+                <span className="receipt-lbl">Term Yield Return</span>
+                <span className="receipt-val text-green">
+                  +{newRewardTokens.toFixed(4)} Bitnoir
+                </span>
+              </div>
+
+              <div className="receipt-divider" />
+
+              <div className="receipt-row total-highlight">
+                <div className="receipt-total-label-wrap">
+                  <span className="receipt-total-title">Total Return at Maturity</span>
+                  <span className="receipt-total-fiat">≈ {money(newTotalReturnUsd)} USD</span>
+                </div>
+                <div className="receipt-total-figure">
+                  <TokenMark size={22} />
+                  <span className="receipt-total-num">{newTotalReturnTokens.toFixed(4)}</span>
+                  <span className="receipt-total-unit">Bitnoir</span>
+                </div>
+              </div>
+            </div>
+
+            {isStakingActive && numericStake > 0 && (
+              <div className="receipt-combined-note">
+                {isSameTerm ? (
+                  <>Combined Active {duration}-Day Position: <strong>{number(combinedBits)} Bits</strong> → <strong>{combinedTotalReturnTokens.toFixed(4)} Bitnoir</strong> ({money(combinedTotalReturnUsd)})</>
+                ) : (
+                  <>Independent Position #{activePositions.length + 1}: <strong>{number(numericStake)} Bits</strong> locked for {duration} days. Active {activeTerm}-day position ({number(stakedBits)} Bits) continues unaffected.</>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+          <button type="button" className="clean-glass-btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="clean-stake-confirm-btn"
+            style={{ width: 'auto', minWidth: 220 }}
+            disabled={stake.isPending || numericStake <= 0 || numericStake > purchasedBits}
+            onClick={handleCommit}
+          >
+            {stake.isPending ? (
+              'Processing Staking Order…'
+            ) : numericStake <= 0 ? (
+              'Enter Commitment Amount'
+            ) : numericStake > purchasedBits ? (
+              'Insufficient Bits Balance'
+            ) : isStakingActive && isSameTerm ? (
+              <>Confirm Position Increase (+{number(numericStake)} Bits) <ArrowRight size={16} /></>
+            ) : isStakingActive ? (
+              <>Open {duration}-Day Position ({number(numericStake)} Bits) <ArrowRight size={16} /></>
+            ) : (
+              <>Confirm & Lock {number(numericStake)} Bits <ArrowRight size={16} /></>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StakingPage({ account }: { account: UserAccount }) {
+  const client = useQueryClient();
+  const { notify, notice } = useNotice();
+
+  const balances = (account.balances as unknown as Record<string, number>) || {};
+  const purchasedBits = balances.purchased || 0;
+  const stakedBits = balances.staked || 0;
+  const claimableTokens = balances.claimable || 0;
+
+  const isStakingActive = stakedBits > 0;
+  const [duration, setDuration] = useState<number>(60);
+  const [depositOpen, setDepositOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  // Position modal overlay state (matches Guide modal architecture)
+  const [isPositionModalOpen, setIsPositionModalOpen] = useState<boolean>(false);
+
+  // Check if active staking term is finished (unlock time reached)
+  const positions = readPositions(account);
+  const activePositions = positions.filter((p) => p.status === 'active');
+  const primaryPosition = activePositions[0] || (account as unknown as { position?: StakingPosition }).position;
+  const isTermFinished = activePositions.length > 0
+    ? activePositions.every((p) => new Date(p.unlocksAt).getTime() <= Date.now())
+    : primaryPosition
+    ? new Date(primaryPosition.unlocksAt).getTime() <= Date.now()
+    : false;
+
+  // Exact rule-based per-hour emission calculation
+  const calculatePositionPerHour = (bits: number, days: number, customRate?: number) => {
+    const rate = customRate ?? rewardRateForDays(days);
+    const totalYieldBitnoir = (bits * USDT_PER_BITS * rate) / BITNOIR_REFERENCE_PRICE;
+    const totalHours = Math.max(1, days * 24);
+    return totalYieldBitnoir / totalHours;
+  };
+
+  const totalBitnoirPerHour = activePositions.length > 0
+    ? activePositions.reduce((sum, p) => sum + calculatePositionPerHour(p.stakedBits, p.lockupDays || 30, p.rewardRate), 0)
+    : calculatePositionPerHour(stakedBits, duration);
+
+  // Real-time ticking reward state (Stake.coredao.org style continuous live yield streaming)
+  const [liveClaimable, setLiveClaimable] = useState<number>(claimableTokens);
+
+  useEffect(() => {
+    setLiveClaimable(claimableTokens);
+  }, [claimableTokens]);
+
+  // Live points/yield increasing ticker strictly synchronized to the exact hourly rate
+  useEffect(() => {
+    if (stakedBits <= 0 || totalBitnoirPerHour <= 0) return;
+    const rewardPerSecond = totalBitnoirPerHour / 3600;
+    const tickIntervalMs = 250;
+    const deltaPerTick = rewardPerSecond * (tickIntervalMs / 1000);
+
+    const timer = setInterval(() => {
+      setLiveClaimable((prev) => prev + deltaPerTick);
+    }, tickIntervalMs);
+
+    return () => clearInterval(timer);
+  }, [stakedBits, totalBitnoirPerHour]);
+
+  const rewardRate = rewardRateForDays(duration);
+
+  // Active existing position metrics
+  const existingPrincipalReturnTokens = (stakedBits * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE;
+  const existingPrincipalReturnUsd = stakedBits * USDT_PER_BITS;
+  const existingRewardTokens = (stakedBits * USDT_PER_BITS * rewardRate) / BITNOIR_REFERENCE_PRICE;
+  const existingTotalReturnTokens = existingPrincipalReturnTokens + existingRewardTokens;
+  const existingTotalReturnUsd = existingPrincipalReturnUsd + (existingRewardTokens * BITNOIR_REFERENCE_PRICE);
+
+  // Claim eligibility: waived upon lock term finish, otherwise 0.0400 Bitnoir
+  const canClaim = isTermFinished
+    ? liveClaimable > 0
+    : liveClaimable >= MIN_CLAIM_BITNOIR;
+
   const handleClaim = async () => {
-    if (claimableUsdtValue < MIN_CLAIM_USDT) {
-      notify(`Minimum claim threshold is $${MIN_CLAIM_USDT.toFixed(2)} worth of Bitnoir.`);
+    if (!canClaim) {
+      if (!isTermFinished) {
+        notify(`Minimum mid-term claim threshold is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir. Full balance is claimable upon term maturity.`);
+      } else {
+        notify('No claimable Bitnoir available at this time.');
+      }
       return;
     }
     try {
       const res = await fetch('/api/accounts/me/claim', { method: 'POST' });
       if (res.ok) {
-        notify(`Successfully claimed ${claimableTokens.toFixed(4)} Bitnoir tokens!`);
+        const data = await res.json().catch(() => null);
+        const burnedBits = data?.burnedBitsSettled || Math.round((liveClaimable * BITNOIR_REFERENCE_PRICE) / USDT_PER_BITS);
+        notify(`Successfully claimed ${liveClaimable.toFixed(4)} Bitnoir tokens! Protocol burned ${burnedBits.toLocaleString()} Bits per Proof-of-Burn rule.`);
+        setLiveClaimable(0);
         void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
         void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
       } else {
@@ -2415,7 +2827,7 @@ function StakingPage({ account }: { account: UserAccount }) {
                 <>
                   <span className="dot-sep">•</span>
                   <span className="staking-live-rate">
-                    +{(stakedBits * 0.00008).toFixed(4)} Bitnoir/hr
+                    +{totalBitnoirPerHour.toFixed(4)} Bitnoir/hr
                   </span>
                   <span className="dot-sep">•</span>
                   <span>{number(stakedBits)} Bits Active</span>
@@ -2433,273 +2845,187 @@ function StakingPage({ account }: { account: UserAccount }) {
             <button
               type="button"
               className="clean-claim-btn"
-              disabled={claimableUsdtValue < MIN_CLAIM_USDT}
+              disabled={!canClaim}
               onClick={handleClaim}
-              title={claimableUsdtValue < MIN_CLAIM_USDT ? `Min claim threshold is $${MIN_CLAIM_USDT.toFixed(2)}` : 'Claim accrued Bitnoir'}
+              title={
+                !canClaim
+                  ? `Min claim threshold is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir`
+                  : 'Claim accrued Bitnoir'
+              }
             >
               <Sparkles size={16} />
               <span>
-                {claimableUsdtValue >= MIN_CLAIM_USDT
-                  ? `Claim ${claimableTokens.toFixed(4)} Bitnoir`
-                  : `Claim ($${MIN_CLAIM_USDT.toFixed(2)} Min)`}
+                {isTermFinished
+                  ? `Claim Maturity (${liveClaimable.toFixed(4)} Bitnoir)`
+                  : canClaim
+                  ? `Claim ${liveClaimable.toFixed(4)} Bitnoir`
+                  : `Claim (Min. ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir)`}
               </span>
             </button>
             <div className="staking-claim-hint">
-              {claimableUsdtValue >= MIN_CLAIM_USDT
-                ? `${money(claimableUsdtValue)} ready to claim`
-                : `Accrued: ${money(claimableUsdtValue)} (Req. $2.00)`}
+              {isTermFinished ? (
+                <span className="text-green">Term Matured · All Accrued Bitnoir Unlocked</span>
+              ) : canClaim ? (
+                `${liveClaimable.toFixed(4)} Bitnoir ready to claim`
+              ) : (
+                `Accrued: ${liveClaimable.toFixed(4)} Bitnoir · Mid-term min: ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir`
+              )}
             </div>
           </div>
         </div>
 
-        {/* ACTIVE POSITION BENTO SUMMARY (CLEAN INSTITUTIONAL BENTO) */}
+        {/* ACTIVE POSITION BENTO SUMMARY (CLEAN INSTITUTIONAL BENTO - NO PERCENTAGES) */}
         {isStakingActive && (
           <div className="staking-active-bento">
             <div className="active-bento-grid">
               <div className="bento-tile">
                 <div className="bento-tile-header">
-                  <span className="bento-tile-label">STAKED BITS</span>
+                  <span className="bento-tile-label">STAKED COMMITMENT</span>
                   <BitsMark size={18} />
                 </div>
                 <div className="bento-tile-val">{number(stakedBits)} Bits</div>
-                <div className="bento-tile-sub">{money(existingPrincipalReturnUsd)}</div>
+                <div className="bento-tile-sub">{money(existingPrincipalReturnUsd)} Locked</div>
               </div>
 
               <div className="bento-tile">
                 <div className="bento-tile-header">
-                  <span className="bento-tile-label">LOCK TERM</span>
-                  <span className="bento-rate-tag">+{(rewardRate * 100).toFixed(0)}%</span>
+                  <span className="bento-tile-label">PROOF-OF-BURN SETTLED</span>
+                  <Flame size={16} style={{ color: '#ff9800' }} />
                 </div>
-                <div className="bento-tile-val">{duration} Days</div>
-                <div className="bento-tile-sub">Fixed Period</div>
+                <div className="bento-tile-val">{number(balances.burned || stakedBits)} Bits</div>
+                <div className="bento-tile-sub">Burned via Protocol Rule</div>
               </div>
 
               <div className="bento-tile">
                 <div className="bento-tile-header">
-                  <span className="bento-tile-label">PRINCIPAL RETURN</span>
-                  <TokenMark size={18} />
+                  <span className="bento-tile-label">REWARDS PAID OUT</span>
+                  <BadgeCheck size={16} style={{ color: 'var(--neon-green)' }} />
                 </div>
-                <div className="bento-tile-val">{existingPrincipalReturnTokens.toFixed(4)} Bitnoir</div>
-                <div className="bento-tile-sub">{money(existingPrincipalReturnUsd)}</div>
+                <div className="bento-tile-val">{(balances.claimed || 0).toFixed(4)} Bitnoir</div>
+                <div className="bento-tile-sub">{money((balances.claimed || 0) * BITNOIR_REFERENCE_PRICE)} Claimed & Settled</div>
               </div>
 
               <div className="bento-tile bento-highlight">
                 <div className="bento-tile-header">
-                  <span className="bento-tile-label highlight">TOTAL RETURN</span>
+                  <span className="bento-tile-label highlight">TOTAL MATURITY RETURN</span>
                   <span className="bento-status-tag">Guaranteed</span>
                 </div>
                 <div className="bento-tile-val highlight">{existingTotalReturnTokens.toFixed(4)} Bitnoir</div>
-                <div className="bento-tile-sub highlight">{money(existingTotalReturnUsd)}</div>
+                <div className="bento-tile-sub highlight">{money(existingTotalReturnUsd)} Principal + Yield</div>
               </div>
             </div>
+
+            {/* MULTI-POSITION BREAKDOWN (LISTS INDEPENDENT TERMS CLEANLY) */}
+            {activePositions.length > 0 && (
+              <div className="active-positions-breakdown">
+                <div className="positions-breakdown-head">
+                  <span className="positions-breakdown-title">
+                    <Layers3 size={15} /> Active Lock Positions ({activePositions.length})
+                  </span>
+                  <span className="positions-breakdown-rule">
+                    1 Bitnoir = 500 Bits Burned on Claim · Rule-Based Hourly Emissions
+                  </span>
+                </div>
+                <div className="positions-breakdown-list">
+                  {activePositions.map((pos, idx) => {
+                    const posRate = pos.rewardRate || rewardRateForDays(pos.lockupDays);
+                    const posPrincipalTokens = (pos.stakedBits * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE;
+                    const posRewardTokens = (pos.stakedBits * USDT_PER_BITS * posRate) / BITNOIR_REFERENCE_PRICE;
+                    const posTotalTokens = posPrincipalTokens + posRewardTokens;
+                    const posPerHour = calculatePositionPerHour(pos.stakedBits, pos.lockupDays, posRate);
+                    const isMatured = new Date(pos.unlocksAt).getTime() <= Date.now();
+
+                    return (
+                      <div key={pos.id || idx} className="position-item-card">
+                        <div className="pos-item-col">
+                          <span className="pos-item-badge">Position #{idx + 1}</span>
+                          <span className="pos-item-term">{pos.lockupDays} Days Lock</span>
+                        </div>
+                        <div className="pos-item-col">
+                          <span className="pos-item-label">Allocation</span>
+                          <span className="pos-item-value">{number(pos.stakedBits)} Bits</span>
+                        </div>
+                        <div className="pos-item-col">
+                          <span className="pos-item-label">Hourly Emission</span>
+                          <span className="pos-item-value text-green">+{posPerHour.toFixed(4)}/hr</span>
+                        </div>
+                        <div className="pos-item-col">
+                          <span className="pos-item-label">Maturity Return</span>
+                          <span className="pos-item-value">{posTotalTokens.toFixed(4)} Bitnoir</span>
+                        </div>
+                        <div className="pos-item-col" style={{ textAlign: 'right' }}>
+                          <span className={`pos-status-badge ${isMatured ? 'matured' : 'active'}`}>
+                            {isMatured ? 'Matured' : `Unlocks ${shortDate(pos.unlocksAt)}`}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="active-bento-footer">
               <div className="active-bento-note">
                 <span className="live-pulse-dot" />
-                <span>Yield actively streaming · Rewards claimable anytime</span>
+                <span>
+                  {isTermFinished
+                    ? 'Lock term completed · Final settlement unlocked'
+                    : 'Yield actively streaming · Rewards claimable anytime'}
+                </span>
               </div>
               <button
                 type="button"
-                className={`bento-action-btn ${isPositioningOpen ? 'active' : ''}`}
-                onClick={() => setIsPositioningOpen((prev) => !prev)}
+                className="bento-action-btn"
+                onClick={() => setIsPositionModalOpen(true)}
               >
-                {isPositioningOpen ? (
-                  <>
-                    <span>Close Calculator</span>
-                    <X size={14} />
-                  </>
-                ) : (
-                  <>
-                    <Plus size={14} />
-                    <span>Increase Position</span>
-                  </>
-                )}
+                <Plus size={14} />
+                <span>Increase Position</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* 3. STREAMLINED INSTITUTIONAL POSITIONING CONSOLE & CALCULATOR */}
-        {(!isStakingActive || isPositioningOpen) && (
-          <div className="staking-positioning-console">
-            <div className="console-head-row">
-              <div>
-                <h3 className="console-heading">
-                  {isStakingActive ? 'Increase Staking Position' : 'Open Staking Position'}
-                </h3>
-                <p className="console-subheading">
-                  {isStakingActive
-                    ? 'Commit additional Bits to your lock. New tokens merge into your position with proportional Bitnoir return.'
-                    : 'Commit Bits to earn continuous streaming Bitnoir rewards plus 100% principal return at maturity.'}
-                </p>
-              </div>
-              {isStakingActive && (
-                <button
-                  type="button"
-                  className="console-close-icon"
-                  onClick={() => setIsPositioningOpen(false)}
-                  title="Close calculator"
-                >
-                  <X size={18} />
-                </button>
-              )}
+        {/* READY / NON-ACTIVE STATE HERO CARD */}
+        {!isStakingActive && (
+          <div className="staking-empty-hero-card">
+            <div className="staking-empty-info">
+              <h3>Proof-of-Burn Staking Terminal</h3>
+              <p>Commit Bits to activate continuous streaming Bitnoir rewards and 100% principal return at maturity.</p>
             </div>
-
-            <div className="console-body-grid">
-              {/* LEFT: CONTROLS */}
-              <div className="console-inputs-col">
-                {/* 1. LOCK DURATION */}
-                <div className="console-field-block">
-                  <label className="console-field-label">Select Lock Duration</label>
-                  <div className="term-selector-grid">
-                    {[
-                      { days: 30, rate: 12 },
-                      { days: 45, rate: 20 },
-                      { days: 60, rate: 28 },
-                      { days: 90, rate: 60 },
-                    ].map((item) => (
-                      <button
-                        key={item.days}
-                        type="button"
-                        className={`term-card-btn ${duration === item.days ? 'selected' : ''}`}
-                        onClick={() => setDuration(item.days)}
-                      >
-                        <span className="term-days">{item.days} Days</span>
-                        <span className="term-yield">+{item.rate}% Yield</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 2. STAKE AMOUNT */}
-                <div className="console-field-block">
-                  <div className="console-field-between">
-                    <label className="console-field-label">
-                      {isStakingActive ? 'Additional Stake Amount' : 'Stake Amount'}
-                    </label>
-                    <div className="console-avail-balance">
-                      Available: <strong>{number(purchasedBits)} Bits</strong>
-                      <button
-                        type="button"
-                        className="quick-max-link"
-                        onClick={() => setStakeAmount(String(purchasedBits))}
-                      >
-                        MAX
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="modern-stake-input-box">
-                    <div className="input-with-symbol">
-                      <BitsMark size={26} />
-                      <input
-                        type="number"
-                        min="0"
-                        max={purchasedBits}
-                        placeholder="0"
-                        className="modern-numeric-input"
-                        value={stakeAmount}
-                        onChange={(e) => setStakeAmount(e.target.value)}
-                      />
-                      <span className="modern-input-ticker">Bits</span>
-                    </div>
-                    <div className="modern-input-subline">
-                      <span>≈ {money(numericStake * USDT_PER_BITS)} USD</span>
-                      <div className="preset-ratio-pills">
-                        {[0.25, 0.5, 0.75, 1.0].map((ratio) => (
-                          <button
-                            key={ratio}
-                            type="button"
-                            className="preset-ratio-pill"
-                            onClick={() => setStakeAmount(String(Math.floor(purchasedBits * ratio)))}
-                          >
-                            {ratio === 1.0 ? 'MAX' : `${ratio * 100}%`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* RIGHT: CLEAN RECEIPT & ACTION */}
-              <div className="console-receipt-col">
-                <div className="institutional-receipt-card">
-                  <div className="receipt-title-row">
-                    <span className="receipt-badge">ESTIMATED POSITION RECEIPT</span>
-                    <span className="receipt-term-tag">{duration} Days · +{(rewardRate * 100).toFixed(0)}%</span>
-                  </div>
-
-                  <div className="receipt-rows">
-                    <div className="receipt-row">
-                      <span className="receipt-lbl">Stake Commitment</span>
-                      <span className="receipt-val">
-                        {number(numericStake)} Bits <span className="receipt-dim">({money(newPrincipalReturnUsd)})</span>
-                      </span>
-                    </div>
-
-                    <div className="receipt-row">
-                      <span className="receipt-lbl">Principal Return</span>
-                      <span className="receipt-val">
-                        <TokenMark size={16} />
-                        {newPrincipalReturnTokens.toFixed(4)} Bitnoir
-                      </span>
-                    </div>
-
-                    <div className="receipt-row">
-                      <span className="receipt-lbl">Term Yield (+{(rewardRate * 100).toFixed(0)}%)</span>
-                      <span className="receipt-val text-green">
-                        +{newRewardTokens.toFixed(4)} Bitnoir
-                      </span>
-                    </div>
-
-                    <div className="receipt-divider" />
-
-                    <div className="receipt-row total-highlight">
-                      <div className="receipt-total-label-wrap">
-                        <span className="receipt-total-title">Total Return at Maturity</span>
-                        <span className="receipt-total-fiat">≈ {money(newTotalReturnUsd)} USD</span>
-                      </div>
-                      <div className="receipt-total-figure">
-                        <TokenMark size={22} />
-                        <span className="receipt-total-num">{newTotalReturnTokens.toFixed(4)}</span>
-                        <span className="receipt-total-unit">Bitnoir</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {isStakingActive && numericStake > 0 && (
-                    <div className="receipt-combined-note">
-                      Combined Active: <strong>{number(combinedBits)} Bits</strong> → <strong>{combinedTotalReturnTokens.toFixed(4)} Bitnoir</strong> ({money(combinedTotalReturnUsd)})
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    className="clean-stake-confirm-btn"
-                    disabled={stake.isPending || numericStake <= 0 || numericStake > purchasedBits}
-                    onClick={handleStake}
-                  >
-                    {stake.isPending ? (
-                      'Processing Staking Order…'
-                    ) : numericStake <= 0 ? (
-                      'Enter Bits to Stake'
-                    ) : numericStake > purchasedBits ? (
-                      'Insufficient Bits Balance'
-                    ) : isStakingActive ? (
-                      <>Increase Position (+{number(numericStake)} Bits) <ArrowRight size={16} /></>
-                    ) : (
-                      <>Confirm Stake & Lock {number(numericStake)} Bits <ArrowRight size={16} /></>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
+            <button
+              type="button"
+              className="clean-stake-confirm-btn"
+              style={{ width: 'auto', minWidth: 220 }}
+              onClick={() => setIsPositionModalOpen(true)}
+            >
+              <Plus size={16} />
+              <span>Open Staking Position</span>
+            </button>
           </div>
         )}
       </div>
 
       {/* MODALS */}
+      <StakingPositionModal
+        open={isPositionModalOpen}
+        onClose={() => setIsPositionModalOpen(false)}
+        isStakingActive={isStakingActive}
+        purchasedBits={purchasedBits}
+        stakedBits={stakedBits}
+        activePositions={activePositions}
+        existingPrincipalReturnTokens={existingPrincipalReturnTokens}
+        existingPrincipalReturnUsd={existingPrincipalReturnUsd}
+        existingTotalReturnTokens={existingTotalReturnTokens}
+        existingTotalReturnUsd={existingTotalReturnUsd}
+        duration={duration}
+        setDuration={setDuration}
+        onStakeSuccess={() => {
+          void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
+          void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
+        }}
+        notify={notify}
+      />
       <StakingGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
       <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} />
       {notice}

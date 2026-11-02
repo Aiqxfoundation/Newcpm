@@ -39,7 +39,7 @@ export function bitnoirApiPlugin(): Plugin {
     balances: {
       purchased: 5000,      // 5,000 Bits ($500 value) available for staking
       staked: 10000,        // 10,000 Bits locked in active staking position
-      burned: 10000,        // 10,000 Bits burned
+      burned: 12000,        // 10,000 Bits staked + 2,000 Bits burned for claimed rewards (1 Bitnoir = 500 Bits)
       claimable: 0.1600,    // 0.16 Bitnoir tokens ($8.00 at $50 reference price - ready for withdrawal/claim!)
       claimed: 0.0400,      // 0.04 Bitnoir tokens previously claimed ($2.00)
       swapAvailable: 0,
@@ -55,6 +55,7 @@ export function bitnoirApiPlugin(): Plugin {
     lockupDays: number;
     rewardRate: number;
     accruedReward: number;
+    claimedReward?: number;
     principalReturnTokens: number;
     createdAt: string;
     unlocksAt: string;
@@ -64,8 +65,9 @@ export function bitnoirApiPlugin(): Plugin {
       id: 1,
       stakedBits: 10000,
       lockupDays: 60,
-      rewardRate: 0.16,
+      rewardRate: 0.28,
       accruedReward: 0.1600,
+      claimedReward: 0.0400,
       principalReturnTokens: 20.0,
       createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
       unlocksAt: new Date(Date.now() + 46 * 86400000).toISOString(),
@@ -318,10 +320,16 @@ export function bitnoirApiPlugin(): Plugin {
         return sendJson(res, 400, { error: 'Lockup duration must be between 30 and 90 days.' });
       }
 
-      // Explicit reward rate
-      const rate = days === 30 ? 0.08 : days === 60 ? 0.16 : days >= 90 ? 0.28 : 0.08 + ((days - 30) / 60) * 0.20;
+      // Exact mathematical yield curve (30d = 12%, 60d = 28%, 90d = 60%)
+      const rate = days <= 30
+        ? 0.12
+        : days >= 90
+        ? 0.60
+        : days <= 60
+        ? 0.12 + ((days - 30) / 30) * (0.28 - 0.12)
+        : 0.28 + ((days - 60) / 30) * (0.60 - 0.28);
       
-      // Burning mechanism: Staked Bits are permanently burned
+      // Burning mechanism: Staked Bits are permanently committed to protocol engine
       userAccount.balances.purchased -= amount;
       userAccount.balances.staked += amount;
       userAccount.balances.burned = (userAccount.balances.burned || 0) + amount;
@@ -330,60 +338,105 @@ export function bitnoirApiPlugin(): Plugin {
       const principalUsdtEquivalent = amount * USDT_PER_BITS;
       const principalTokens = principalUsdtEquivalent / BITNOIR_REFERENCE_PRICE;
 
-      const position = {
-        id: nextPositionId++,
-        stakedBits: amount,
-        lockupDays: days,
-        rewardRate: Number(rate.toFixed(4)),
-        accruedReward: 0,
-        principalReturnTokens: Number(principalTokens.toFixed(4)),
-        createdAt: new Date().toISOString(),
-        unlocksAt: new Date(Date.now() + days * 86400000).toISOString(),
-        status: 'active' as const,
-      };
+      // Check if user has an existing active position with the same term length
+      const existingSameTerm = stakingPositions.find((p) => p.status === 'active' && p.lockupDays === days);
 
-      stakingPositions.unshift(position);
+      let position;
+      if (existingSameTerm) {
+        // Increase existing position under same term
+        existingSameTerm.stakedBits += amount;
+        existingSameTerm.principalReturnTokens = Number(((existingSameTerm.stakedBits * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE).toFixed(4));
+        position = existingSameTerm;
 
-      activityList.unshift({
-        id: Date.now(),
-        kind: 'stake',
-        title: 'Bits Staked & Burned',
-        detail: `${amount.toLocaleString()} Bits burned permanently into a ${days}-day staking term at ${(rate * 100).toFixed(0)}% reward rate.`,
-        createdAt: new Date().toISOString(),
-      });
+        activityList.unshift({
+          id: Date.now(),
+          kind: 'stake',
+          title: 'Position Increased & Bits Committed',
+          detail: `Added ${amount.toLocaleString()} Bits to active ${days}-day position. Combined allocation: ${existingSameTerm.stakedBits.toLocaleString()} Bits.`,
+          createdAt: new Date().toISOString(),
+        });
+      } else {
+        // Create independent position (e.g. if 90 days exists and user stakes for 30 days, 30 days runs independently)
+        position = {
+          id: nextPositionId++,
+          stakedBits: amount,
+          lockupDays: days,
+          rewardRate: Number(rate.toFixed(4)),
+          accruedReward: 0,
+          claimedReward: 0,
+          principalReturnTokens: Number(principalTokens.toFixed(4)),
+          createdAt: new Date().toISOString(),
+          unlocksAt: new Date(Date.now() + days * 86400000).toISOString(),
+          status: 'active' as const,
+        };
+        stakingPositions.unshift(position);
+
+        activityList.unshift({
+          id: Date.now(),
+          kind: 'stake',
+          title: 'New Staking Position Opened',
+          detail: `${amount.toLocaleString()} Bits committed into independent ${days}-day term at ${(rate * 100).toFixed(1)}% yield.`,
+          createdAt: new Date().toISOString(),
+        });
+      }
 
       return sendJson(res, 200, {
         ...userAccount,
         position,
+        stakingPositions,
       });
     }
 
     // Claim farming rewards endpoint
     if (url === '/api/accounts/me/claim' && req.method === 'POST') {
       const claimable = userAccount.balances.claimable;
-      const claimableUsdtValue = claimable * BITNOIR_REFERENCE_PRICE;
 
-      if (claimableUsdtValue < MIN_CLAIM_USDT) {
+      // Check if user has an active position and whether the lock term has completed
+      const activePositionsList = stakingPositions.filter((p) => p.status === 'active');
+      const isAnyTermFinished = activePositionsList.some((p) => new Date(p.unlocksAt).getTime() <= Date.now());
+
+      // If lock term is finished, the threshold is waived completely (users can claim less than 0.04 Bitnoir)
+      if (!isAnyTermFinished && claimable < MIN_CLAIM_BITNOIR) {
         return sendJson(res, 400, {
-          error: `Minimum claim threshold is $${MIN_CLAIM_USDT.toFixed(2)} worth of Bitnoir (${MIN_CLAIM_BITNOIR} BITS). You have $${claimableUsdtValue.toFixed(2)}.`,
+          error: `Minimum mid-term claim threshold is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir. Full balance is claimable once lock term finishes.`,
         });
       }
 
-      userAccount.balances.claimed += claimable;
+      if (claimable <= 0) {
+        return sendJson(res, 400, {
+          error: 'No claimable Bitnoir available at this time.',
+        });
+      }
+
+      // Proof-of-Burn Settlement: 1 Bitnoir = 500 Bits (1 Bitnoir = $50, 1 Bits = $0.10)
+      const burnedBitsForReward = Math.round((claimable * BITNOIR_REFERENCE_PRICE) / USDT_PER_BITS);
+
+      userAccount.balances.claimed = (userAccount.balances.claimed || 0) + claimable;
       userAccount.balances.claimable = 0;
+      userAccount.balances.burned = (userAccount.balances.burned || 0) + burnedBitsForReward;
+
+      // Record claimed rewards on active positions
+      activePositionsList.forEach((pos) => {
+        pos.claimedReward = (pos.claimedReward || 0) + (claimable / Math.max(1, activePositionsList.length));
+        if (new Date(pos.unlocksAt).getTime() <= Date.now()) {
+          pos.status = 'matured';
+        }
+      });
 
       activityList.unshift({
         id: Date.now(),
         kind: 'claim',
-        title: 'Farming Rewards Claimed',
-        detail: `Successfully claimed ${claimable.toFixed(4)} Bitnoir tokens ($${claimableUsdtValue.toFixed(2)} reference value).`,
+        title: 'Proof-of-Burn Settlement Claimed',
+        detail: `Claimed ${claimable.toFixed(4)} Bitnoir tokens. Protocol burned ${burnedBitsForReward.toLocaleString()} Bits per burn rule.`,
         createdAt: new Date().toISOString(),
       });
 
       return sendJson(res, 200, {
         claimedAmount: claimable,
+        burnedBitsSettled: burnedBitsForReward,
         balances: userAccount.balances,
-        message: `Claimed ${claimable.toFixed(4)} Bitnoir tokens.`,
+        stakingPositions,
+        message: `Claimed ${claimable.toFixed(4)} Bitnoir tokens. ${burnedBitsForReward.toLocaleString()} Bits burned.`,
       });
     }
 
@@ -468,9 +521,9 @@ export function bitnoirApiPlugin(): Plugin {
       let amountUsd = 0;
       if (asset === 'bitnoir') {
         amountUsd = amount * BITNOIR_REFERENCE_PRICE;
-        if (amountUsd < MIN_CLAIM_USDT) {
+        if (amount < MIN_CLAIM_BITNOIR) {
           return sendJson(res, 400, {
-            error: `Minimum withdrawal value is $${MIN_CLAIM_USDT.toFixed(2)} USD (${MIN_CLAIM_BITNOIR} BITS).`,
+            error: `Minimum withdrawal is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir.`,
           });
         }
         if (amount > (userAccount.balances.claimable + userAccount.balances.claimed)) {
