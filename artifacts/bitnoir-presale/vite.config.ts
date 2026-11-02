@@ -13,7 +13,7 @@ if (!Number.isInteger(port) || port <= 0 || port > 65535) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH ?? '/';
+const basePath = process.env.BASE_PATH || '/';
 
 export default defineConfig({
   envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
@@ -22,10 +22,10 @@ export default defineConfig({
     bitnoirApiPlugin(),
     react(),
     tailwindcss({ optimize: true }),
-    ...(process.env.NODE_ENV !== 'production' ? [runtimeErrorOverlay()] : []),
     ...(process.env.NODE_ENV !== 'production' &&
     process.env.REPL_ID !== undefined
       ? [
+          runtimeErrorOverlay(),
           await import('@replit/vite-plugin-cartographer').then((m) =>
             m.cartographer({
               root: path.resolve(import.meta.dirname, '..'),
@@ -59,6 +59,7 @@ export default defineConfig({
     strictPort: true,
     host: '0.0.0.0',
     allowedHosts: true,
+    hmr: process.env.DISABLE_HMR === 'true' ? false : undefined,
     fs: {
       strict: false,
     },
