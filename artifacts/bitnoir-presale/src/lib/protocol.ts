@@ -4,15 +4,18 @@ import type { UserAccount } from '@workspace/api-client-react';
  * Asset model
  * - USDT: what members deposit (on-chain stablecoin).
  * - Bits: non-transferable internal points. 1 USDT = 10 Bits. Used only to open stakes; burned when staked.
- * - Bitnoir (BNR): the real token. Earned as staking rewards and returned as principal at maturity.
+ * - Bitnoir: the real token. Earned as staking rewards and returned as principal at maturity.
  */
-export const BNR_PRICE = 50;
+export const BITNOIR_PRICE = 50;
+export const BNR_PRICE = BITNOIR_PRICE;
 export const BITS_PRICE = 0.1;
 export const BITS_PER_USDT = 10;
 export const MIN_CLAIM_USD = 2;
-export const MIN_CLAIM_BNR = MIN_CLAIM_USD / BNR_PRICE;
+export const MIN_CLAIM_BITNOIR = MIN_CLAIM_USD / BITNOIR_PRICE;
+export const MIN_CLAIM_BNR = MIN_CLAIM_BITNOIR;
 export const MAX_SUPPLY = 21_000_000;
-export const BNR = 'BNR';
+export const BITNOIR = 'Bitnoir';
+export const BNR = 'Bitnoir';
 
 export const TERMS = [
   { days: 30, rate: 0.08 },
