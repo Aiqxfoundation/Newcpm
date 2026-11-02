@@ -241,8 +241,8 @@ export function bitnoirApiPlugin(): Plugin {
         totalTokensSold: totalSold,
         publicSaleSupply: 8400000,
         allocations: [
-          { name: 'Public Sale', percent: 40, tokens: 8400000 },
-          { name: 'Staking & Yield Reserve', percent: 20, tokens: 4200000 },
+          { name: 'Staking & Burn Allocation', percent: 40, tokens: 8400000 },
+          { name: 'Node Mining (Network Mainnet Live)', percent: 20, tokens: 4200000 },
           { name: 'CEX Listing & Liquidity', percent: 21, tokens: 4410000 },
           { name: 'Market Making & Stability', percent: 11, tokens: 2310000 },
           { name: 'Airdrop & Ecosystem Growth', percent: 8, tokens: 1680000 },
@@ -578,24 +578,87 @@ export function bitnoirApiPlugin(): Plugin {
       });
     }
 
-    // Dedicated Mining Pool stats
-    if (url === '/api/pool/stats' && req.method === 'GET') {
-      const totalReserve = 4200000; // 20% Staking Reserve
-      const totalDistributed = 342850;
+    // Global Protocol Statistics & Network Metrics (/api/statistics, /api/statics, /api/pool/stats)
+    if ((url === '/api/statistics' || url === '/api/statics' || url === '/api/pool/stats') && req.method === 'GET') {
+      const baselineGlobalBitsStaked = 14850000;
+      const baselineGlobalBitnoirClaimed = 18420.5000;
+      const baselineGlobalBurnedBits = 24062330;
+      const baselineGlobalCommittedBits = 28650000;
+      const baselineActiveStakers = 1421;
+      const totalUsers = 3842;
+
+      const totalBitsStaked = baselineGlobalBitsStaked + userAccount.balances.staked;
+      const totalBitnoirRewardsClaimed = Number((baselineGlobalBitnoirClaimed + (userAccount.balances.claimed || 0)).toFixed(4));
+      const totalAmountBurnedBits = baselineGlobalBurnedBits + (userAccount.balances.burned || 0);
+      const totalCommittedBits = baselineGlobalCommittedBits + userAccount.balances.staked;
+
+      const totalReserve = 4200000; // 20% Staking & Yield Reserve
+      const totalDistributed = Number((342850.2 + (userAccount.balances.claimed || 0)).toFixed(1));
+      const availablePoolBalance = Number((totalReserve - totalDistributed).toFixed(1));
       const userStaked = userAccount.balances.staked;
-      const totalPoolStaked = 1420000;
-      const userSharePercent = Number(((userStaked / totalPoolStaked) * 100).toFixed(2));
+      const userSharePercent = totalBitsStaked > 0 ? Number(((userStaked / totalBitsStaked) * 100).toFixed(4)) : 0;
 
       return sendJson(res, 200, {
+        // Overall Stakers & Users Aggregates
+        totalBitsStaked,
+        totalBitsStakedUsd: totalBitsStaked * USDT_PER_BITS,
+        totalBitnoirRewardsClaimed,
+        totalBitnoirRewardsClaimedUsd: Number((totalBitnoirRewardsClaimed * BITNOIR_REFERENCE_PRICE).toFixed(2)),
+        totalAmountBurnedBits,
+        totalAmountBurnedBitsUsd: totalAmountBurnedBits * USDT_PER_BITS,
+        totalCommittedBits,
+        totalCommittedBitsUsd: totalCommittedBits * USDT_PER_BITS,
+        totalUsers,
+        activeStakers: baselineActiveStakers + (userStaked > 0 ? 1 : 0),
+        averageStakePerUser: Math.round(totalBitsStaked / (baselineActiveStakers + (userStaked > 0 ? 1 : 0))),
+
+        // Total Share Of Bitnoir Token (21,000,000 Hard Cap)
+        hardCapSupply: 21000000,
+        stakingBurnTokens: 8400000,
+        stakingBurnPercent: 40,
+        nodeMiningTokens: 4200000,
+        nodeMiningPercent: 20,
+        cexLiquidityTokens: 4410000,
+        cexLiquidityPercent: 21,
+        stabilityTokens: 2310000,
+        stabilityPercent: 11,
+        airdropTokens: 1680000,
+        airdropPercent: 8,
+
+        // Reserve Emissions & Staking Pool Health
         totalReserve,
         totalDistributed,
-        availablePoolBalance: totalReserve - totalDistributed,
+        availablePoolBalance,
         emissionRatePerHour: 12.4,
-        activeStakers: 1420,
-        totalPoolStaked,
+        reserveEmittedPercent: Number(((totalDistributed / totalReserve) * 100).toFixed(2)),
+
+        // User's Individual Network Position
         userStaked,
+        userClaimed: userAccount.balances.claimed || 0,
+        userBurned: userAccount.balances.burned || 0,
         userSharePercent,
+
+        // Protocol Pricing & Constants
         referencePrice: BITNOIR_REFERENCE_PRICE,
+        usdtPerBits: USDT_PER_BITS,
+        minClaimBitnoir: MIN_CLAIM_BITNOIR,
+
+        // Term Distribution Breakdown
+        termBreakdown: [
+          { termDays: 30, tier: 'Base Tier', rate: '12%', totalBits: 3260000, stakers: 412, sharePercent: 22 },
+          { termDays: 60, tier: 'Accelerated Tier', rate: '28%', totalBits: 6840000, stakers: 620, sharePercent: 46 },
+          { termDays: 90, tier: 'Maximum Tier', rate: '60%', totalBits: 4740000, stakers: 388, sharePercent: 32 },
+        ],
+
+        // Recent Global Staker & Burning Ledger
+        recentNetworkEvents: [
+          { id: 1, type: 'stake', title: 'Bits Committed to Staking', detail: '25,000 Bits locked into 90-Day Term (60% APY)', participant: 'Node_8f29', time: '3m ago', bits: 25000 },
+          { id: 2, type: 'claim', title: 'Proof-of-Burn Settlement', detail: '0.4200 Bitnoir claimed · 210 Bits burned', participant: 'Node_c14e', time: '9m ago', tokens: 0.42 },
+          { id: 3, type: 'stake', title: 'Position Increased', detail: '10,000 Bits added to active 60-Day Term', participant: 'Node_77aa', time: '18m ago', bits: 10000 },
+          { id: 4, type: 'burn', title: 'Protocol Proof-of-Burn', detail: '500 Bits permanently burned for emission dispatch', participant: 'System_Burn', time: '31m ago', bits: 500 },
+          { id: 5, type: 'stake', title: 'New Staker Joined', detail: '5,000 Bits locked into 30-Day Base Term', participant: 'Node_993c', time: '44m ago', bits: 5000 },
+          { id: 6, type: 'claim', title: 'Farming Rewards Dispatched', detail: '0.1600 Bitnoir claimed ($8.00 USD value)', participant: 'Node_b10a', time: '1h ago', tokens: 0.16 },
+        ]
       });
     }
 

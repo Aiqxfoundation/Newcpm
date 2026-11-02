@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
   ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Gift, Globe2, HelpCircle, Info,
-  Landmark, Layers3, Link as LinkIcon, LockKeyhole, LogOut, Menu, Plus, QrCode, Radio, RefreshCw,
+  Landmark, Layers3, Link as LinkIcon, LockKeyhole, LogOut, Menu, PieChart, Plus, QrCode, Radio, RefreshCw,
   Search, Send, ShieldAlert, ShieldCheck, Sparkles, Timer, TrendingUp, Trophy, Users, Wallet, X,
 } from 'lucide-react';
 import {
@@ -888,7 +888,7 @@ const navMain = [
   { href: '/wallet', label: 'Wallet', description: 'Portfolio, balances & assets', icon: Wallet },
   { href: '/staking', label: 'Earn & Staking', description: '30–90d lockup & proof-of-burn', icon: Layers3 },
   { href: '/activity', label: 'Transactions', description: 'Complete ledger & audit history', icon: FileClock },
-  { href: '/pool', label: 'Mining Pool', description: 'Emission engine & reserve', icon: Coins },
+  { href: '/statistics', label: 'Statistics', description: 'Overall stakers & protocol metrics', icon: Globe2 },
   { href: '/referrals', label: 'Airdrop & Network', description: 'Reputation XP & invite link', icon: Gift },
   { href: '/docs', label: 'Whitepaper', description: 'Protocol specifications', icon: BookOpen },
 ];
@@ -938,20 +938,26 @@ function AppShell({
 
         <div className="side-caption">Ecosystem Navigation</div>
         <nav className="sidebar-nav">
-          {navMain.map(({ href, label, description, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              onClick={() => setMenuOpen(false)}
-              className={`side-link ${active === href || (href === '/wallet' && (active === '/deposit' || active.startsWith('/asset'))) ? 'active' : ''}`}
-            >
-              <Icon size={17} />
-              <span>
-                <strong>{label}</strong>
-                <small>{description}</small>
-              </span>
-            </Link>
-          ))}
+          {navMain.map(({ href, label, description, icon: Icon }) => {
+            const isStatActive = href === '/statistics' && (active === '/statistics' || active === '/statics' || active === '/pool');
+            const isWalletActive = href === '/wallet' && (active === '/deposit' || active.startsWith('/asset'));
+            const isActive = active === href || isStatActive || isWalletActive;
+
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setMenuOpen(false)}
+                className={`side-link ${isActive ? 'active' : ''}`}
+              >
+                <Icon size={17} />
+                <span>
+                  <strong>{label}</strong>
+                  <small>{description}</small>
+                </span>
+              </Link>
+            );
+          })}
         </nav>
 
         {admin && (
@@ -3035,150 +3041,1000 @@ function StakingPage({ account }: { account: UserAccount }) {
 
 
 // ---------------------------------------------------------------------------
-// 10. DEDICATED MINING POOL PAGE (/pool)
+// 10. PROTOCOL STATISTICS & STAKER METRICS GUIDE MODAL
 // ---------------------------------------------------------------------------
-function PoolPage({ account }: { account: UserAccount }) {
-  const [stats, setStats] = useState({
-    totalReserve: 4200000,
-    totalDistributed: 342850,
-    availablePoolBalance: 3857150,
-    emissionRatePerHour: 12.4,
-    activeStakers: 1420,
-    userSharePercent: 0.70,
-  });
+function StatisticsGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-dialog"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 640, maxHeight: '90vh', overflowY: 'auto' }}
+      >
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 12,
+                background: 'rgba(0, 245, 155, 0.12)',
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--neon-green)',
+              }}
+            >
+              <BookOpen size={20} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: 20, margin: 0, color: '#fff' }}>Protocol Statistics Guide & Details</h2>
+              <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--silver-dark)' }}>
+                Verifiable network metrics, tokenomics architecture, and mainnet node mining rules
+              </p>
+            </div>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
 
-  useEffect(() => {
-    fetch('/api/pool/stats')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data) setStats((prev) => ({ ...prev, ...data }));
-      })
-      .catch(() => undefined);
-  }, []);
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 16 }}>
+          {/* Rule 1: Bits Points vs Bitnoir Token */}
+          <div style={{ padding: 18, background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Globe2 size={16} color="var(--neon-green)" />
+              <strong style={{ color: '#fff', fontSize: 15 }}>1. Dual Asset Separation: Bits Points vs. Bitnoir Token</strong>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
+              • <strong>Bits Points</strong>: Internal protocol accounting points credited upon USDT deposits on BNB Smart Chain
+              (100 USDT = 1,000 Bits Points at $0.10 benchmark). Bits Points are committed and permanently burned into staking positions.<br />
+              • <strong>Bitnoir Token</strong>: The scarce cryptographic token hard-capped at 21,000,000 units. Valued at $50.00
+              accounting benchmark for rewards and principal redemptions upon term maturity.
+            </p>
+          </div>
 
-  const emissionDistributionPercentage = stats.totalReserve > 0 ? Math.min(100, (stats.totalDistributed / stats.totalReserve) * 100) : 0;
+          {/* Rule 2: 21M Tokenomics & Staking & Burn */}
+          <div style={{ padding: 18, background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Layers3 size={16} color="var(--token-orange)" />
+              <strong style={{ color: '#fff', fontSize: 15 }}>2. Tokenomics: Staking & Burn (40%) and Node Mining (20%)</strong>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
+              The 21,000,000 Bitnoir hard cap contains no public presale inflation:<br />
+              • <strong>40.0% (8,400,000 Bitnoir)</strong>: Staking & Burn Allocation — minted strictly as stakers lock Bits Points.<br />
+              • <strong>20.0% (4,200,000 Bitnoir)</strong>: Node Mining — dedicated to decentralized node operators once Network Mainnet is live.<br />
+              • <strong>21.0% (4,410,000 Bitnoir)</strong>: CEX Deep Liquidity orderbooks.<br />
+              • <strong>11.0% (2,310,000 Bitnoir)</strong>: Market Stability & Reserve.<br />
+              • <strong>8.0% (1,680,000 Bitnoir)</strong>: Ecosystem & Community Airdrop.
+            </p>
+          </div>
+
+          {/* Rule 3: Remaining Pool Share & Proof-of-Burn */}
+          <div style={{ padding: 18, background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Flame size={16} color="#ff6b6b" />
+              <strong style={{ color: '#fff', fontSize: 15 }}>3. Remaining Pool Share & Proof-of-Burn Deflation</strong>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
+              • <strong>Pool Share</strong>: Stakers continuously earn from the 4,200,000 Bitnoir yield reservoir. As rewards are distributed,
+              the remaining pool balance contracts, ensuring transparent verifiability.<br />
+              • <strong>Proof-of-Burn Ratio</strong>: When Bitnoir tokens are claimed, <strong>500 Bits Points are burned per 1 Bitnoir claimed</strong>
+              ($50.00 / $0.10). Every reward claim permanently tightens internal point supply.
+            </p>
+          </div>
+        </div>
+
+        <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', padding: '16px 24px', display: 'flex', justifyContent: 'flex-end' }}>
+          <button type="button" className="button button-primary" onClick={onClose} style={{ minHeight: 36, padding: '0 20px' }}>
+            Got It
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 10. TOKENOMICS SHARE OVERLAY MODAL (TOTAL SHARE OF BITNOIR TOKEN)
+// ---------------------------------------------------------------------------
+function TokenomicsShareModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-dialog"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 580, maxHeight: '88vh', overflowY: 'auto' }}
+      >
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 12,
+                background: 'rgba(0, 245, 155, 0.12)',
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--neon-green)',
+                border: '1px solid rgba(0, 245, 155, 0.25)',
+              }}
+            >
+              <PieChart size={20} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: 19, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>
+                Total Share of Bitnoir Token
+              </h2>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
+                21,000,000 Hard Cap · Verified Decentralized Allocation (No Public Sale)
+              </p>
+            </div>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 14 }}>
+          {/* Top Summary Card */}
+          <div
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.25) 100%)',
+              borderRadius: 12,
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+            }}
+          >
+            <div>
+              <span className="small-label" style={{ fontSize: 10, color: 'var(--silver-dark)' }}>
+                Fixed Hard Cap
+              </span>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: 'var(--token-orange)', marginTop: 2 }}>
+                21,000,000 Bitnoir
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <span className="small-label" style={{ fontSize: 10, color: 'var(--silver-dark)' }}>
+                Protocol Benchmark
+              </span>
+              <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: 'var(--neon-green)', marginTop: 2 }}>
+                $50.00 USD / Bitnoir
+              </div>
+            </div>
+          </div>
+
+          {/* Color Allocation Track */}
+          <div>
+            <div
+              style={{
+                height: 10,
+                borderRadius: 999,
+                display: 'flex',
+                overflow: 'hidden',
+                background: 'rgba(255, 255, 255, 0.05)',
+                marginBottom: 10,
+              }}
+            >
+              <div style={{ width: '40%', background: '#00f59b' }} title="Staking & Burn: 40% (8,400,000)" />
+              <div style={{ width: '20%', background: '#ff8b2f' }} title="Node Mining (Mainnet Live): 20% (4,200,000)" />
+              <div style={{ width: '21%', background: '#38bdf8' }} title="CEX Liquidity: 21% (4,410,000)" />
+              <div style={{ width: '11%', background: '#a855f7' }} title="Market Stability: 11% (2,310,000)" />
+              <div style={{ width: '8%', background: '#f5a623' }} title="Ecosystem & Airdrop: 8% (1,680,000)" />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--silver-dark)' }}>
+              <span>40% Staking & Burn · 20% Node Mining</span>
+              <span>21M Fixed Cap (No Presale)</span>
+            </div>
+          </div>
+
+          {/* The 5 Clean Allocation Rows */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* 1. Staking & Burn */}
+            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#00f59b' }} />
+                <div>
+                  <strong style={{ fontSize: 13, color: '#fff' }}>Staking & Burn Allocation</strong>
+                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Earned via Bits Points lockups & Proof-of-Burn</div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: '#00f59b' }}>
+                  40.0%
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>8,400,000 Bitnoir Tokens</div>
+              </div>
+            </div>
+
+            {/* 2. Node Mining (Network Mainnet Live) */}
+            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff8b2f' }} />
+                <div>
+                  <strong style={{ fontSize: 13, color: '#fff' }}>Node Mining (Network Mainnet Live)</strong>
+                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Decentralized node mining when network mainnet live</div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--token-orange)' }}>
+                  20.0%
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>4,200,000 Bitnoir Tokens</div>
+              </div>
+            </div>
+
+            {/* 3. CEX Deep Liquidity */}
+            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#38bdf8' }} />
+                <div>
+                  <strong style={{ fontSize: 13, color: '#fff' }}>CEX Deep Liquidity</strong>
+                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Tier-1 exchange listing orderbooks & market making</div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: '#38bdf8' }}>
+                  21.0%
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>4,410,000 Bitnoir Tokens</div>
+              </div>
+            </div>
+
+            {/* 4. Market Stability & Reserve */}
+            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#a855f7' }} />
+                <div>
+                  <strong style={{ fontSize: 13, color: '#fff' }}>Market Stability & Reserve</strong>
+                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Secondary market price stabilization reserve</div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: '#a855f7' }}>
+                  11.0%
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>2,310,000 Bitnoir Tokens</div>
+              </div>
+            </div>
+
+            {/* 5. Ecosystem & Airdrop */}
+            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f5a623' }} />
+                <div>
+                  <strong style={{ fontSize: 13, color: '#fff' }}>Ecosystem & Community Airdrop</strong>
+                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Community contributor & reputation XP rewards</div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: '#f5a623' }}>
+                  8.0%
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>1,680,000 Bitnoir Tokens</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Rule Note */}
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 8,
+              background: 'rgba(0, 245, 155, 0.04)',
+              border: '1px solid rgba(0, 245, 155, 0.15)',
+              fontSize: 12,
+              color: 'var(--silver-medium)',
+              lineHeight: 1.5,
+            }}
+          >
+            <strong style={{ color: '#fff' }}>Verifiable Deflationary Rule:</strong> When Bitnoir rewards are claimed,{' '}
+            <strong style={{ color: 'var(--neon-green)' }}>500 Bits Points are permanently destroyed</strong> per 1 Bitnoir claimed.
+            No public presale allocation exists.
+          </div>
+        </div>
+
+        <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end' }}>
+          <button type="button" className="button button-primary" onClick={onClose} style={{ minHeight: 36, padding: '0 20px', fontSize: 12 }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 9.5 PROTOCOL SPECIFICATIONS OVERLAY MODAL (MATCHING REFERENCE ARCHITECTURE)
+// ---------------------------------------------------------------------------
+function ProtocolSpecsModal({ open, onClose, stats }: { open: boolean; onClose: () => void; stats: any }) {
+  if (!open) return null;
+
+  const totalCap = stats.totalReserveCap || 4200000;
+  const distributed = stats.totalBitnoirDistributed || 342850;
+  const distributedPercent = ((distributed / totalCap) * 100).toFixed(2);
+  const remainingTokens = stats.remainingPoolShareTokens || (totalCap - distributed);
 
   return (
-    <AppShell active="/pool" admin={account.role === 'admin'}>
-      <div className="page-title-row">
-        <div>
-          <h1 className="page-title">Mining Pool & Emissions Engine</h1>
-          <p className="page-subtitle">
-            Verifiable supply statistics, continuous staking emission metrics, and real-time pool balance backed by the
-            4,200,000 BITS Staking & Yield Reserve.
-          </p>
+    <div
+      className="modal-backdrop"
+      onClick={onClose}
+      style={{
+        backdropFilter: 'blur(10px)',
+        background: 'rgba(5, 7, 12, 0.82)',
+        padding: '16px',
+        zIndex: 1000,
+      }}
+    >
+      <div
+        className="modal-card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 520,
+          width: '100%',
+          padding: 0,
+          overflow: 'hidden',
+          background: '#090d14',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: 22,
+          boxShadow: '0 24px 64px rgba(0, 0, 0, 0.75)',
+        }}
+      >
+        {/* Header matching mockup */}
+        <div style={{ padding: '28px 28px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div
+              style={{
+                color: '#ff8b2f',
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                marginBottom: 4,
+              }}
+            >
+              BITNOIR
+            </div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 28,
+                fontWeight: 800,
+                color: '#ffffff',
+                letterSpacing: '-0.02em',
+              }}
+            >
+              Protocol Specifications
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="modal-close-btn"
+            aria-label="Close modal"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              color: 'var(--silver-dark)',
+              display: 'grid',
+              placeItems: 'center',
+              cursor: 'pointer',
+              marginTop: 2,
+            }}
+          >
+            <X size={18} />
+          </button>
         </div>
-        <span className="status approved"><Radio size={14} /> Live Protocol Accounting</span>
-      </div>
 
-      <div className="pool-hero-banner">
-        <div className="eyebrow" style={{ marginBottom: 12 }}><span className="eyebrow-dot" />Algorithmic Staking Yield</div>
-        <h2 style={{ font: '700 32px var(--app-font-serif)', margin: '0 0 8px', color: '#fff' }}>
-          Reserve Emissions Status
-        </h2>
-        <p style={{ color: 'var(--silver-medium)', maxWidth: 640, margin: '0 0 24px', fontSize: 14 }}>
-          Bitnoir's emission rate is algorithmically capped to prevent inflation. Stakers receive proportional shares
-          of each hourly block emission based on active locked position size.
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-          <div>
-            <span className="small-label">Total Reserve Cap</span>
-            <div style={{ font: '700 24px var(--app-font-serif)', color: '#fff', marginTop: 4 }}>
-              {number(stats.totalReserve)} <small style={{ fontSize: 13 }}>BITS</small>
+        {/* Modal Body with 3 Cards */}
+        <div style={{ padding: '0 28px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Card 1: STAKING RESERVOIR */}
+          <div
+            style={{
+              background: '#0f141f',
+              border: '1px solid rgba(255, 255, 255, 0.07)',
+              borderRadius: 16,
+              padding: '20px 22px',
+            }}
+          >
+            <div
+              style={{
+                color: '#00f59b',
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                marginBottom: 8,
+              }}
+            >
+              STAKING RESERVOIR
             </div>
-            <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>20% of 21M hard cap</span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14 }}>
+              <span
+                style={{
+                  fontSize: 34,
+                  fontWeight: 800,
+                  color: '#ffffff',
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1,
+                }}
+              >
+                {number(totalCap)}
+              </span>
+              <span style={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>Total Cap</span>
+            </div>
+
+            {/* Progress bar */}
+            <div
+              style={{
+                height: 8,
+                background: 'rgba(255, 255, 255, 0.08)',
+                borderRadius: 9999,
+                overflow: 'hidden',
+                marginBottom: 10,
+              }}
+            >
+              <div
+                style={{
+                  width: `${Math.max(6, 100 - stats.remainingPoolSharePercent)}%`,
+                  height: '100%',
+                  background: '#00f59b',
+                  borderRadius: 9999,
+                }}
+              />
+            </div>
+
+            {/* Sub-values */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: 12,
+                fontWeight: 600,
+                flexWrap: 'wrap',
+                gap: 4,
+              }}
+            >
+              <span style={{ color: '#00f59b' }}>
+                {number(distributed)} Distributed ({distributedPercent}%)
+              </span>
+              <span style={{ color: '#38bdf8' }}>
+                {number(remainingTokens)} Remaining
+              </span>
+            </div>
           </div>
 
-          <div>
-            <span className="small-label">Distributed to Date</span>
-            <div style={{ font: '700 24px var(--app-font-serif)', color: 'var(--neon-green)', marginTop: 4 }}>
-              {number(stats.totalDistributed)} <small style={{ fontSize: 13 }}>BITS</small>
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>{emissionDistributionPercentage.toFixed(1)}% of reserve emitted</span>
-          </div>
-
-          <div>
-            <span className="small-label">Remaining Pool Balance</span>
-            <div style={{ font: '700 24px var(--app-font-serif)', color: '#fff', marginTop: 4 }}>
-              {number(stats.availablePoolBalance)} <small style={{ fontSize: 13 }}>BITS</small>
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Protected yield reservoir</span>
-          </div>
-
-          <div>
-            <span className="small-label">Current Emission Rate</span>
-            <div style={{ font: '700 24px var(--app-font-serif)', color: 'var(--neon-green)', marginTop: 4 }}>
-              {stats.emissionRatePerHour} BITS / hr
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Shared across {number(stats.activeStakers)} stakers</span>
-          </div>
-        </div>
-
-        <div className="progress-track" style={{ marginTop: 24, height: 8 }}>
-          <div className="progress-value" style={{ width: `${emissionDistributionPercentage}%` }} />
-        </div>
-      </div>
-
-      <div className="dashboard-grid">
-        <section className="panel content-card">
-          <div className="card-heading">
-            <div>
-              <h3>24-Hour Pool Emission Cadence</h3>
-              <p>Continuous emission blocks distributed to active staking nodes</p>
-            </div>
-            <BarChart3 size={18} color="var(--neon-green)" />
-          </div>
-
-          <div className="pool-bars">
-            {[45, 52, 60, 58, 64, 72, 68, 75, 82, 80, 88, 94].map((height, i) => (
-              <div className="pool-bar-item" key={i}>
-                <div className="pool-bar-pill" style={{ height: `${height}%` }} />
-                <span className="pool-bar-label">{`${(i + 1) * 2}h`}</span>
+          {/* Card 2 & 3: BURN RATE & EMISSION SIDE-BY-SIDE */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            {/* Left: BURN RATE */}
+            <div
+              style={{
+                background: 'rgba(255, 107, 107, 0.04)',
+                border: '1px solid rgba(255, 107, 107, 0.16)',
+                borderRadius: 16,
+                padding: '18px 20px',
+              }}
+            >
+              <div
+                style={{
+                  color: '#ff6b6b',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}
+              >
+                BURN RATE
               </div>
-            ))}
-          </div>
-
-          <div className="callout info" style={{ marginTop: 20 }}>
-            Pool rewards accrue continuously into your account balance. You can claim rewards at any time
-            once your accrued reward reaches at least $2.00 worth of Bitnoir.
-          </div>
-        </section>
-
-        <section className="panel content-card">
-          <div className="card-heading">
-            <div>
-              <h3>Your Pool Participation</h3>
-              <p>Calculated against total active protocol stake</p>
-            </div>
-            <Trophy size={18} color="var(--gold-bits)" />
-          </div>
-
-          <div style={{ display: 'grid', gap: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '1px solid var(--border-subtle)' }}>
-              <span style={{ color: 'var(--silver-dark)' }}>Your Active Stake</span>
-              <strong style={{ color: '#fff' }}>{number((account.balances as unknown as Record<string, number>)?.staked || 0)} Bits</strong>
+              <div
+                style={{
+                  fontSize: 30,
+                  fontWeight: 800,
+                  color: '#ff6b6b',
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1,
+                  marginBottom: 8,
+                }}
+              >
+                500 / 1
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>
+                Bits Points -&gt; Bitnoir
+              </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '1px solid var(--border-subtle)' }}>
-              <span style={{ color: 'var(--silver-dark)' }}>Your Pool Share</span>
-              <strong style={{ color: 'var(--neon-green)' }}>{stats.userSharePercent}%</strong>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '1px solid var(--border-subtle)' }}>
-              <span style={{ color: 'var(--silver-dark)' }}>Reference Valuation</span>
-              <strong style={{ color: '#fff' }}>${BITNOIR_REFERENCE_PRICE}.00 / BITS</strong>
+            {/* Right: EMISSION */}
+            <div
+              style={{
+                background: 'rgba(0, 245, 155, 0.04)',
+                border: '1px solid rgba(0, 245, 155, 0.16)',
+                borderRadius: 16,
+                padding: '18px 20px',
+              }}
+            >
+              <div
+                style={{
+                  color: '#00f59b',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
+                }}
+              >
+                EMISSION
+              </div>
+              <div
+                style={{
+                  fontSize: 30,
+                  fontWeight: 800,
+                  color: '#00f59b',
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1,
+                  marginBottom: 8,
+                }}
+              >
+                {stats.emissionRatePerHour || '12.4'} /h
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>
+                Continuous Velocity
+              </div>
             </div>
           </div>
 
-          <Link href="/staking" className="button button-primary" style={{ width: '100%', marginTop: 24 }}>
-            Increase Stake to Grow Pool Share <ArrowRight size={14} />
+          {/* Card 4: DEFLATIONARY COMMITMENTS */}
+          <div
+            style={{
+              background: '#0f141f',
+              border: '1px solid rgba(255, 255, 255, 0.07)',
+              borderRadius: 16,
+              padding: '20px 22px',
+            }}
+          >
+            <div
+              style={{
+                color: '#ff8b2f',
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                marginBottom: 12,
+              }}
+            >
+              DEFLATIONARY COMMITMENTS
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {/* Row 1: Protocol Hard Cap */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 0',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                }}
+              >
+                <span style={{ color: '#94a3b8', fontSize: 14 }}>Protocol Hard Cap</span>
+                <span style={{ color: '#ff8b2f', fontSize: 14, fontWeight: 700 }} className="mono">
+                  {number(stats.hardCapSupply || 21000000)} (Fixed)
+                </span>
+              </div>
+
+              {/* Row 2: Total Committed */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 0',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                }}
+              >
+                <span style={{ color: '#94a3b8', fontSize: 14 }}>Total Committed</span>
+                <span style={{ color: '#ffffff', fontSize: 14, fontWeight: 700 }} className="mono">
+                  {number(stats.totalCommittedBits || 28650000)} Bits
+                </span>
+              </div>
+
+              {/* Row 3: Total Burned */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 0',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                }}
+              >
+                <span style={{ color: '#94a3b8', fontSize: 14 }}>Total Burned</span>
+                <span style={{ color: '#ff6b6b', fontSize: 14, fontWeight: 700 }} className="mono">
+                  {number(stats.totalAmountBurnedBits || 24062250)} Bits
+                </span>
+              </div>
+
+              {/* Row 4: USD Destroyed */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 0',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                }}
+              >
+                <span style={{ color: '#94a3b8', fontSize: 14 }}>USD Destroyed</span>
+                <span style={{ color: '#ffaa33', fontSize: 14, fontWeight: 700 }} className="mono">
+                  {money(stats.totalAmountBurnedBitsUsd || 2406225)}
+                </span>
+              </div>
+
+              {/* Row 5: Verified Nodes */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 0 2px',
+                }}
+              >
+                <span style={{ color: '#94a3b8', fontSize: 14 }}>Verified Nodes</span>
+                <span style={{ color: '#00f59b', fontSize: 14, fontWeight: 700 }} className="mono">
+                  {number(stats.activeStakersCount || 1421)} Nodes
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Subtle, sleek footer actions */}
+        <div
+          style={{
+            borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+            padding: '14px 28px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: 'rgba(0, 0, 0, 0.25)',
+          }}
+        >
+          <Link
+            href="/staking"
+            onClick={onClose}
+            className="button button-primary"
+            style={{ minHeight: 36, padding: '0 18px', fontSize: 12 }}
+          >
+            <span>Enter Staking Terminal</span>
+            <ArrowRight size={13} />
           </Link>
-        </section>
+          <button
+            type="button"
+            className="clean-glass-btn"
+            onClick={onClose}
+            style={{ minHeight: 36, padding: '0 18px', fontSize: 12 }}
+          >
+            Close
+          </button>
+        </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 10. CLEAN & PROFESSIONAL NETWORK STATISTICS PAGE (/statistics, /statics, /pool)
+// ---------------------------------------------------------------------------
+function StatisticsPage({ account }: { account: UserAccount }) {
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [tokenomicsOpen, setTokenomicsOpen] = useState(false);
+  const [specsOpen, setSpecsOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>(() => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+
+  const userStakedBits = (account.balances as unknown as Record<string, number>)?.staked || 0;
+  const userClaimedTokens = (account.balances as unknown as Record<string, number>)?.claimed || 0;
+  const userBurnedBits = (account.balances as unknown as Record<string, number>)?.burned || 0;
+
+  const [stats, setStats] = useState({
+    totalBitsStaked: 14840000 + userStakedBits,
+    totalBitsStakedUsd: (14840000 + userStakedBits) * USDT_PER_BITS,
+    totalBitnoirDistributed: Number((342850 + userClaimedTokens).toFixed(4)),
+    totalBitnoirDistributedUsd: Number(((342850 + userClaimedTokens) * BITNOIR_REFERENCE_PRICE).toFixed(2)),
+    totalReserveCap: 4200000,
+    remainingPoolShareTokens: Number((4200000 - (342850 + userClaimedTokens)).toFixed(4)),
+    remainingPoolSharePercent: Number((((4200000 - (342850 + userClaimedTokens)) / 4200000) * 100).toFixed(2)),
+    totalAmountBurnedBits: 24062250 + userBurnedBits,
+    totalAmountBurnedBitsUsd: (24062250 + userBurnedBits) * USDT_PER_BITS,
+    totalCommittedBits: 28650000 + userStakedBits,
+    totalCommittedBitsUsd: (28650000 + userStakedBits) * USDT_PER_BITS,
+    activeStakersCount: 1421 + (userStakedBits > 0 ? 1 : 0),
+    totalUsersCount: 3842,
+    emissionRatePerHour: 12.4,
+    hardCapSupply: 21000000,
+  });
+
+  const loadStats = () => {
+    setIsRefreshing(true);
+    fetch('/api/statistics')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) {
+          const distributed = Number(data.totalDistributed ?? (342850 + userClaimedTokens));
+          const reserve = Number(data.totalReserve ?? 4200000);
+          const remainingTokens = Number((reserve - distributed).toFixed(4));
+          const remainingPercent = Number(((remainingTokens / reserve) * 100).toFixed(2));
+
+          setStats((prev) => ({
+            ...prev,
+            totalBitsStaked: data.totalBitsStaked ?? prev.totalBitsStaked,
+            totalBitsStakedUsd: data.totalBitsStakedUsd ?? prev.totalBitsStakedUsd,
+            totalBitnoirDistributed: distributed,
+            totalBitnoirDistributedUsd: Number((distributed * BITNOIR_REFERENCE_PRICE).toFixed(2)),
+            totalReserveCap: reserve,
+            remainingPoolShareTokens: remainingTokens,
+            remainingPoolSharePercent: remainingPercent,
+            totalAmountBurnedBits: data.totalAmountBurnedBits ?? prev.totalAmountBurnedBits,
+            totalAmountBurnedBitsUsd: data.totalAmountBurnedBitsUsd ?? prev.totalAmountBurnedBitsUsd,
+            totalCommittedBits: data.totalCommittedBits ?? prev.totalCommittedBits,
+            totalCommittedBitsUsd: data.totalCommittedBitsUsd ?? prev.totalCommittedBitsUsd,
+            activeStakersCount: data.activeStakers ?? prev.activeStakersCount,
+            totalUsersCount: data.totalUsers ?? prev.totalUsersCount,
+            emissionRatePerHour: data.emissionRatePerHour ?? prev.emissionRatePerHour,
+          }));
+          setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        setTimeout(() => setIsRefreshing(false), 300);
+      });
+  };
+
+  useEffect(() => {
+    loadStats();
+    const interval = setInterval(loadStats, 20_000);
+    return () => clearInterval(interval);
+  }, [userStakedBits, userClaimedTokens, userBurnedBits]);
+
+  return (
+    <AppShell active="/statistics" admin={account.role === 'admin'}>
+      {/* 1. CLEAN TOP HEADER WITH GLOBE ICON, SUBTITLE & TOP OVERLAY BUTTONS */}
+      <div className="page-title-row" style={{ marginBottom: 20 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 12,
+                background: 'rgba(0, 245, 155, 0.1)',
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--neon-green)',
+                border: '1px solid rgba(0, 245, 155, 0.25)',
+              }}
+            >
+              <Globe2 size={22} />
+            </div>
+            <div>
+              <h1 className="page-title" style={{ margin: 0, fontSize: 24, letterSpacing: '-0.02em' }}>
+                Protocol Statistics
+              </h1>
+              <p className="page-subtitle" style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--silver-dark)' }}>
+                Real-time verified metrics for overall stakers, token burn velocity, and pool share
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* TOP BUTTONS: TOTAL SHARE (21M), PROTOCOL SPECS, GUIDE & RULES, REFRESH */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="clean-glass-btn"
+            onClick={() => setTokenomicsOpen(true)}
+            title="Total Share of Bitnoir Token (21M Allocation)"
+            style={{ borderColor: 'rgba(0, 245, 155, 0.35)', color: '#fff' }}
+          >
+            <PieChart size={14} color="var(--neon-green)" />
+            <span>Total Share (21M)</span>
+          </button>
+
+          <button
+            type="button"
+            className="clean-glass-btn"
+            onClick={() => setSpecsOpen(true)}
+            title="Protocol Specifications & Parameters"
+            style={{ borderColor: 'rgba(255, 139, 47, 0.35)', color: '#fff' }}
+          >
+            <Coins size={14} color="var(--token-orange)" />
+            <span>Protocol Specs</span>
+          </button>
+
+          <button
+            type="button"
+            className="clean-glass-btn"
+            onClick={() => setGuideOpen(true)}
+            title="Protocol Guidelines & Explanations"
+          >
+            <BookOpen size={14} />
+            <span>Guide & Rules</span>
+          </button>
+
+          <button
+            type="button"
+            className="clean-glass-btn"
+            onClick={loadStats}
+            disabled={isRefreshing}
+            title="Refresh Protocol Data"
+          >
+            <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
+            <span>{isRefreshing ? 'Syncing…' : `Synced ${lastUpdated}`}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. UNIFIED PROTOCOL HERO BANNER (MATCHING WALLET-PORTFOLIO-HERO ARCHITECTURE - SINGLE CLEAN LAYOUT) */}
+      <div className="stat-portfolio-hero" style={{ marginBottom: 20 }}>
+        <div className="stat-hero-top">
+          <div>
+            <div className="stat-hero-kicker">Bits Points Staked by Total Users</div>
+            <div className="stat-hero-main-val">
+              {number(stats.totalBitsStaked)}{' '}
+              <span style={{ fontSize: 16, color: 'var(--silver-dark)', fontWeight: 500 }}>Bits Points</span>
+            </div>
+            <div className="stat-hero-main-sub">
+              ≈ {money(stats.totalBitsStakedUsd)} USD Total Staked Capital
+            </div>
+          </div>
+
+          <div className="wallet-portfolio-status">
+            <span className="wallet-status-dot" />
+            <span>{number(stats.activeStakersCount)} Active Stakers · {number(stats.totalUsersCount)} Protocol Users</span>
+          </div>
+        </div>
+
+        {/* Integrated Core 4-Column Metric Strip (Architecture & Perfection Approach) */}
+        <div className="stat-metrics-strip-clean">
+          {/* Column 1: Bitnoir Tokens Distributed / Reserved */}
+          <div className="stat-strip-col">
+            <div className="stat-strip-label">Bitnoir Tokens Distributed / Reserved</div>
+            <div className="stat-strip-val" style={{ color: 'var(--token-orange)' }}>
+              {number(stats.totalBitnoirDistributed)}{' '}
+              <span style={{ fontSize: 12, color: 'var(--silver-dark)', fontWeight: 500 }}>
+                / {number(stats.totalReserveCap)} Bitnoir
+              </span>
+            </div>
+            <div className="stat-strip-sub">
+              ≈ {money(stats.totalBitnoirDistributedUsd)} USD distributed till now
+            </div>
+          </div>
+
+          {/* Column 2: Remaining Pool Share */}
+          <div className="stat-strip-col">
+            <div className="stat-strip-label">Remaining Reservoir Share</div>
+            <div className="stat-strip-val" style={{ color: '#38bdf8' }}>
+              {number(stats.remainingPoolShareTokens)} Bitnoir{' '}
+              <span style={{ fontSize: 12, color: 'var(--silver-dark)', fontWeight: 500 }}>
+                ({stats.remainingPoolSharePercent}%)
+              </span>
+            </div>
+            <div className="stat-strip-sub">
+              Algorithmic yield reservoir available for stakers
+            </div>
+          </div>
+
+          {/* Column 3: Total Amount Burned */}
+          <div className="stat-strip-col">
+            <div className="stat-strip-label">Total Amount Burned</div>
+            <div className="stat-strip-val" style={{ color: '#ff6b6b' }}>
+              {number(stats.totalAmountBurnedBits)}{' '}
+              <span style={{ fontSize: 12, color: 'var(--silver-dark)', fontWeight: 500 }}>Bits Points</span>
+            </div>
+            <div className="stat-strip-sub">
+              ≈ {money(stats.totalAmountBurnedBitsUsd)} USD permanently destroyed
+            </div>
+          </div>
+
+          {/* Column 4: Total Committed Bits Points */}
+          <div className="stat-strip-col">
+            <div className="stat-strip-label">Total Committed Bits Points</div>
+            <div className="stat-strip-val" style={{ color: 'var(--neon-green)' }}>
+              {number(stats.totalCommittedBits)}{' '}
+              <span style={{ fontSize: 12, color: 'var(--silver-dark)', fontWeight: 500 }}>Bits Points</span>
+            </div>
+            <div className="stat-strip-sub">
+              ≈ {money(stats.totalCommittedBitsUsd)} USD protocol commitment
+            </div>
+          </div>
+        </div>
+
+        {/* Integrated Progress Track */}
+        <div style={{ marginTop: 14 }}>
+          <div className="progress-track" style={{ height: 6, margin: '6px 0 8px' }}>
+            <div
+              className="progress-value"
+              style={{
+                width: `${100 - stats.remainingPoolSharePercent}%`,
+                background: 'linear-gradient(90deg, #00f59b 0%, #38bdf8 100%)',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--silver-dark)', flexWrap: 'wrap', gap: 6 }}>
+            <span>
+              Distributed Till Now: <strong>{(100 - stats.remainingPoolSharePercent).toFixed(2)}%</strong> ({number(stats.totalBitnoirDistributed)} Bitnoir Tokens)
+            </span>
+            <span style={{ color: '#38bdf8' }}>
+              Remaining Reservoir Share: <strong>{stats.remainingPoolSharePercent}%</strong> ({number(stats.remainingPoolShareTokens)} Bitnoir Tokens)
+            </span>
+          </div>
+        </div>
+
+        {/* Sleek Institutional Strip & Direct Terminal CTA */}
+        <div
+          style={{
+            marginTop: 18,
+            paddingTop: 16,
+            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--silver-dark)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ff6b6b' }} />
+              <span>Proof-of-Burn: <strong style={{ color: '#fff' }}>500 Bits Points / 1 Bitnoir</strong></span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--neon-green)' }} />
+              <span>Velocity: <strong style={{ color: 'var(--neon-green)' }}>{stats.emissionRatePerHour} Bitnoir / hr</strong></span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--token-orange)' }} />
+              <span>Hard Cap: <strong style={{ color: 'var(--token-orange)' }}>21M Bitnoir (Fixed)</strong></span>
+            </div>
+          </div>
+
+          <Link
+            href="/staking"
+            className="button button-primary"
+            style={{ minHeight: 36, padding: '0 18px', fontSize: 12 }}
+          >
+            <span>Enter Staking Terminal</span>
+            <ArrowRight size={13} />
+          </Link>
+        </div>
+      </div>
+
+      {/* 3. PROTOCOL OVERLAY MODALS */}
+      <StatisticsGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
+      <TokenomicsShareModal open={tokenomicsOpen} onClose={() => setTokenomicsOpen(false)} />
+      <ProtocolSpecsModal open={specsOpen} onClose={() => setSpecsOpen(false)} stats={stats} />
     </AppShell>
   );
 }
+
+// Backward-compatible alias for any residual routes/imports
+const PoolPage = StatisticsPage;
+
+// ---------------------------------------------------------------------------
+// 11. REPUTATION XP & REFERRAL NETWORK PORTAL (/referrals, /airdrop)
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // 11. REPUTATION XP & REFERRAL NETWORK PORTAL (/referrals, /airdrop)
@@ -3637,9 +4493,15 @@ function App() {
                 {() => <ProtectedGate>{(account) => <StakingPage account={account} />}</ProtectedGate>}
               </Route>
 
-              {/* MINING POOL */}
+              {/* PROTOCOL STATISTICS & STAKER METRICS (/statistics, /statics, /pool) */}
+              <Route path="/statistics">
+                {() => <ProtectedGate>{(account) => <StatisticsPage account={account} />}</ProtectedGate>}
+              </Route>
+              <Route path="/statics">
+                {() => <ProtectedGate>{(account) => <StatisticsPage account={account} />}</ProtectedGate>}
+              </Route>
               <Route path="/pool">
-                {() => <ProtectedGate>{(account) => <PoolPage account={account} />}</ProtectedGate>}
+                {() => <ProtectedGate>{(account) => <StatisticsPage account={account} />}</ProtectedGate>}
               </Route>
 
               {/* AIRDROP & REFERRAL NETWORK */}
