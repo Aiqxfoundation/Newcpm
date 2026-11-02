@@ -5,7 +5,15 @@ import { dateTime, type ActivityItem } from '@/lib/protocol';
 export function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <span className="brand">
-      <img src="/bits-logo-green.webp" alt="" width={28} height={28} />
+      <img
+        src="/asset-bitnoir-md.png"
+        srcSet="/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w"
+        sizes="28px"
+        alt="Bitnoir"
+        width={28}
+        height={28}
+        style={{ imageRendering: '-webkit-optimize-contrast' }}
+      />
       {!compact && <span>Bitnoir</span>}
     </span>
   );
@@ -21,14 +29,27 @@ export function AssetIcon({ asset, size = 36 }: { asset: AssetKind; size?: numbe
       </span>
     );
   }
+  const isBitnoir = asset === 'bnr';
+  const defaultSrc = isBitnoir ? '/asset-bitnoir-md.png' : '/asset-bits-md.png';
+  const srcSet = isBitnoir
+    ? '/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w'
+    : '/asset-bits-sm.png 64w, /asset-bits-md.png 128w';
+
   return (
     <img
       className="asset-icon"
-      src={asset === 'bnr' ? '/bits-logo-green.webp' : '/bitnoir-logo-orange.webp'}
-      alt=""
+      src={defaultSrc}
+      srcSet={srcSet}
+      sizes={`${size}px`}
+      alt={isBitnoir ? 'Bitnoir' : 'Bits'}
       width={size}
       height={size}
-      style={{ width: size, height: size }}
+      style={{
+        width: size,
+        height: size,
+        objectFit: 'contain',
+        imageRendering: '-webkit-optimize-contrast',
+      }}
     />
   );
 }
