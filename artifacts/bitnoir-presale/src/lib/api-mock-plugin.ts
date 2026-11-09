@@ -18,6 +18,7 @@ export function bitnoirApiPlugin(): Plugin {
     { id: 1, chain: 'bnb', address: '0x71C8360437E55928d11B3e264259837a7F9D7065', active: true },
     { id: 2, chain: 'ethereum', address: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7', active: true },
     { id: 3, chain: 'polygon', address: '0x3507e4978e0eb83315d20df86ca0b976c0e40ccb', active: true },
+    { id: 4, chain: 'solana', address: '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', active: true },
   ];
 
   const batches = [
@@ -47,8 +48,60 @@ export function bitnoirApiPlugin(): Plugin {
       claimed: 7.2727,      // Bitnoir tokens previously claimed
       swapAvailable: 0,
     },
+    mining: {
+      baseRatePerHour: 0.1,         // Base Rate: 0.1 Bits Per Hour
+      burnedSol: 0.5,               // Current burned SOL
+      solBurnBoostPerHour: 2.5,     // 0.5 SOL * 5.0 Bits/hr
+      referralBoostPerHour: 0.075,  // 3 Verified Referral peers * 0.025 Bits/hr
+      totalMiningRatePerHour: 2.675, // Base 0.1 + Ref 0.075 + Burn 2.5
+      minedBitsUnclaimed: 14.8291,  // Accumulated in storage tank ready to claim
+      minedBitsTotalClaimed: 120.5,
+      sessionStartedAt: new Date(Date.now() - 6 * 3600000).toISOString(),
+      sessionEndsAt: new Date(Date.now() + 18 * 3600000).toISOString(),
+    },
     createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
   };
+
+  // Mining allocations list
+  const miningAllocations: Array<{
+    id: number;
+    kind: 'base' | 'referral' | 'sol_burn';
+    label: string;
+    solBurned?: number;
+    ratePerHour: number;
+    multiplier: string;
+    createdAt: string;
+    status: 'active';
+  }> = [
+    {
+      id: 1,
+      kind: 'base',
+      label: 'Network Base Engine',
+      ratePerHour: 0.1,
+      multiplier: '1.0x',
+      createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
+      status: 'active',
+    },
+    {
+      id: 2,
+      kind: 'referral',
+      label: 'Qualified Referral Team (3 Peers)',
+      ratePerHour: 0.075,
+      multiplier: '+75% Boost',
+      createdAt: new Date(Date.now() - 12 * 86400000).toISOString(),
+      status: 'active',
+    },
+    {
+      id: 3,
+      kind: 'sol_burn',
+      label: 'Proof-of-Burn Power (0.5 SOL)',
+      solBurned: 0.5,
+      ratePerHour: 2.5,
+      multiplier: '+2,500% Boost',
+      createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+      status: 'active',
+    },
+  ];
 
   // Staking positions
   let nextPositionId = 2;
@@ -264,6 +317,7 @@ export function bitnoirApiPlugin(): Plugin {
       return sendJson(res, 200, {
         ...userAccount,
         stakingPositions,
+        miningAllocations,
       });
     }
 
@@ -478,6 +532,78 @@ export function bitnoirApiPlugin(): Plugin {
         ...userAccount,
         position,
         stakingPositions,
+        miningAllocations,
+      });
+    }
+
+    // Burn SOL to Mine More Bits endpoint (0.1 to 10 SOL Max)
+    if (url === '/api/accounts/me/burn-sol' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const rawSol = Number(body.solAmount) || 0.1;
+      const solAmount = Number(Math.max(0.1, Math.min(10.0, rawSol)).toFixed(2));
+      const rateBoost = Number((solAmount * 5.0).toFixed(4)); // 1 SOL = +5 Bits/hr boost
+
+      userAccount.mining.burnedSol = Number((userAccount.mining.burnedSol + solAmount).toFixed(3));
+      userAccount.mining.solBurnBoostPerHour = Number((userAccount.mining.solBurnBoostPerHour + rateBoost).toFixed(4));
+      userAccount.mining.totalMiningRatePerHour = Number(
+        (userAccount.mining.baseRatePerHour + userAccount.mining.referralBoostPerHour + userAccount.mining.solBurnBoostPerHour).toFixed(4)
+      );
+
+      const allocation = {
+        id: Date.now(),
+        kind: 'sol_burn' as const,
+        label: `Proof-of-Burn Power (${solAmount} SOL)`,
+        solBurned: solAmount,
+        ratePerHour: rateBoost,
+        multiplier: `+${Math.round((rateBoost / 0.1) * 100)}% Boost`,
+        createdAt: new Date().toISOString(),
+        status: 'active' as const,
+      };
+      miningAllocations.unshift(allocation);
+
+      activityList.unshift({
+        id: Date.now(),
+        kind: 'burn',
+        title: `Burned ${solAmount} SOL to Mine More Bits`,
+        detail: `Committed ${solAmount} SOL into protocol burn sink. Granted +${rateBoost} Bits/hr hash power boost.`,
+        createdAt: new Date().toISOString(),
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        solBurned: solAmount,
+        rateBoost,
+        mining: userAccount.mining,
+        miningAllocations,
+        message: `Burned ${solAmount} SOL! Mining speed boosted by +${rateBoost} Bits/hr.`,
+      });
+    }
+
+    // Claim accumulated mined Bits into available balance
+    if (url === '/api/accounts/me/claim-mined-bits' && req.method === 'POST') {
+      const unclaimed = userAccount.mining.minedBitsUnclaimed || 0;
+      if (unclaimed <= 0) {
+        return sendJson(res, 400, { error: 'No mined Bits accumulated in storage tank.' });
+      }
+
+      userAccount.mining.minedBitsTotalClaimed = Number(((userAccount.mining.minedBitsTotalClaimed || 0) + unclaimed).toFixed(4));
+      userAccount.mining.minedBitsUnclaimed = 0;
+      userAccount.balances.purchased = Number(((userAccount.balances.purchased || 0) + unclaimed).toFixed(4));
+
+      activityList.unshift({
+        id: Date.now(),
+        kind: 'reward',
+        title: 'Mined Bits Claimed',
+        detail: `Claimed +${unclaimed.toFixed(4)} mined Bits directly into your available balance.`,
+        createdAt: new Date().toISOString(),
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        claimedBits: unclaimed,
+        mining: userAccount.mining,
+        balances: userAccount.balances,
+        message: `Claimed +${unclaimed.toFixed(4)} Bits to your available balance!`,
       });
     }
 

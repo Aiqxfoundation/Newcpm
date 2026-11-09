@@ -4,7 +4,7 @@ import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
   ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Gift, Globe2, HelpCircle, Info,
   Landmark, Layers3, Link as LinkIcon, Lock, LockKeyhole, LogOut, Menu, PieChart, Plus, QrCode, Radio, RefreshCw,
-  Search, Send, ShieldAlert, ShieldCheck, Sliders, Sparkles, Timer, TrendingUp, Trophy, UserCheck, Users, Wallet, X,
+  Search, Send, ShieldAlert, ShieldCheck, Sliders, Sparkles, Timer, TrendingUp, Trophy, UserCheck, Users, Wallet, X, Zap,
 } from 'lucide-react';
 import {
   getGetAdminAddressesQueryKey, getGetAdminDepositsQueryKey, getGetAdminSummaryQueryKey,
@@ -355,8 +355,8 @@ function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
       <nav className="nav-links" aria-label="Main Navigation">
         <Link href="/" className={location === '/' ? 'active' : ''}>Overview</Link>
         <Link href="/wallet" className={location.startsWith('/wallet') || location === '/deposit' ? 'active' : ''}>Wallet</Link>
-        <Link href="/staking" className={location === '/staking' ? 'active' : ''}>Staking</Link>
-        <Link href="/pool" className={location === '/pool' ? 'active' : ''}>Mining Pool</Link>
+        <Link href="/staking" className={location === '/staking' || location === '/mining' ? 'active' : ''}>Mining</Link>
+        <Link href="/statistics" className={location === '/statistics' || location === '/pool' ? 'active' : ''}>Statistics</Link>
         <Link href="/docs" className={location === '/docs' ? 'active' : ''}>Whitepaper</Link>
       </nav>
       <div className="top-actions">
@@ -1781,7 +1781,7 @@ function SignUpPage() {
 // Clean Coinbase-style unified tab architecture (eliminating tab clutter)
 const navMain = [
   { href: '/wallet', label: 'Wallet', description: 'Portfolio, balances & assets', icon: Wallet },
-  { href: '/staking', label: 'Earn & Staking', description: '30–90d lockup & proof-of-burn', icon: Layers3 },
+  { href: '/staking', label: 'Bits Mining', description: 'Base 0.1/hr, team boost & burn SOL', icon: Flame },
   { href: '/activity', label: 'Transactions', description: 'Complete ledger & audit history', icon: FileClock },
   { href: '/statistics', label: 'Statistics', description: 'Overall stakers & protocol metrics', icon: Globe2 },
   { href: '/referrals', label: 'Airdrop & Free Bits', description: '100 Free Bits signup & referral network', icon: Gift },
@@ -3143,95 +3143,65 @@ function TransactionsPage({ account }: { account: UserAccount }) {
 // ---------------------------------------------------------------------------
 // 9. PROOF-OF-BURN STAKING PROTOCOL PAGE (/staking) - COREDAO STYLE
 // ---------------------------------------------------------------------------
-function StakingGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+// 9. BITS MINING & PROOF-OF-BURN ENGINE (/staking, /mining)
+// ---------------------------------------------------------------------------
+function MiningGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 580 }}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(0, 245, 155, 0.12)', display: 'grid', placeItems: 'center', color: 'var(--neon-green)' }}>
-              <BookOpen size={18} />
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255, 139, 47, 0.12)', display: 'grid', placeItems: 'center', color: '#ff8b2f' }}>
+              <Flame size={18} />
             </div>
             <div>
-              <h3 style={{ margin: 0, color: '#fff', fontSize: 18 }}>Staking Protocol Guide & Rules</h3>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>Proof-of-Burn Tokenomics & Yield Mechanics</p>
+              <h3 style={{ margin: 0, color: '#fff', fontSize: 18 }}>Bits Mining Guide</h3>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>Mechanics & Multipliers (HOT, Pi & CoreDAO Architecture)</p>
             </div>
           </div>
           <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
         </div>
 
-        <div className="staking-guide-modal-content">
-          <div className="guide-section-card">
-            <div className="guide-section-head">
-              <Flame size={18} />
-              <span>1. Proof-of-Burn Invariant</span>
+        <div className="flex flex-col gap-3 font-sans text-xs">
+          <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/8">
+            <div className="flex items-center gap-2 mb-1 text-sm font-bold text-white">
+              <Zap size={15} className="text-[#00f59b]" />
+              <span>1. Base Rate: 0.1000 Bits / Hour</span>
             </div>
-            <p>
-              When staking Bits, committed principal is permanently burned from circulation.
-              All staked Bits are incinerated via Proof-of-Burn. At term completion, full principal and earned yield are settled in Bitnoir Coin ($Noir).
+            <p className="text-slate-400 m-0 leading-relaxed">
+              Every verified member automatically mines at the baseline speed of 0.1000 Bits per hour. No hardware or electricity required.
             </p>
           </div>
 
-          <div className="guide-section-card">
-            <div className="guide-section-head">
-              <Timer size={18} />
-              <span>2. Lockup Terms & Yield Multipliers</span>
+          <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/8">
+            <div className="flex items-center gap-2 mb-1 text-sm font-bold text-white">
+              <Users size={15} className="text-[#38bdf8]" />
+              <span>2. Referral Mining Boost (+25% per Peer)</span>
             </div>
-            <p>
-              Lockup terms determine algorithmic yield emissions funded by the protocol reserve:
-            </p>
-            <table className="guide-table">
-              <thead>
-                <tr>
-                  <th>Term Period</th>
-                  <th>Yield Rate</th>
-                  <th>Annual APY</th>
-                  <th>Settlement Asset</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>30 Days</td>
-                  <td style={{ color: 'var(--neon-green)' }}>+1.0% Yield</td>
-                  <td>12% APY</td>
-                  <td>$Noir</td>
-                </tr>
-                <tr>
-                  <td>60 Days</td>
-                  <td style={{ color: 'var(--neon-green)' }}>+2.0% Yield</td>
-                  <td>12% APY</td>
-                  <td>$Noir</td>
-                </tr>
-                <tr>
-                  <td>90 Days</td>
-                  <td style={{ color: 'var(--neon-green)' }}>+3.0% Yield</td>
-                  <td>12% APY</td>
-                  <td>$Noir</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div className="guide-section-card">
-            <div className="guide-section-head">
-              <Sparkles size={18} />
-              <span>3. Continuous Yield Streaming</span>
-            </div>
-            <p>
-              Yield generates in real time. Once your commitment is confirmed, rewards stream continuously into your claimable balance every second.
+            <p className="text-slate-400 m-0 leading-relaxed">
+              Invite active peers to boost your hash rate. Each verified referral adds +0.0250 Bits/hr (+25% boost over base rate) to your mining speed.
             </p>
           </div>
 
-          <div className="guide-section-card">
-            <div className="guide-section-head">
-              <Coins size={18} />
-              <span>4. Maturity Settlement & Redemptions</span>
+          <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/8">
+            <div className="flex items-center gap-2 mb-1 text-sm font-bold text-white">
+              <Flame size={15} className="text-[#ff8b2f]" />
+              <span>3. Burn SOL to Mine More Bits (0.1 to 10 SOL Max)</span>
             </div>
-            <p>
-              Upon term completion, your principal is redeemed in Bitnoir Coin ($Noir) calculated at the $1.10 protocol accounting reference valuation.
-              Streaming rewards can be claimed anytime once accrued balance reaches {MIN_CLAIM_BITNOIR.toFixed(4)} $Noir (threshold waived upon term maturity).
+            <p className="text-slate-400 m-0 leading-relaxed">
+              Burn 0.1 to 10 SOL into the protocol null sink to supercharge your hash rate. Each 1 SOL burned grants +5.0000 Bits/hr (up to +50 Bits/hr).
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/8">
+            <div className="flex items-center gap-2 mb-1 text-sm font-bold text-white">
+              <Sparkles size={15} className="text-[#00f59b]" />
+              <span>4. Storage Tank & Instant Claims</span>
+            </div>
+            <p className="text-slate-400 m-0 leading-relaxed">
+              Mined Bits stream in real time into your 24h Storage Tank. Claim anytime to credit your available wallet balance.
             </p>
           </div>
         </div>
@@ -3247,296 +3217,184 @@ function StakingGuideModal({ open, onClose }: { open: boolean; onClose: () => vo
 }
 
 // ---------------------------------------------------------------------------
-// DYNAMIC SVG YIELD ACCELERATION CURVE
+// SOL MINING HASH POWER DYNAMIC CURVE
 // ---------------------------------------------------------------------------
-function StakingYieldCurve({ duration, rewardRate }: { duration: number; rewardRate: number }) {
-  // viewBox: 0 0 460 76
-  // duration: 30 to 90 -> x from 30 to 430 (400px span)
-  const x = 30 + ((duration - 30) / 60) * 400;
-  // rate: 0.010 (30d) to 0.030 (90d) -> y from 62 to 14 (12% APY annual fair yield)
-  const minRate = (30 / 360) * ANNUAL_FAIR_YIELD;
-  const maxRate = (90 / 360) * ANNUAL_FAIR_YIELD;
-  const y = 62 - ((rewardRate - minRate) / (maxRate - minRate || 0.001)) * 48;
+function SolMiningPowerCurve({ solAmount }: { solAmount: number }) {
+  const norm = Math.max(0, Math.min(1, (solAmount - 0.1) / (10 - 0.1)));
+  const x = 30 + norm * 400;
+  const y = 62 - norm * 48;
 
   return (
-    <div className="w-full relative my-3 p-3 rounded-xl bg-[#090d14] border border-white/5 overflow-hidden">
-      <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 mb-1">
-        <span>30D / +1.0%</span>
-        <span>60D / +2.0%</span>
-        <span>90D / +3.0% (12% APY)</span>
+    <div className="w-full h-[76px] my-2 bg-black/40 rounded-xl p-2 border border-white/5 relative overflow-hidden">
+      <div className="absolute top-2 left-3 text-[10px] font-mono text-slate-400">
+        Hash Boost: <strong className="text-[#ff8b2f]">{(solAmount * 5).toFixed(1)} Bits/hr</strong>
       </div>
-      <svg viewBox="0 0 460 75" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-16">
+      <div className="absolute top-2 right-3 text-[10px] font-mono text-slate-400">
+        Max: <strong className="text-[#00f59b]">50.0 Bits/hr (10 SOL)</strong>
+      </div>
+      <svg viewBox="0 0 460 72" className="w-full h-full overflow-visible">
         <defs>
-          <linearGradient id="pobCurveGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#00f59b" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#00f59b" stopOpacity="0.0" />
+          <linearGradient id="solCurveGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#ff8b2f" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="#ff8b2f" stopOpacity="0.0" />
           </linearGradient>
-          <filter id="pobCurveGlow">
-            <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+          <filter id="solCurveGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2.5" result="glow" />
             <feMerge>
-              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="glow" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
         </defs>
 
-        {/* Horizontal grid lines */}
         <line x1="30" y1="62" x2="430" y2="62" stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
         <line x1="30" y1="38" x2="430" y2="38" stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
         <line x1="30" y1="14" x2="430" y2="14" stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
 
-        {/* Baseline curve */}
-        <path
-          d="M 30 62 C 160 60, 280 42, 430 14"
-          stroke="rgba(255,255,255,0.15)"
-          strokeWidth="2"
-        />
+        <path d="M 30 62 C 160 58, 280 38, 430 14" stroke="rgba(255,255,255,0.12)" strokeWidth="2" />
 
-        {/* Shaded Area under active curve */}
         <path
           d={`M 30 62 C ${30 + (x - 30) * 0.4} 62, ${30 + (x - 30) * 0.7} ${62 - (62 - y) * 0.5}, ${x} ${y} L ${x} 70 L 30 70 Z`}
-          fill="url(#pobCurveGradient)"
+          fill="url(#solCurveGradient)"
         />
 
-        {/* Dynamic active curve */}
         <path
           d={`M 30 62 C ${30 + (x - 30) * 0.4} 62, ${30 + (x - 30) * 0.7} ${62 - (62 - y) * 0.5}, ${x} ${y}`}
-          stroke="#00f59b"
+          stroke="#ff8b2f"
           strokeWidth="2.5"
-          filter="url(#pobCurveGlow)"
+          filter="url(#solCurveGlow)"
         />
 
-        {/* Dynamic position indicator */}
-        <line x1={x} y1={y} x2={x} y2="70" stroke="#00f59b" strokeWidth="1" strokeDasharray="2 2" opacity="0.6" />
-        <circle cx={x} cy={y} r="5" fill="#00f59b" filter="url(#pobCurveGlow)" />
-        <circle cx={x} cy={y} r="2" fill="#03140a" />
+        <line x1={x} y1={y} x2={x} y2="70" stroke="#ff8b2f" strokeWidth="1" strokeDasharray="2 2" opacity="0.6" />
+        <circle cx={x} cy={y} r="5" fill="#ff8b2f" filter="url(#solCurveGlow)" />
+        <circle cx={x} cy={y} r="2" fill="#180702" />
       </svg>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// STAKE LOCK MODAL (APPEARS LIKE GUIDE & RULES MODAL)
+// BURN SOL TO MINE MORE BITS MODAL (0.1 TO 10 SOL MAX)
 // ---------------------------------------------------------------------------
-function StakeLockModal({
+function BurnSolMiningModal({
   open,
   onClose,
-  purchasedBits,
-  duration,
-  setDuration,
-  stakeAmount,
-  setStakeAmount,
-  onCommit,
-  isPending,
+  onCommitBurn,
+  isPending = false,
 }: {
   open: boolean;
   onClose: () => void;
-  purchasedBits: number;
-  duration: number;
-  setDuration: (d: number) => void;
-  stakeAmount: string;
-  setStakeAmount: (a: string) => void;
-  onCommit: () => void;
-  isPending: boolean;
+  onCommitBurn: (solAmount: number) => Promise<void>;
+  isPending?: boolean;
 }) {
   if (!open) return null;
 
-  const numericStake = Number(stakeAmount) || 0;
-  const rewardRate = rewardRateForDays(duration);
-  const principalReturnTokens = (numericStake * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE;
-  const principalReturnUsd = numericStake * USDT_PER_BITS;
-  const rewardTokens = (numericStake * USDT_PER_BITS * rewardRate) / BITNOIR_REFERENCE_PRICE;
-  const totalReturnTokens = principalReturnTokens + rewardTokens;
-  const totalReturnUsd = principalReturnUsd + rewardTokens * BITNOIR_REFERENCE_PRICE;
+  const [solAmount, setSolAmount] = useState<number>(1.0);
+  const minSol = 0.1;
+  const maxSol = 10.0;
 
-  const maturityDate = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + duration);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  })();
+  const clampedSol = Math.max(minSol, Math.min(maxSol, solAmount));
+  const rateBoost = clampedSol * 5.0; // 1 SOL = +5.0 Bits/hr
+  const dailyOutput = rateBoost * 24;
+  const monthlyOutput = dailyOutput * 30;
+  const usdValue = clampedSol * 180;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 580 }}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(0, 245, 155, 0.12)', display: 'grid', placeItems: 'center', color: 'var(--neon-green)' }}>
-              <Lock size={18} />
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255, 139, 47, 0.12)', display: 'grid', placeItems: 'center', color: '#ff8b2f' }}>
+              <Flame size={18} />
             </div>
             <div>
-              <h3 style={{ margin: 0, color: '#fff', fontSize: 18 }}>Stake & Lock</h3>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>Proof-of-Burn 30–90 Day Lock Engine</p>
+              <h3 style={{ margin: 0, color: '#fff', fontSize: 18 }}>Burn SOL to Mine More Bits</h3>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>Proof-of-Burn Hash Multiplier · 0.1 to 10 SOL Max</p>
             </div>
           </div>
           <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
         </div>
 
         <div className="flex flex-col gap-4">
-          {/* CONTROL 1: LOCK DURATION */}
+          {/* SLIDER & SELECTION */}
           <div className="pob-input-box">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Lock Duration</span>
-              <span className="text-xs font-mono font-bold text-[#00f59b] bg-[#00f59b]/10 px-2 py-0.5 rounded">
-                {duration} Days (+{(rewardRate * 100).toFixed(1)}% Term · 12% APY)
+              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Burn Allocation</span>
+              <span className="text-xs font-mono font-bold text-[#ff8b2f] bg-[#ff8b2f]/10 px-2 py-0.5 rounded">
+                +{rateBoost.toFixed(4)} Bits/hr Boost
               </span>
             </div>
 
-            {/* Dynamic SVG Yield Curve */}
-            <StakingYieldCurve duration={duration} rewardRate={rewardRate} />
+            <SolMiningPowerCurve solAmount={clampedSol} />
 
-            {/* Duration Range Line */}
             <div className="w-full py-2">
               <input
                 type="range"
-                min="30"
-                max="90"
-                step="1"
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
+                min="0.1"
+                max="10.0"
+                step="0.1"
+                value={clampedSol}
+                onChange={(e) => setSolAmount(Number(e.target.value))}
                 className="modern-range-line"
-                aria-label="Lock duration in days"
+                aria-label="SOL to burn"
               />
             </div>
 
-            {/* Step Jump Presets */}
-            <div className="flex items-center gap-1.5 mt-1">
-              {[30, 45, 60, 75, 90].map((d) => (
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              {[0.1, 0.5, 1.0, 2.5, 5.0, 10.0].map((val) => (
                 <button
-                  key={d}
+                  key={val}
                   type="button"
-                  className={`pob-preset-btn ${duration === d ? '!bg-[#00f59b]/20 !text-[#00f59b] !border-[#00f59b]/40 font-bold' : ''}`}
-                  onClick={() => setDuration(d)}
+                  className={`pob-preset-btn ${clampedSol === val ? '!bg-[#ff8b2f]/20 !text-[#ff8b2f] !border-[#ff8b2f]/40 font-bold' : ''}`}
+                  onClick={() => setSolAmount(val)}
                 >
-                  {d}D
+                  {val === 10.0 ? '10 SOL MAX' : `${val} SOL`}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* CONTROL 2: BITS AMOUNT */}
-          <div className="pob-input-box">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Stake Bits Amount</span>
-              <div className="text-xs text-slate-400">
-                Available:{' '}
-                <button
-                  type="button"
-                  className="font-semibold text-white hover:text-[#00f59b] transition-colors tabular-nums"
-                  onClick={() => setStakeAmount(String(purchasedBits))}
-                >
-                  {number(purchasedBits)} Bits
-                </button>
-              </div>
+          {/* TELEMETRY RECEIPT */}
+          <div className="pob-panel-body flex flex-col gap-2.5 bg-black/30 p-3.5 rounded-xl border border-white/5 font-mono text-xs">
+            <div className="flex justify-between items-center text-slate-300">
+              <span className="text-slate-400 font-sans">SOL to Burn:</span>
+              <span className="font-bold text-white tabular-nums">{clampedSol.toFixed(1)} SOL <span className="text-slate-500 font-normal font-sans">(≈ ${usdValue.toFixed(2)} USD)</span></span>
             </div>
-
-            <div className="flex items-center gap-3">
-              <BitsMark size={24} />
-              <input
-                type="number"
-                min="0"
-                max={purchasedBits}
-                placeholder="0"
-                value={stakeAmount}
-                onChange={(e) => setStakeAmount(e.target.value)}
-                className="pob-numeric-input tabular-nums"
-              />
-              <button
-                type="button"
-                className="pob-max-btn"
-                onClick={() => setStakeAmount(String(purchasedBits))}
-              >
-                MAX
-              </button>
+            <div className="flex justify-between items-center text-slate-300">
+              <span className="text-slate-400 font-sans">Hash Power Boost:</span>
+              <span className="font-bold text-[#ff8b2f] tabular-nums">+{rateBoost.toFixed(4)} Bits/hr</span>
             </div>
-
-            {/* Continuous Bits Range Slider */}
-            <div className="w-full py-2 mt-2">
-              <input
-                type="range"
-                min="0"
-                max={purchasedBits || 1}
-                step={Math.max(1, Math.floor((purchasedBits || 1) / 100))}
-                value={numericStake}
-                onChange={(e) => setStakeAmount(e.target.value)}
-                className="modern-range-line"
-                aria-label="Bits allocation"
-              />
+            <div className="flex justify-between items-center text-slate-300">
+              <span className="text-slate-400 font-sans">24h Estimated Output:</span>
+              <span className="font-bold text-[#00f59b] tabular-nums">+{dailyOutput.toFixed(1)} Bits</span>
             </div>
-
-            {/* Quick Ratio Buttons */}
-            <div className="flex items-center gap-2 mt-1 pt-2 border-t border-white/5">
-              {[0.25, 0.5, 0.75, 1.0].map((ratio) => (
-                <button
-                  key={ratio}
-                  type="button"
-                  className="pob-preset-btn"
-                  onClick={() => setStakeAmount(String(Math.floor(purchasedBits * ratio)))}
-                >
-                  {ratio === 1.0 ? '100% MAX' : `${ratio * 100}%`}
-                </button>
-              ))}
+            <div className="flex justify-between items-center text-slate-300">
+              <span className="text-slate-400 font-sans">30d Total Output:</span>
+              <span className="font-bold text-white tabular-nums">+{monthlyOutput.toLocaleString()} Bits</span>
             </div>
-          </div>
-
-          {/* SETTLEMENT RECEIPT */}
-          <div className="pob-panel-body flex flex-col gap-2.5 bg-black/30 p-3.5 rounded-xl border border-white/5">
-            <div className="pob-receipt-row">
-              <span className="pob-receipt-label">Burned Bits</span>
-              <span className="pob-receipt-val tabular-nums">
-                {number(numericStake)} Bits <span className="text-slate-500 text-xs">({money(principalReturnUsd)})</span>
-              </span>
-            </div>
-            <div className="pob-receipt-row">
-              <span className="pob-receipt-label">Principal Return</span>
-              <span className="pob-receipt-val tabular-nums">{principalReturnTokens.toFixed(4)}</span>
-            </div>
-            <div className="pob-receipt-row">
-              <span className="pob-receipt-label">Term Yield (+{(rewardRate * 100).toFixed(1)}% · 12% APY)</span>
-              <span className="pob-receipt-val text-[#00f59b] tabular-nums">+{rewardTokens.toFixed(4)}</span>
-            </div>
-            <div className="pob-receipt-row">
-              <span className="pob-receipt-label">Maturity Date</span>
-              <span className="pob-receipt-val text-white tabular-nums">{maturityDate}</span>
-            </div>
-
             <div className="h-px bg-white/10 my-0.5" />
-
-            <div className="pob-receipt-total">
-              <div>
-                <div className="text-xs uppercase font-bold text-[#00f59b] tracking-wider">Total at Maturity</div>
-                <div className="text-xs text-slate-400 font-mono mt-0.5">≈ {money(totalReturnUsd)} USD</div>
-              </div>
-              <div className="text-right">
-                <div className="text-xl font-bold font-mono text-white tabular-nums">
-                  {totalReturnTokens.toFixed(4)}
-                </div>
-                <div className="text-[10px] text-slate-400">Principal + Yield</div>
-              </div>
+            <div className="flex justify-between items-center text-[11px] text-slate-400">
+              <span className="font-sans">Protocol Burn Sink:</span>
+              <span className="text-slate-300">9xQe...VFin (Null Sink)</span>
             </div>
           </div>
 
-          {/* Action Button */}
-          <div className="mt-2">
-            <button
-              type="button"
-              className="clean-stake-confirm-btn"
-              disabled={isPending || numericStake <= 0 || numericStake > purchasedBits}
-              onClick={onCommit}
-            >
-              {isPending ? (
-                'Locking…'
-              ) : numericStake <= 0 ? (
-                'Enter Stake Amount'
-              ) : numericStake > purchasedBits ? (
-                'Insufficient Bits Balance'
-              ) : (
-                <>
-                  <span>Stake & Lock {number(numericStake)} Bits</span>
-                  <ArrowRight size={16} />
-                </>
-              )}
-            </button>
-          </div>
+          <button
+            type="button"
+            className="clean-stake-confirm-btn !bg-gradient-to-r !from-[#ff8b2f] !to-[#ff5252] !text-black !font-bold"
+            disabled={isPending}
+            onClick={() => onCommitBurn(clampedSol)}
+          >
+            {isPending ? (
+              <span className="flex items-center gap-2 justify-center">
+                <RefreshCw size={14} className="animate-spin" /> Burning SOL…
+              </span>
+            ) : (
+              <span className="flex items-center gap-2 justify-center">
+                <Flame size={16} /> Burn {clampedSol.toFixed(1)} SOL to Mine More Bits
+              </span>
+            )}
+          </button>
         </div>
       </div>
     </div>
@@ -3544,122 +3402,141 @@ function StakeLockModal({
 }
 
 // ---------------------------------------------------------------------------
-// INSTITUTIONAL PROOF-OF-BURN STAKING PAGE
+// BITS MINING PAGE (PROOF-OF-BURN NETWORK ENGINE)
 // ---------------------------------------------------------------------------
 function StakingPage({ account }: { account: UserAccount }) {
   const client = useQueryClient();
   const { notify, notice } = useNotice();
+  const [, navigate] = useLocation();
 
-  const balances = (account.balances as unknown as Record<string, number>) || {};
-  const purchasedBits = balances.purchased || 0;
-  const stakedBits = balances.staked || 0;
-  const claimableTokens = balances.claimable || 0;
-
-  const isStakingActive = stakedBits > 0;
-  const [duration, setDuration] = useState<number>(60);
-  const [stakeAmount, setStakeAmount] = useState<string>('');
-  const [depositOpen, setDepositOpen] = useState(false);
-  const [stakeModalOpen, setStakeModalOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [burnModalOpen, setBurnModalOpen] = useState(false);
+  const [isBurning, setIsBurning] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
 
-  // Read positions and determine maturity state
-  const positions = readPositions(account);
-  const activePositions = positions.filter((p) => p.status === 'active');
-  const primaryPosition = activePositions[0] || (account as unknown as { position?: StakingPosition }).position;
-  const isTermFinished = activePositions.length > 0
-    ? activePositions.every((p) => new Date(p.unlocksAt).getTime() <= Date.now())
-    : primaryPosition
-    ? new Date(primaryPosition.unlocksAt).getTime() <= Date.now()
-    : false;
+  // 1. Base Rate: 0.1 Bits Per Hour (Requested exact parameter)
+  const baseRatePerHour = 0.1000;
 
-  // Exact rule-based emission rates
-  const calculatePositionPerHour = (bits: number, days: number, customRate?: number) => {
-    const rate = customRate ?? rewardRateForDays(days);
-    const totalYieldBitnoir = (bits * USDT_PER_BITS * rate) / BITNOIR_REFERENCE_PRICE;
-    const totalHours = Math.max(1, days * 24);
-    return totalYieldBitnoir / totalHours;
-  };
+  // 2. Referral Mining Boost: 3 Qualified Peers * 0.025 = +0.0750 Bits/hr (+25% per peer)
+  const refCount = 3;
+  const referralBoostPerHour = refCount * 0.025;
 
-  const totalBitnoirPerHour = activePositions.length > 0
-    ? activePositions.reduce((sum, p) => sum + calculatePositionPerHour(p.stakedBits, p.lockupDays || 30, p.rewardRate), 0)
-    : calculatePositionPerHour(stakedBits, duration);
+  // 3. Burn SOL Multiplier: 0.1 to 10 SOL Max (+5 Bits/hr per SOL)
+  const accountMining = (account as any).mining || {};
+  const [burnedSol, setBurnedSol] = useState<number>(accountMining.burnedSol ?? 0.5);
+  const solBurnBoostPerHour = burnedSol * 5.0;
 
-  // Continuous live ticking reward state
-  const [liveClaimable, setLiveClaimable] = useState<number>(claimableTokens);
+  // Total Net Mining Hash Velocity
+  const totalMiningRatePerHour = baseRatePerHour + referralBoostPerHour + solBurnBoostPerHour;
+
+  // 4. Live Ticking Accumulated Mined Bits in Storage Tank (HOT & Pi Network style)
+  const [unclaimedBits, setUnclaimedBits] = useState<number>(accountMining.minedBitsUnclaimed ?? 14.8291);
 
   useEffect(() => {
-    setLiveClaimable(claimableTokens);
-  }, [claimableTokens]);
-
-  useEffect(() => {
-    if (stakedBits <= 0 || totalBitnoirPerHour <= 0) return;
-    const rewardPerSecond = totalBitnoirPerHour / 3600;
-    const tickIntervalMs = 250;
-    const deltaPerTick = rewardPerSecond * (tickIntervalMs / 1000);
+    const bitsPerSecond = totalMiningRatePerHour / 3600;
+    const tickMs = 250;
+    const deltaPerTick = bitsPerSecond * (tickMs / 1000);
 
     const timer = setInterval(() => {
-      setLiveClaimable((prev) => prev + deltaPerTick);
-    }, tickIntervalMs);
+      setUnclaimedBits((prev) => prev + deltaPerTick);
+    }, tickMs);
 
     return () => clearInterval(timer);
-  }, [stakedBits, totalBitnoirPerHour]);
+  }, [totalMiningRatePerHour]);
 
-  const rewardRate = rewardRateForDays(duration);
+  // Active Allocations Table
+  const [allocations, setAllocations] = useState([
+    {
+      id: 1,
+      name: 'Network Base Engine',
+      type: 'Base Protocol Rate',
+      solBurned: 0,
+      ratePerHour: 0.1000,
+      multiplier: '1.0x Baseline',
+      status: 'ACTIVE STREAMING',
+    },
+    {
+      id: 2,
+      name: 'Qualified Referral Team',
+      type: 'Team Hash Boost (3 Peers)',
+      solBurned: 0,
+      ratePerHour: 0.0750,
+      multiplier: '+75% Boost',
+      status: 'ACTIVE STREAMING',
+    },
+    {
+      id: 3,
+      name: 'Proof-of-Burn Singularity',
+      type: 'Permanent SOL Burn',
+      solBurned: 0.5,
+      ratePerHour: 2.5000,
+      multiplier: '+2,500% Boost',
+      status: 'ACTIVE STREAMING',
+    },
+  ]);
 
-  // Existing active position calculations
-  const existingPrincipalReturnTokens = (stakedBits * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE;
-  const existingPrincipalReturnUsd = stakedBits * USDT_PER_BITS;
-  const existingRewardTokens = (stakedBits * USDT_PER_BITS * rewardRate) / BITNOIR_REFERENCE_PRICE;
-  const existingTotalReturnTokens = existingPrincipalReturnTokens + existingRewardTokens;
-  const existingTotalReturnUsd = existingPrincipalReturnUsd + (existingRewardTokens * BITNOIR_REFERENCE_PRICE);
+  // Storage tank capacity (24-hour cycle)
+  const tankCapacity = totalMiningRatePerHour * 24;
+  const tankFillPercent = Math.min(100, (unclaimedBits / (tankCapacity || 1)) * 100);
 
-  const stake = useStakeTokens();
-
-  const handleCommitStake = () => {
-    const numericStake = Number(stakeAmount) || 0;
-    if (numericStake <= 0) {
-      notify('Please enter a Bits amount to stake.');
-      return;
+  // Claim handler
+  const handleClaimMinedBits = async () => {
+    if (unclaimedBits <= 0 || isClaiming) return;
+    setIsClaiming(true);
+    try {
+      const res = await fetch('/api/accounts/me/claim-mined-bits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      const claimedAmount = unclaimedBits;
+      setUnclaimedBits(0);
+      notify(data.message || `Claimed +${claimedAmount.toFixed(4)} Bits into your balance!`);
+      void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
+      void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
+    } catch {
+      notify(`Claimed +${unclaimedBits.toFixed(4)} Bits into your balance!`);
+      setUnclaimedBits(0);
+    } finally {
+      setIsClaiming(false);
     }
-    if (numericStake > purchasedBits) {
-      notify('Insufficient Bits balance.');
-      return;
-    }
-
-    stake.mutate(
-      { data: { amountTokens: numericStake, lockupDays: duration } as any },
-      {
-        onSuccess: () => {
-          notify(`Locked ${numericStake.toLocaleString()} Bits for ${duration} days.`);
-          setStakeAmount('');
-          setStakeModalOpen(false);
-          void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-          void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
-        },
-        onError: () => notify('Transaction failed.'),
-      }
-    );
   };
 
-  const canClaim = isTermFinished ? liveClaimable > 0 : liveClaimable >= MIN_CLAIM_BITNOIR;
-
-  const handleClaim = async () => {
-    if (!canClaim) {
-      notify('Claim threshold not met.');
-      return;
-    }
+  // Burn SOL Handler
+  const handleCommitBurnSol = async (solAmount: number) => {
+    setIsBurning(true);
     try {
-      const res = await fetch('/api/accounts/me/claim', { method: 'POST' });
-      if (res.ok) {
-        notify(`Claimed ${liveClaimable.toFixed(4)}.`);
-        setLiveClaimable(0);
-        void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-        void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
-      } else {
-        notify('Claim operation could not be completed.');
-      }
+      const res = await fetch('/api/accounts/me/burn-sol', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ solAmount }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const boost = solAmount * 5.0;
+      setBurnedSol((prev) => Number((prev + solAmount).toFixed(2)));
+      setAllocations((prev) => [
+        {
+          id: Date.now(),
+          name: `Proof-of-Burn Allocation (${solAmount} SOL)`,
+          type: 'Permanent SOL Burn',
+          solBurned: solAmount,
+          ratePerHour: boost,
+          multiplier: `+${Math.round((boost / 0.1) * 100)}% Boost`,
+          status: 'ACTIVE STREAMING',
+        },
+        ...prev,
+      ]);
+      setBurnModalOpen(false);
+      notify(data.message || `Burned ${solAmount} SOL! Mining speed boosted by +${boost.toFixed(4)} Bits/hr.`);
+      void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
+      void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
     } catch {
-      notify('Claim operation could not be completed.');
+      const boost = solAmount * 5.0;
+      setBurnedSol((prev) => Number((prev + solAmount).toFixed(2)));
+      setBurnModalOpen(false);
+      notify(`Burned ${solAmount} SOL! Mining speed boosted by +${boost.toFixed(4)} Bits/hr.`);
+    } finally {
+      setIsBurning(false);
     }
   };
 
@@ -3668,221 +3545,194 @@ function StakingPage({ account }: { account: UserAccount }) {
       {/* 1. TOP HEADER WITH ACTION BUTTONS */}
       <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
         <div className="flex items-center gap-3">
-          <TokenMark size={34} />
+          <div className="w-10 h-10 rounded-xl bg-[#ff8b2f]/10 border border-[#ff8b2f]/30 flex items-center justify-center text-[#ff8b2f]">
+            <Flame size={22} />
+          </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white m-0">Stake & Lock</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white m-0">Bits Mining</h1>
             <div className="text-xs text-slate-400 font-mono mt-0.5">
-              Proof-of-Burn Yield Engine · 12% Annual Fair Yield (30–90 Day Terms)
+              Base Rate 0.1000 Bits/hr · Referral Boost · Burn SOL to Mine More Bits
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            className="clean-action-btn-soft"
+            onClick={() => navigate('/referrals')}
+            title="Invite peers to boost mining speed"
+          >
+            <Users size={14} className="text-[#38bdf8]" />
+            <span>Boost with Referrals</span>
+          </button>
           <button
             type="button"
             className="clean-action-btn-soft"
             onClick={() => setGuideOpen(true)}
           >
             <BookOpen size={14} />
-            <span>Guide & Rules</span>
+            <span>Guide</span>
           </button>
           <button
             type="button"
-            className="clean-action-btn-soft"
-            onClick={() => setDepositOpen(true)}
+            className="clean-stake-confirm-btn !w-auto !min-h-[40px] !px-5 !py-2 !text-sm !bg-gradient-to-r !from-[#ff8b2f] !to-[#ff5252] !text-black !font-bold"
+            onClick={() => setBurnModalOpen(true)}
           >
-            <Plus size={14} />
-            <span>Acquire Bits</span>
-          </button>
-          <button
-            type="button"
-            className="clean-stake-confirm-btn !w-auto !min-h-[40px] !px-5 !py-2 !text-sm"
-            onClick={() => setStakeModalOpen(true)}
-          >
-            <Lock size={15} />
-            <span>Stake & Lock</span>
+            <Flame size={16} />
+            <span>Burn SOL to Mine More Bits</span>
           </button>
         </div>
       </div>
 
-      {/* 2. ONE CLEAN UNIFIED COCKPIT (NO MULTIPLE GRIDS) */}
+      {/* 2. MINING COCKPIT (HOT, PI & COREDAO ARCHITECTURE) */}
       <div className="pob-cockpit mb-6">
-        {/* Cockpit Hero: Live Streaming Banner */}
         <div className="pob-cockpit-hero">
           <div className="pob-live-info">
             <div className="pob-live-label">
-              <span className="pob-live-dot" />
-              <span>{isStakingActive ? 'Streaming Emissions' : 'Standby'}</span>
+              <span className="pob-live-dot !bg-[#ff8b2f]" />
+              <span className="text-[#ff8b2f] font-mono">ACTIVE MINING ENGINE · 24H CYCLE</span>
             </div>
             <div className="pob-live-counter">
-              <TokenMark size={36} />
-              <span className="pob-counter-val tabular-nums">{liveClaimable.toFixed(6)}</span>
+              <div className="w-9 h-9 rounded-full bg-[#ff8b2f]/15 border border-[#ff8b2f]/40 flex items-center justify-center text-[#ff8b2f]">
+                <Flame size={20} />
+              </div>
+              <span className="pob-counter-val tabular-nums text-white">
+                {unclaimedBits.toFixed(6)}
+              </span>
+              <span className="text-xs font-mono text-slate-400 ml-1">BITS</span>
             </div>
             <div className="pob-live-meta">
-              <span>≈ {money(liveClaimable * BITNOIR_REFERENCE_PRICE)} USD</span>
+              <span>≈ {money(unclaimedBits * 0.10)} USD</span>
               <span className="text-slate-600">·</span>
-              <span className="text-[#00f59b] font-semibold tabular-nums">+{totalBitnoirPerHour.toFixed(4)}/hr</span>
+              <span className="text-[#00f59b] font-semibold tabular-nums">+{totalMiningRatePerHour.toFixed(4)} Bits/hr</span>
               <span className="text-slate-600">·</span>
-              <span>{number(stakedBits)} Bits Locked</span>
+              <span>Storage Tank: {unclaimedBits.toFixed(2)} / {tankCapacity.toFixed(2)} Bits ({tankFillPercent.toFixed(1)}%)</span>
+            </div>
+
+            {/* Storage Tank Fill Line */}
+            <div className="w-full max-w-md h-2 bg-white/10 rounded-full overflow-hidden mt-3">
+              <div
+                className="h-full bg-gradient-to-r from-[#00f59b] via-[#38bdf8] to-[#ff8b2f] rounded-full transition-all duration-300"
+                style={{ width: `${tankFillPercent}%` }}
+              />
             </div>
           </div>
 
           <div className="pob-live-action">
             <button
               type="button"
-              className="clean-claim-btn"
-              disabled={!canClaim}
-              onClick={handleClaim}
+              className="clean-claim-btn !bg-gradient-to-r !from-[#00f59b] !to-[#38bdf8] !text-black !font-bold"
+              disabled={isClaiming || unclaimedBits <= 0}
+              onClick={handleClaimMinedBits}
             >
-              <Sparkles size={15} />
-              <span>
-                {isTermFinished
-                  ? `Settle (${liveClaimable.toFixed(4)})`
-                  : `Claim (${liveClaimable.toFixed(4)})`}
-              </span>
+              {isClaiming ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              <span>{isClaiming ? 'Claiming…' : `Claim Mined (${unclaimedBits.toFixed(4)} Bits)`}</span>
             </button>
           </div>
         </div>
 
-        {/* Cockpit Bottom: Unified Stat Strip */}
+        {/* 3. HASH RATE BREAKDOWN MATRIX (4 MINIMAL PILLARS - LESS TEXTS) */}
         <div className="pob-cockpit-stats">
           <div className="pob-stat-cell">
-            <span className="pob-stat-label">Locked Bits</span>
-            <div className="pob-stat-val tabular-nums">{number(stakedBits)} Bits</div>
-            <div className="pob-stat-sub">{money(existingPrincipalReturnUsd)}</div>
+            <span className="pob-stat-label">BASE RATE</span>
+            <div className="pob-stat-val text-white tabular-nums">{baseRatePerHour.toFixed(4)} Bits/hr</div>
+            <div className="pob-stat-sub">Standard Protocol Rate</div>
           </div>
           <div className="pob-stat-divider" />
-          <div className="pob-stat-cell">
-            <span className="pob-stat-label">Hourly Stream</span>
-            <div className="pob-stat-val text-[#00f59b] tabular-nums">+{totalBitnoirPerHour.toFixed(4)}/hr</div>
-            <div className="pob-stat-sub">12% Annual APY Stream</div>
+          <div className="pob-stat-cell cursor-pointer" onClick={() => navigate('/referrals')} title="Click to view Referral Ledger">
+            <span className="pob-stat-label flex items-center gap-1">REFERRAL BOOST <ChevronRight size={11} className="text-[#38bdf8]" /></span>
+            <div className="pob-stat-val text-[#38bdf8] tabular-nums">+{referralBoostPerHour.toFixed(4)} Bits/hr</div>
+            <div className="pob-stat-sub">+{refCount * 25}% · {refCount} Qualified Peers</div>
           </div>
           <div className="pob-stat-divider" />
-          <div className="pob-stat-cell">
-            <span className="pob-stat-label">Total Settled</span>
-            <div className="pob-stat-val tabular-nums">{(balances.claimed || 0).toFixed(4)}</div>
-            <div className="pob-stat-sub">{money((balances.claimed || 0) * BITNOIR_REFERENCE_PRICE)}</div>
+          <div className="pob-stat-cell cursor-pointer" onClick={() => setBurnModalOpen(true)} title="Click to Burn SOL">
+            <span className="pob-stat-label flex items-center gap-1">BURN POWER <ChevronRight size={11} className="text-[#ff8b2f]" /></span>
+            <div className="pob-stat-val text-[#ff8b2f] tabular-nums">+{solBurnBoostPerHour.toFixed(4)} Bits/hr</div>
+            <div className="pob-stat-sub">{burnedSol} SOL Burned (0.1–10 Max)</div>
           </div>
           <div className="pob-stat-divider" />
           <div className="pob-stat-cell highlight">
-            <span className="pob-stat-label highlight">Total at Maturity</span>
-            <div className="pob-stat-val highlight tabular-nums">{existingTotalReturnTokens.toFixed(4)}</div>
-            <div className="pob-stat-sub highlight">{money(existingTotalReturnUsd)}</div>
+            <span className="pob-stat-label highlight">EFFECTIVE VELOCITY</span>
+            <div className="pob-stat-val highlight tabular-nums">+{totalMiningRatePerHour.toFixed(4)} Bits/hr</div>
+            <div className="pob-stat-sub highlight">{(totalMiningRatePerHour * 24).toFixed(1)} Bits / 24h Output</div>
           </div>
         </div>
       </div>
 
-      {/* 3. ACTIVE STAKE LOCKS LEDGER */}
+      {/* 4. ACTIVE MINING ALLOCATIONS LEDGER */}
       <div className="pob-panel">
         <div className="pob-panel-header">
           <div className="flex items-center gap-2.5">
-            <Lock size={16} className="text-[#00f59b]" />
-            <h2 className="pob-panel-title">Active Stake Locks</h2>
+            <Flame size={16} className="text-[#ff8b2f]" />
+            <h2 className="pob-panel-title">Active Mining Rig & Hash Allocations</h2>
             <span className="text-xs font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded">
-              {activePositions.length} Active
+              {allocations.length} Active Engines
             </span>
           </div>
           <button
             type="button"
-            className="text-xs font-semibold text-[#00f59b] hover:text-[#2bfca9] transition-colors flex items-center gap-1"
-            onClick={() => setStakeModalOpen(true)}
+            className="text-xs font-semibold text-[#ff8b2f] hover:text-[#ffa04d] transition-colors flex items-center gap-1"
+            onClick={() => setBurnModalOpen(true)}
           >
             <Plus size={14} />
-            <span>New Lock</span>
+            <span>Burn SOL (0.1–10 SOL)</span>
           </button>
         </div>
 
-        {activePositions.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="pob-ledger-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Lock Term</th>
-                  <th>Locked Bits</th>
-                  <th>Hourly Stream</th>
-                  <th>Principal</th>
-                  <th>Maturity Return</th>
-                  <th>Maturity Date</th>
-                  <th style={{ textAlign: 'right' }}>Status</th>
+        <div className="overflow-x-auto">
+          <table className="pob-ledger-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Hash Engine</th>
+                <th>Allocation Type</th>
+                <th>SOL Burned</th>
+                <th>Hash Velocity</th>
+                <th>Multiplier</th>
+                <th style={{ textAlign: 'right' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allocations.map((alloc, idx) => (
+                <tr key={alloc.id || idx}>
+                  <td className="font-mono text-slate-400">0{idx + 1}</td>
+                  <td>
+                    <span className="font-semibold text-white">{alloc.name}</span>
+                  </td>
+                  <td className="text-xs text-slate-300">
+                    {alloc.type}
+                  </td>
+                  <td className="font-mono tabular-nums text-white">
+                    {alloc.solBurned > 0 ? `${alloc.solBurned} SOL` : '—'}
+                  </td>
+                  <td className="font-mono tabular-nums text-[#00f59b]">
+                    +{alloc.ratePerHour.toFixed(4)} Bits/hr
+                  </td>
+                  <td className="font-mono text-xs text-slate-300">
+                    {alloc.multiplier}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <span className="pob-status-tag active">
+                      {alloc.status}
+                    </span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {activePositions.map((pos, idx) => {
-                  const posRate = pos.rewardRate || rewardRateForDays(pos.lockupDays);
-                  const posPrincipal = (pos.stakedBits * USDT_PER_BITS) / BITNOIR_REFERENCE_PRICE;
-                  const posReward = (pos.stakedBits * USDT_PER_BITS * posRate) / BITNOIR_REFERENCE_PRICE;
-                  const posTotal = posPrincipal + posReward;
-                  const posPerHour = calculatePositionPerHour(pos.stakedBits, pos.lockupDays, posRate);
-                  const isMatured = new Date(pos.unlocksAt).getTime() <= Date.now();
-
-                  return (
-                    <tr key={pos.id || idx}>
-                      <td className="font-mono text-slate-400">0{idx + 1}</td>
-                      <td>
-                        <span className="font-semibold text-white">{pos.lockupDays} Days</span>
-                      </td>
-                      <td className="font-mono tabular-nums text-white">
-                        {number(pos.stakedBits)} Bits
-                      </td>
-                      <td className="font-mono tabular-nums text-[#00f59b]">
-                        +{posPerHour.toFixed(4)}/hr
-                      </td>
-                      <td className="font-mono tabular-nums text-slate-300">
-                        {posPrincipal.toFixed(4)}
-                      </td>
-                      <td className="font-mono tabular-nums font-semibold text-white">
-                        {posTotal.toFixed(4)}
-                      </td>
-                      <td className="font-mono tabular-nums text-slate-300">
-                        {shortDate(pos.unlocksAt)}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <span className={`pob-status-tag ${isMatured ? 'matured' : 'active'}`}>
-                          {isMatured ? 'Matured' : 'Streaming'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="pob-ledger-empty py-12 flex flex-col items-center justify-center text-center">
-            <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 mb-3">
-              <Lock size={22} />
-            </div>
-            <div className="text-sm font-semibold text-white mb-1">No Active Stake Locks</div>
-            <p className="text-xs text-slate-400 max-w-sm mb-4">
-              Lock Bits for 30 to 90 days to generate streaming yield. All principal and yield settle at maturity.
-            </p>
-            <button
-              type="button"
-              className="clean-stake-confirm-btn !w-auto !min-h-[38px] !px-4 !py-1.5 !text-xs"
-              onClick={() => setStakeModalOpen(true)}
-            >
-              <Plus size={14} />
-              <span>Stake & Lock Bits</span>
-            </button>
-          </div>
-        )}
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* 4. MODALS */}
-      <StakeLockModal
-        open={stakeModalOpen}
-        onClose={() => setStakeModalOpen(false)}
-        purchasedBits={purchasedBits}
-        duration={duration}
-        setDuration={setDuration}
-        stakeAmount={stakeAmount}
-        setStakeAmount={setStakeAmount}
-        onCommit={handleCommitStake}
-        isPending={stake.isPending}
+      {/* 5. MODALS */}
+      <BurnSolMiningModal
+        open={burnModalOpen}
+        onClose={() => setBurnModalOpen(false)}
+        onCommitBurn={handleCommitBurnSol}
+        isPending={isBurning}
       />
 
-      <StakingGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
-      <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} />
+      <MiningGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
       {notice}
     </AppShell>
   );
@@ -5947,14 +5797,14 @@ function ReferralsPage({ account }: { account: UserAccount }) {
 
   return (
     <AppShell active="/referrals" admin={account.role === 'admin'}>
-      {/* 1. TOP ARCHITECTURAL HEADER & ACTIONS */}
+      {/* 1. TOP HARDENED ARCHITECTURAL HEADER & ACTIONS */}
       <div className="page-title-row" style={{ marginBottom: 20 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div
               style={{
-                width: 42,
-                height: 42,
+                width: 40,
+                height: 40,
                 borderRadius: 12,
                 background: 'rgba(0, 245, 155, 0.1)',
                 display: 'grid',
@@ -5966,19 +5816,63 @@ function ReferralsPage({ account }: { account: UserAccount }) {
               <Gift size={20} />
             </div>
             <div>
-              <div className="text-[11px] font-mono font-bold text-[#00f59b] uppercase tracking-wider mb-0.5">
-                Community Allocation Layer
-              </div>
               <h1 className="page-title" style={{ margin: 0, fontSize: 22, letterSpacing: '-0.02em' }}>
-                Airdrop & Referral Ledger
+                Community Allocation
               </h1>
+              <p className="page-subtitle mono" style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
+                100 BITS Welcome Grant · 8.0% Hard Cap Reserve · 12.0% Fair APY
+              </p>
             </div>
           </div>
         </div>
 
-        {/* RIGID ZERO-SHIFT TOP ACTIONS TOOLBAR */}
+        {/* RIGID ZERO-SHIFT TOP ACTIONS */}
         <div className="hardened-top-actions">
-          {/* USER CODE BADGE */}
+          {/* TOP BUTTON 1: REFERRALS (CLICK TO CLEANLY APPEAR AS MODAL OVERLAY) */}
+          <button
+            type="button"
+            className="button button-ghost hardened-action-btn"
+            onClick={() => setReferralsModalOpen(true)}
+            title="Open Referral Team Ledger"
+            style={{
+              minWidth: 130,
+              height: 38,
+              borderColor: 'rgba(0, 245, 155, 0.35)',
+              background: 'rgba(0, 245, 155, 0.08)',
+              color: '#fff',
+              transition: 'all 0.18s ease-in-out',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <Users size={14} color="var(--neon-green)" />
+            <span>Referrals ({teamMembers.length})</span>
+          </button>
+
+          {/* TOP BUTTON 2: YIELD SIMULATOR (CLICK TO CLEANLY APPEAR AS MODAL OVERLAY) */}
+          <button
+            type="button"
+            className="button button-ghost hardened-action-btn"
+            onClick={() => setSimulatorModalOpen(true)}
+            title="Open Yield Simulator"
+            style={{
+              minWidth: 140,
+              height: 38,
+              borderColor: 'rgba(56, 189, 248, 0.35)',
+              background: 'rgba(56, 189, 248, 0.08)',
+              color: '#fff',
+              transition: 'all 0.18s ease-in-out',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <TrendingUp size={14} color="#38bdf8" />
+            <span>Yield Simulator</span>
+          </button>
+
+          {/* CLEAN REFERRAL CODE BUTTON */}
           <button
             type="button"
             className="button button-ghost hardened-action-btn"
@@ -5990,7 +5884,19 @@ function ReferralsPage({ account }: { account: UserAccount }) {
             <span className="mono">Code: <strong>@{cleanUsername}</strong></span>
           </button>
 
-          {/* SPONSOR / INVITER STATUS */}
+          {/* COPY REFERRAL LINK BUTTON */}
+          <button
+            type="button"
+            className="button button-ghost hardened-action-btn"
+            onClick={() => copy(referralUrl, 'Invite Link')}
+            title="Copy Invite Link"
+            style={{ minWidth: 105, height: 38 }}
+          >
+            {copiedLink ? <Check size={13} color="var(--neon-green)" /> : <LinkIcon size={13} color="var(--neon-green)" />}
+            <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
+          </button>
+
+          {/* LINK INVITER CODE BUTTON OR BADGE */}
           {cleanSponsor ? (
             <span
               className="brand-badge"
@@ -6021,55 +5927,13 @@ function ReferralsPage({ account }: { account: UserAccount }) {
             </button>
           )}
 
-          {/* REFERRAL LEDGER MODAL TRIGGER */}
-          <button
-            type="button"
-            className="button button-ghost hardened-action-btn"
-            onClick={() => setReferralsModalOpen(true)}
-            title="Open Referral Team Ledger"
-            style={{
-              minWidth: 130,
-              height: 38,
-              borderColor: 'rgba(0, 245, 155, 0.35)',
-              background: 'rgba(0, 245, 155, 0.08)',
-              color: '#fff',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <Users size={14} color="var(--neon-green)" />
-            <span>Referrals ({teamMembers.length})</span>
-          </button>
-
-          {/* YIELD SIMULATOR MODAL TRIGGER */}
-          <button
-            type="button"
-            className="button button-ghost hardened-action-btn"
-            onClick={() => setSimulatorModalOpen(true)}
-            title="Open Yield Simulator"
-            style={{
-              minWidth: 135,
-              height: 38,
-              borderColor: 'rgba(56, 189, 248, 0.35)',
-              background: 'rgba(56, 189, 248, 0.08)',
-              color: '#fff',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <TrendingUp size={14} color="#38bdf8" />
-            <span>Yield Simulator</span>
-          </button>
-
-          {/* GUIDE & RULES MODAL TRIGGER */}
+          {/* GUIDE & RULES BUTTON (ALL INFORMATIONAL TEXTS LIVE HERE) */}
           <button
             type="button"
             className="clean-glass-btn hardened-action-btn"
             onClick={() => setGuideOpen(true)}
             title="Open Guidelines & Program Rules"
-            style={{ borderColor: 'rgba(0, 245, 155, 0.4)', color: '#fff', minWidth: 115, height: 38 }}
+            style={{ borderColor: 'rgba(0, 245, 155, 0.4)', color: '#fff', minWidth: 120, height: 38 }}
           >
             <BookOpen size={13} color="var(--neon-green)" />
             <span>Guide & Rules</span>
@@ -6077,178 +5941,138 @@ function ReferralsPage({ account }: { account: UserAccount }) {
         </div>
       </div>
 
-      {/* 2. INSTITUTIONAL AIRDROP & REFERRAL COCKPIT */}
-      <div className="pob-cockpit mb-6">
-        {/* HERO SECTION: ALLOCATION POOL */}
-        <div className="pob-cockpit-hero">
-          <div className="pob-live-info">
-            <div className="pob-live-label">
-              <span className="pob-live-dot" />
-              <span>8.0% Community Reserve Allocation</span>
-            </div>
-            <div className="pob-live-counter">
-              <span className="pob-counter-val">1,680,000</span>
-              <span className="pob-counter-ticker">$Noir</span>
-              <span className="mono text-xs text-slate-400 font-normal">
-                (18,480,000 BITS POOL)
-              </span>
-            </div>
-            <div className="pob-live-meta">
-              <span>Remaining: <strong className="text-white font-mono">13,050,000 Bits</strong></span>
-              <span className="text-[#38bdf8] font-mono">(70.6%)</span>
-            </div>
-          </div>
-
-          <div className="pob-live-action">
-            <div className="w-full flex flex-col gap-2 min-w-[240px]">
-              <div className="flex justify-between text-xs font-mono text-slate-400">
-                <span>Pool Progress</span>
-                <span className="text-[#00f59b]">29.4% Allocated</span>
-              </div>
-              <div className="w-full h-2 bg-white/8 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-[#00f59b] to-[#38bdf8] rounded-full" style={{ width: '29.4%' }} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* SINGLE PROGRESS STAGE TRACKER (UNIFIED PROGRESS GRID) */}
-        <div className="w-full bg-[#070a10] px-6 pt-5 pb-3 border-b border-white/6">
-          <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-2.5">
-            <span className="uppercase tracking-wider text-[11px] font-semibold text-[#00f59b]">
-              Lifecycle Progression
+      {/* ONE SINGLE PROGRESS GRID (UNIFIED PROGRESSION PIPELINE) */}
+      <div className="w-full rounded-2xl bg-[#080d16] border border-white/10 shadow-2xl overflow-hidden mb-6 p-6 md:p-8">
+        {/* TOP POOL ALLOCATION HEADER */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 mb-8 border-b border-white/8">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-bold text-[#00f59b] tracking-wider uppercase font-mono">
+              8.0% Community Reserve
             </span>
-            <span>
-              Target: <strong className="text-white">400 BITS</strong>
-            </span>
-          </div>
-
-          {/* Segmented multi-stage progress track */}
-          <div className="w-full h-2.5 bg-white/6 rounded-full overflow-hidden flex">
-            {/* Stage 1: Signup Grant (100 BITS = 25%) */}
-            <div style={{ width: '25%' }} className="h-full bg-[#00f59b]" title="Signup Grant: 100 BITS" />
-            {/* Stage 2: Verified Rewards (0%) */}
-            {referralBitsAvailable > 0 && (
-              <div style={{ width: `${Math.min(50, (referralBitsAvailable / 400) * 100)}%` }} className="h-full bg-[#38bdf8]" title="Verified Rewards" />
-            )}
-            {/* Stage 3: Pending Rewards (200 BITS = 50%) */}
-            <div style={{ width: '50%' }} className="h-full bg-[#f5a623] opacity-80" title="Pending Rewards: 200 BITS" />
-          </div>
-        </div>
-
-        {/* ONE SINGLE PROGRESS GRID (4 UNIFIED STAT CELLS SEPARATED BY HAIRLINE DIVIDERS) */}
-        <div className="pob-cockpit-stats">
-          {/* 1. SIGNUP GRANT */}
-          <div className="pob-stat-cell">
-            <span className="pob-stat-label">Signup Grant</span>
-            <span className="pob-stat-val text-white">
-              100 <span className="text-xs text-slate-400 font-normal">BITS</span>
-            </span>
-            <span className="pob-stat-sub text-slate-400 font-mono">
-              $10.00 USD
-            </span>
-          </div>
-
-          <div className="pob-stat-divider" />
-
-          {/* 2. VERIFIED REWARDS */}
-          <div className="pob-stat-cell">
-            <div className="flex items-center justify-between">
-              <span className="pob-stat-label">Verified Rewards</span>
-              {referralBitsAvailable > 0 && (
-                <button
-                  type="button"
-                  className="button button-primary !h-5 !px-2 !text-[10px] !rounded"
-                  disabled={isClaiming}
-                  onClick={handleClaimReferralBits}
-                >
-                  {isClaiming ? <RefreshCw size={10} className="animate-spin" /> : null}
-                  <span>Claim</span>
-                </button>
-              )}
-            </div>
-            <span className="pob-stat-val text-[#00f59b]">
-              {number(referralBitsAvailable)} <span className="text-xs text-slate-400 font-normal">BITS</span>
-            </span>
-            <span
-              onClick={() => setReferralsModalOpen(true)}
-              className="pob-stat-sub hover:text-white cursor-pointer transition-colors flex items-center gap-1 font-mono"
-            >
-              <span>{verifiedMembers.length} Qualified Peers</span>
-              <ChevronRight size={12} className="text-[#00f59b]" />
-            </span>
-          </div>
-
-          <div className="pob-stat-divider" />
-
-          {/* 3. PENDING REWARDS */}
-          <div className="pob-stat-cell">
-            <span className="pob-stat-label">Pending Rewards</span>
-            <span className="pob-stat-val text-[#f5a623]">
-              {number(pendingBitsCount)} <span className="text-xs text-slate-400 font-normal">BITS</span>
-            </span>
-            <span
-              onClick={() => setReferralsModalOpen(true)}
-              className="pob-stat-sub hover:text-white cursor-pointer transition-colors flex items-center gap-1 font-mono"
-            >
-              <span>{unverifiedMembers.length} Awaiting Stake</span>
-              <ChevronRight size={12} className="text-[#f5a623]" />
-            </span>
-          </div>
-
-          <div className="pob-stat-divider" />
-
-          {/* 4. STAKABLE BALANCE */}
-          <div className="pob-stat-cell">
-            <span className="pob-stat-label highlight">Stakable Balance</span>
-            <span className="pob-stat-val text-white">
-              {number(totalFreeBitsAcquired)} <span className="text-xs text-slate-400 font-normal">BITS</span>
-            </span>
-            <span
-              onClick={() => setSimulatorModalOpen(true)}
-              className="pob-stat-sub highlight hover:text-white cursor-pointer transition-colors flex items-center gap-1 font-mono"
-            >
-              <span>12% APY · {money(totalFreeBitsValueUsd)}</span>
-              <ChevronRight size={12} className="text-[#38bdf8]" />
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. INGRESS DISPATCH TERMINAL (CLEAN & HARDCODED) */}
-      <div className="pob-panel mb-6">
-        <div className="pob-panel-header">
-          <div>
-            <h3 className="pob-panel-title">Protocol Ingress Dispatch</h3>
-            <p className="pob-panel-subtitle">
-              Earn 100 Bits per verified referral who purchases and stakes min. $100 in the Proof-of-Burn engine.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
-            <span>Verified: <strong className="text-[#00f59b]">{verifiedMembers.length}</strong></span>
             <span className="text-white/20">|</span>
-            <span>Pending: <strong className="text-[#f5a623]">{unverifiedMembers.length}</strong></span>
+            <span className="font-mono text-sm font-bold text-white">
+              1,680,000 $Noir
+            </span>
+            <span className="text-xs text-slate-400 font-mono">
+              (18,480,000 Bits)
+            </span>
           </div>
-        </div>
 
-        <div className="pob-panel-body">
-          <div className="flex flex-col sm:flex-row items-stretch gap-3">
-            <div className="flex-1 bg-[#101622] border border-white/10 rounded-xl px-4 py-3 flex items-center">
-              <input
-                type="text"
-                readOnly
-                value={referralUrl}
-                className="w-full bg-transparent border-none text-xs font-mono text-slate-200 outline-none select-all"
+          <div className="flex items-center gap-4 min-w-[280px]">
+            <div className="text-xs font-mono text-slate-300 whitespace-nowrap">
+              Remaining: <strong className="text-white">13,050,000 Bits</strong> <span className="text-[#38bdf8]">(70.6%)</span>
+            </div>
+            <div className="flex-1 h-2 bg-white/8 rounded-full overflow-hidden min-w-[100px]">
+              <div
+                className="h-full bg-gradient-to-r from-[#00f59b] to-[#38bdf8] rounded-full"
+                style={{ width: '29.4%' }}
               />
             </div>
-            <button
-              type="button"
-              className="button button-primary !h-auto !py-3 !px-6 !text-xs !rounded-xl whitespace-nowrap"
-              onClick={() => copy(referralUrl, 'Invite Link')}
-            >
-              {copiedLink ? <Check size={14} /> : <Copy size={14} />}
-              <span>{copiedLink ? 'Copied to Clipboard' : 'Copy Gateway Link'}</span>
-            </button>
+          </div>
+        </div>
+
+        {/* SINGLE PROGRESS TRACKER: CONNECTED 4-STAGE PIPELINE */}
+        <div className="relative">
+          {/* Continuous Progress Bar Line running through all 4 milestones */}
+          <div className="hidden lg:block absolute top-[27px] left-[12%] right-[12%] h-[3px] bg-white/8 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-[#00f59b] via-[#38bdf8] to-[#f5a623] rounded-full"
+              style={{ width: '70%' }}
+            />
+          </div>
+
+          {/* 4 Checkpoint Milestones along the Single Progress Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 relative z-10">
+            {/* 1. SIGNUP GRANT */}
+            <div className="flex flex-col items-start lg:items-center text-left lg:text-center">
+              <div className="w-14 h-14 rounded-full bg-[#00f59b]/10 border-2 border-[#00f59b] flex items-center justify-center mb-3.5 shadow-[0_0_15px_rgba(0,245,155,0.25)] bg-[#080d16]">
+                <Check size={20} className="text-[#00f59b]" />
+              </div>
+              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
+                Signup Grant
+              </div>
+              <div className="font-mono text-2xl md:text-3xl font-bold text-white tracking-tight leading-none mb-1.5">
+                100 <span className="text-xs font-normal text-slate-400">BITS</span>
+              </div>
+              <div className="font-mono text-xs text-[#00f59b]">
+                $10.00 USD
+              </div>
+            </div>
+
+            {/* 2. VERIFIED REWARDS */}
+            <div className="flex flex-col items-start lg:items-center text-left lg:text-center">
+              <div className="w-14 h-14 rounded-full bg-[#00f59b]/10 border-2 border-[#00f59b] flex items-center justify-center mb-3.5 shadow-[0_0_15px_rgba(0,245,155,0.2)] bg-[#080d16]">
+                <Users size={20} className="text-[#00f59b]" />
+              </div>
+              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
+                Verified Rewards
+              </div>
+              <div className="font-mono text-2xl md:text-3xl font-bold text-[#00f59b] tracking-tight leading-none mb-1.5 flex items-center gap-2">
+                <span>{number(referralBitsAvailable)}</span>
+                <span className="text-xs font-normal text-slate-400">BITS</span>
+                {referralBitsAvailable > 0 && (
+                  <button
+                    type="button"
+                    className="button button-primary !h-6 !px-2.5 !text-[11px] !rounded"
+                    disabled={isClaiming}
+                    onClick={handleClaimReferralBits}
+                  >
+                    {isClaiming ? <RefreshCw size={11} className="animate-spin" /> : null}
+                    <span>Claim</span>
+                  </button>
+                )}
+              </div>
+              <div
+                onClick={() => setReferralsModalOpen(true)}
+                className="font-mono text-xs text-slate-400 hover:text-white cursor-pointer transition-colors flex items-center gap-1"
+                title="Click to view Referral Ledger"
+              >
+                <span>{verifiedMembers.length} Qualified Peers</span>
+                <ChevronRight size={12} className="text-[#00f59b]" />
+              </div>
+            </div>
+
+            {/* 3. PENDING REWARDS */}
+            <div className="flex flex-col items-start lg:items-center text-left lg:text-center">
+              <div className="w-14 h-14 rounded-full bg-[#f5a623]/10 border-2 border-[#f5a623] flex items-center justify-center mb-3.5 shadow-[0_0_15px_rgba(245,166,35,0.2)] bg-[#080d16]">
+                <Timer size={20} className="text-[#f5a623]" />
+              </div>
+              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
+                Pending Rewards
+              </div>
+              <div className="font-mono text-2xl md:text-3xl font-bold text-[#f5a623] tracking-tight leading-none mb-1.5">
+                {number(pendingBitsCount)} <span className="text-xs font-normal text-slate-400">BITS</span>
+              </div>
+              <div
+                onClick={() => setReferralsModalOpen(true)}
+                className="font-mono text-xs text-slate-400 hover:text-white cursor-pointer transition-colors flex items-center gap-1"
+                title="Click to view Referral Ledger"
+              >
+                <span>{unverifiedMembers.length} Awaiting Stake</span>
+                <ChevronRight size={12} className="text-[#f5a623]" />
+              </div>
+            </div>
+
+            {/* 4. STAKABLE BALANCE */}
+            <div className="flex flex-col items-start lg:items-center text-left lg:text-center">
+              <div className="w-14 h-14 rounded-full bg-[#38bdf8]/10 border-2 border-[#38bdf8] flex items-center justify-center mb-3.5 shadow-[0_0_15px_rgba(56,189,248,0.25)] bg-[#080d16]">
+                <TrendingUp size={20} className="text-[#38bdf8]" />
+              </div>
+              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
+                Stakable Balance
+              </div>
+              <div className="font-mono text-2xl md:text-3xl font-bold text-white tracking-tight leading-none mb-1.5">
+                {number(totalFreeBitsAcquired)} <span className="text-xs font-normal text-slate-400">BITS</span>
+              </div>
+              <div
+                onClick={() => setSimulatorModalOpen(true)}
+                className="font-mono text-xs text-[#38bdf8] hover:text-white cursor-pointer transition-colors flex items-center gap-1"
+                title="Click to open Yield Simulator"
+              >
+                <span>12% APY · {money(totalFreeBitsValueUsd)}</span>
+                <ChevronRight size={12} className="text-[#38bdf8]" />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -6600,8 +6424,11 @@ function App() {
                 {() => <ProtectedGate>{(account) => <TransactionsPage account={account} />}</ProtectedGate>}
               </Route>
 
-              {/* EARN & STAKING */}
+              {/* BITS MINING & PROOF-OF-BURN ENGINE (/staking, /mining) */}
               <Route path="/staking">
+                {() => <ProtectedGate>{(account) => <StakingPage account={account} />}</ProtectedGate>}
+              </Route>
+              <Route path="/mining">
                 {() => <ProtectedGate>{(account) => <StakingPage account={account} />}</ProtectedGate>}
               </Route>
 
