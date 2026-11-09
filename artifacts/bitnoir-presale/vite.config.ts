@@ -3,7 +3,6 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
-import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 import { bitnoirApiPlugin } from './src/lib/api-mock-plugin';
 
 const rawPort = process.env.PORT?.trim() || '3000';
@@ -22,20 +21,6 @@ export default defineConfig({
     bitnoirApiPlugin(),
     react(),
     tailwindcss({ optimize: true }),
-    ...(process.env.NODE_ENV !== 'production' &&
-    process.env.REPL_ID !== undefined
-      ? [
-          runtimeErrorOverlay(),
-          await import('@replit/vite-plugin-cartographer').then((m) =>
-            m.cartographer({
-              root: path.resolve(import.meta.dirname, '..'),
-            }),
-          ),
-          await import('@replit/vite-plugin-dev-banner').then((m) =>
-            m.devBanner(),
-          ),
-        ]
-      : []),
   ],
   resolve: {
     alias: {
@@ -59,7 +44,7 @@ export default defineConfig({
     strictPort: true,
     host: '0.0.0.0',
     allowedHosts: true,
-    hmr: process.env.DISABLE_HMR === 'true' ? false : undefined,
+    hmr: false,
     fs: {
       strict: false,
     },

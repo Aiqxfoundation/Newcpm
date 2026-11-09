@@ -2,10 +2,10 @@ import type { Plugin } from 'vite';
 
 export function bitnoirApiPlugin(): Plugin {
   // Protocol configuration
-  const BITNOIR_REFERENCE_PRICE = 50; // $50 protocol accounting valuation
+  const BITNOIR_REFERENCE_PRICE = 1.1; // $1.10 protocol accounting valuation ($1.1 Per Noir)
   const USDT_PER_BITS = 0.1; // 100 USDT = 1,000 Bits
   const MIN_CLAIM_USDT = 2; // Minimum $2 claim threshold
-  const MIN_CLAIM_BITNOIR = MIN_CLAIM_USDT / BITNOIR_REFERENCE_PRICE; // 0.04 BITS
+  const MIN_CLAIM_BITNOIR = MIN_CLAIM_USDT / BITNOIR_REFERENCE_PRICE; // ~1.8182 Bitnoir
 
   let launchSettings = {
     saleOpen: true,
@@ -30,18 +30,21 @@ export function bitnoirApiPlugin(): Plugin {
   // User state
   const userAccount = {
     id: 'member-alpha',
-    name: 'SatoshiNode',
-    email: 'node@bitnoir.io',
+    name: 'satoshi',
+    email: 'satoshi@bitnoir.io',
     role: 'admin',
-    referralCode: 'BITS-SATOSHINODE',
-    referredBy: null as string | null,
-    xp: 350,
+    referralCode: 'satoshi',
+    freeSignupBits: 100,      // 100 Free Bits credited for signup ($10 value)
+    referralBitsAvailable: 200, // 200 Verified Referral Bits available to claim
+    referralBitsClaimed: 100,   // 100 Verified Referral Bits already claimed
+    referralBitsPending: 200,   // 200 Unverified Referral Bits awaiting referee $100+ purchase & stake
     balances: {
-      purchased: 5000,      // 5,000 Bits ($500 value) available for staking
-      staked: 10000,        // 10,000 Bits locked in active staking position
-      burned: 12000,        // 10,000 Bits staked + 2,000 Bits burned for claimed rewards (1 Bitnoir = 500 Bits)
-      claimable: 0.1600,    // 0.16 Bitnoir tokens ($8.00 at $50 reference price - ready for withdrawal/claim!)
-      claimed: 0.0400,      // 0.04 Bitnoir tokens previously claimed ($2.00)
+      purchased: 5100,      // Includes 100 Free Signup Bits + purchased
+      freeBits: 100,        // 100 Free Signup Bits
+      staked: 10000,        // 10,000 Bits locked in active staking position ($1,000 value)
+      burned: 10080,        // 10,000 Bits staked + 80 Bits burned for claimed rewards
+      claimable: 10.9091,   // Bitnoir tokens ready for withdrawal/claim
+      claimed: 7.2727,      // Bitnoir tokens previously claimed
       swapAvailable: 0,
     },
     createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
@@ -65,10 +68,10 @@ export function bitnoirApiPlugin(): Plugin {
       id: 1,
       stakedBits: 10000,
       lockupDays: 60,
-      rewardRate: 0.28,
-      accruedReward: 0.1600,
-      claimedReward: 0.0400,
-      principalReturnTokens: 20.0,
+      rewardRate: 0.02,
+      accruedReward: 10.9091,
+      claimedReward: 7.2727,
+      principalReturnTokens: 909.0909,
       createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
       unlocksAt: new Date(Date.now() + 46 * 86400000).toISOString(),
       status: 'active' as const,
@@ -114,7 +117,7 @@ export function bitnoirApiPlugin(): Plugin {
       id: 103,
       kind: 'stake',
       title: 'Bits Staked & Burned',
-      detail: '10,000 Bits burned into 60-day staking term at 16% reward rate.',
+      detail: '10,000 Bits burned into 60-day staking term at 2.0% term yield (12% APY).',
       createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
     },
     {
@@ -286,25 +289,121 @@ export function bitnoirApiPlugin(): Plugin {
       return sendJson(res, 200, myDeposits);
     }
 
+    if (url === '/api/accounts/me/team' && req.method === 'GET') {
+      const teamList = [
+        {
+          id: 'member-1',
+          handle: 'marcus_v',
+          address: '0x3507e4978e0eb83315d20df86ca0b976c0e40ccb',
+          joinedAt: new Date(Date.now() - 4 * 86400000).toISOString(),
+          status: 'verified', // Qualified: >= $100 purchased & staked
+          stakedBits: 25000,
+          volumeUsdt: 2500,
+          bitsReward: 100,
+          isVerified: true,
+          verificationRequirement: 'Qualified ($2,500 staked)',
+          tier: 'Gold Tier',
+        },
+        {
+          id: 'member-2',
+          handle: 'sarah_k',
+          address: '0x71C8360437E55928d11B3e264259837a7F9D7065',
+          joinedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+          status: 'verified', // Qualified: >= $100 purchased & staked
+          stakedBits: 10000,
+          volumeUsdt: 1000,
+          bitsReward: 100,
+          isVerified: true,
+          verificationRequirement: 'Qualified ($1,000 staked)',
+          tier: 'Silver Tier',
+        },
+        {
+          id: 'member-3',
+          handle: 'elena_d',
+          address: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
+          joinedAt: new Date(Date.now() - 12 * 86400000).toISOString(),
+          status: 'verified', // Qualified: >= $100 purchased & staked
+          stakedBits: 5000,
+          volumeUsdt: 500,
+          bitsReward: 100,
+          isVerified: true,
+          verificationRequirement: 'Qualified ($500 staked)',
+          tier: 'Bronze Tier',
+        },
+        {
+          id: 'member-4',
+          handle: 'david_w',
+          address: '0x12a95c80881912a7a40b1928374a56b192847c5d',
+          joinedAt: new Date(Date.now() - 1 * 86400000).toISOString(),
+          status: 'unverified', // Unverified: Ref must purchase min. $100 & stake
+          stakedBits: 0,
+          volumeUsdt: 0,
+          bitsReward: 100,
+          isVerified: false,
+          verificationRequirement: 'Unverified: Referee must purchase min. $100 (1,000 Bits) & stake',
+          tier: 'New Member',
+        },
+        {
+          id: 'member-5',
+          handle: 'alex_c',
+          address: '0x9928f80881912a7a40b1928374a56b192847a11',
+          joinedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+          status: 'unverified', // Unverified: Only $25, needs $100 min
+          stakedBits: 250,
+          volumeUsdt: 25,
+          bitsReward: 100,
+          isVerified: false,
+          verificationRequirement: 'Unverified: Only $25 staked (Min. $100 required)',
+          tier: 'New Member',
+        },
+      ];
+      return sendJson(res, 200, teamList);
+    }
+
+    if ((url === '/api/accounts/me/claim-referral-bits' || url === '/api/accounts/me/claim-referral-xp') && req.method === 'POST') {
+      const available = userAccount.referralBitsAvailable || 0;
+      if (available <= 0) {
+        return sendJson(res, 400, { error: 'No verified referral Bits available to claim.' });
+      }
+      userAccount.referralBitsClaimed = (userAccount.referralBitsClaimed || 0) + available;
+      userAccount.referralBitsAvailable = 0;
+      userAccount.balances.purchased += available; // Directly credited into user's stakable balance!
+      activityList.unshift({
+        id: Date.now(),
+        kind: 'reward',
+        title: 'Verified Referral Bits Claimed',
+        detail: `Successfully claimed +${available} Verified Bits into your balance. Ready to stake in Proof-of-Burn!`,
+        createdAt: new Date().toISOString(),
+      });
+      return sendJson(res, 200, {
+        success: true,
+        claimedBits: available,
+        referralBitsAvailable: 0,
+        referralBitsClaimed: userAccount.referralBitsClaimed,
+        balances: userAccount.balances,
+        message: `Claimed +${available} Verified Referral Bits to your available balance!`,
+      });
+    }
+
     if (url === '/api/accounts/me/referral' && req.method === 'POST') {
       const body = await parseBody(req);
-      const code = String(body.code || '').trim().toUpperCase();
+      const raw = String(body.code || '').trim();
+      const code = raw.replace(/^bits-/i, '').toLowerCase();
       if (!code) {
-        return sendJson(res, 400, { error: 'Please enter a referral code.' });
+        return sendJson(res, 400, { error: 'Please enter a valid inviter username.' });
       }
       if (userAccount.referredBy) {
-        return sendJson(res, 400, { error: 'A referral code has already been linked to this account.' });
+        return sendJson(res, 400, { error: 'An inviter has already been linked to this account.' });
       }
       userAccount.referredBy = code;
-      userAccount.xp += 250;
       activityList.unshift({
         id: Date.now(),
         kind: 'referral',
-        title: 'Referral Code Linked',
-        detail: `Linked to sponsor ${code}. 250 bonus XP credited.`,
+        title: 'Inviter Linked',
+        detail: `Linked to inviter @${code}. Welcome to Bitnoir referral network!`,
         createdAt: new Date().toISOString(),
       });
-      return sendJson(res, 200, { applied: true, xpAwarded: 250, message: `Invite code ${code} verified. 250 XP added.` });
+      return sendJson(res, 200, { applied: true, message: `Inviter @${code} linked successfully!` });
     }
 
     if (url === '/api/accounts/me/stake' && req.method === 'POST') {
@@ -320,14 +419,9 @@ export function bitnoirApiPlugin(): Plugin {
         return sendJson(res, 400, { error: 'Lockup duration must be between 30 and 90 days.' });
       }
 
-      // Exact mathematical yield curve (30d = 12%, 60d = 28%, 90d = 60%)
-      const rate = days <= 30
-        ? 0.12
-        : days >= 90
-        ? 0.60
-        : days <= 60
-        ? 0.12 + ((days - 30) / 30) * (0.28 - 0.12)
-        : 0.28 + ((days - 60) / 30) * (0.60 - 0.28);
+      // Exact mathematical yield curve based on 12% fair annual yield (12% per year)
+      // 30d = 1.0%, 60d = 2.0%, 90d = 3.0%
+      const rate = (days / 360) * 0.12;
       
       // Burning mechanism: Staked Bits are permanently committed to protocol engine
       userAccount.balances.purchased -= amount;
@@ -408,7 +502,7 @@ export function bitnoirApiPlugin(): Plugin {
         });
       }
 
-      // Proof-of-Burn Settlement: 1 Bitnoir = 500 Bits (1 Bitnoir = $50, 1 Bits = $0.10)
+      // Proof-of-Burn Settlement: 1 Bitnoir = 11 Bits (1 Bitnoir = $1.10, 1 Bits = $0.10)
       const burnedBitsForReward = Math.round((claimable * BITNOIR_REFERENCE_PRICE) / USDT_PER_BITS);
 
       userAccount.balances.claimed = (userAccount.balances.claimed || 0) + claimable;
@@ -645,19 +739,19 @@ export function bitnoirApiPlugin(): Plugin {
 
         // Term Distribution Breakdown
         termBreakdown: [
-          { termDays: 30, tier: 'Base Tier', rate: '12%', totalBits: 3260000, stakers: 412, sharePercent: 22 },
-          { termDays: 60, tier: 'Accelerated Tier', rate: '28%', totalBits: 6840000, stakers: 620, sharePercent: 46 },
-          { termDays: 90, tier: 'Maximum Tier', rate: '60%', totalBits: 4740000, stakers: 388, sharePercent: 32 },
+          { termDays: 30, tier: 'Base Tier', rate: '1.0% (12% APY)', totalBits: 3260000, stakers: 412, sharePercent: 22 },
+          { termDays: 60, tier: 'Bi-Monthly Tier', rate: '2.0% (12% APY)', totalBits: 6840000, stakers: 620, sharePercent: 46 },
+          { termDays: 90, tier: 'Quarterly Tier', rate: '3.0% (12% APY)', totalBits: 4740000, stakers: 388, sharePercent: 32 },
         ],
 
         // Recent Global Staker & Burning Ledger
         recentNetworkEvents: [
-          { id: 1, type: 'stake', title: 'Bits Committed to Staking', detail: '25,000 Bits locked into 90-Day Term (60% APY)', participant: 'Node_8f29', time: '3m ago', bits: 25000 },
+          { id: 1, type: 'stake', title: 'Bits Committed to Staking', detail: '25,000 Bits locked into 90-Day Term (3.0% yield · 12% APY)', participant: 'Node_8f29', time: '3m ago', bits: 25000 },
           { id: 2, type: 'claim', title: 'Proof-of-Burn Settlement', detail: '0.4200 Bitnoir claimed · 210 Bits burned', participant: 'Node_c14e', time: '9m ago', tokens: 0.42 },
           { id: 3, type: 'stake', title: 'Position Increased', detail: '10,000 Bits added to active 60-Day Term', participant: 'Node_77aa', time: '18m ago', bits: 10000 },
-          { id: 4, type: 'burn', title: 'Protocol Proof-of-Burn', detail: '500 Bits permanently burned for emission dispatch', participant: 'System_Burn', time: '31m ago', bits: 500 },
+          { id: 4, type: 'burn', title: 'Protocol Proof-of-Burn', detail: '55 Bits permanently burned for emission dispatch', participant: 'System_Burn', time: '31m ago', bits: 55 },
           { id: 5, type: 'stake', title: 'New Staker Joined', detail: '5,000 Bits locked into 30-Day Base Term', participant: 'Node_993c', time: '44m ago', bits: 5000 },
-          { id: 6, type: 'claim', title: 'Farming Rewards Dispatched', detail: '0.1600 Bitnoir claimed ($8.00 USD value)', participant: 'Node_b10a', time: '1h ago', tokens: 0.16 },
+          { id: 6, type: 'claim', title: 'Farming Rewards Dispatched', detail: '2.0000 Bitnoir claimed ($2.20 USD value)', participant: 'Node_b10a', time: '1h ago', tokens: 2.0 },
         ]
       });
     }

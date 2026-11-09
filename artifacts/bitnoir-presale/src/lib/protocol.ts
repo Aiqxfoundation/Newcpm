@@ -6,7 +6,7 @@ import type { UserAccount } from '@workspace/api-client-react';
  * - Bits: non-transferable internal points. 1 USDT = 10 Bits. Used only to open stakes; burned when staked.
  * - Bitnoir: the real token. Earned as staking rewards and returned as principal at maturity.
  */
-export const BITNOIR_PRICE = 50;
+export const BITNOIR_PRICE = 1.1; // $1.10 per Noir
 export const BNR_PRICE = BITNOIR_PRICE;
 export const BITS_PRICE = 0.1;
 export const BITS_PER_USDT = 10;
@@ -17,13 +17,15 @@ export const MAX_SUPPLY = 21_000_000;
 export const BITNOIR = 'Bitnoir';
 export const BNR = 'Bitnoir';
 
+export const ANNUAL_FAIR_YIELD = 0.12; // 12% Annual Fair Yield (12% per year)
+
 export const TERMS = [
-  { days: 30, rate: 0.08 },
-  { days: 60, rate: 0.16 },
-  { days: 90, rate: 0.28 },
+  { days: 30, rate: 0.01 }, // 1.0% for 30 days (12% APY)
+  { days: 60, rate: 0.02 }, // 2.0% for 60 days (12% APY)
+  { days: 90, rate: 0.03 }, // 3.0% for 90 days (12% APY)
 ] as const;
 
-export const rateForDays = (days: number) => TERMS.find((t) => t.days === days)?.rate ?? 0.08;
+export const rateForDays = (days: number) => (days / 360) * ANNUAL_FAIR_YIELD;
 
 export const CHAIN_NAMES: Record<string, string> = {
   bnb: 'BNB Smart Chain',
@@ -87,6 +89,37 @@ export const bitsToUsd = (bits: number) => bits * BITS_PRICE;
 export const bnrToUsd = (bnr: number) => bnr * BNR_PRICE;
 export const bitsToBnr = (bits: number) => bitsToUsd(bits) / BNR_PRICE;
 
+export const BITS_PER_NOIR = 11; // 11 Bits = 1 $Noir ($0.10 * 11 = $1.10)
+export const HASH_PER_BIT_GH = 10; // 10 GH/s per Bit (100 Bits = 1,000 GH/s = 1 TH/s)
+export const EPOCH_90D_DAYS = 90;
+export const EPOCH_90D_RATE = 0.03; // 3.0% yield over 90 days (12% annual APY)
+
+export function formatHashrate(ghs: number): string {
+  if (ghs >= 1_000_000) return `${(ghs / 1_000_000).toFixed(2)} PH/s`;
+  if (ghs >= 1_000) return `${(ghs / 1_000).toFixed(2)} TH/s`;
+  return `${ghs.toFixed(1)} GH/s`;
+}
+
+export function calculateMiningConversion(minedBits: number, days = 90) {
+  const rate = rateForDays(days);
+  const principalUsd = bitsToUsd(minedBits);
+  const principalNoir = principalUsd / BNR_PRICE; // Bits / 11
+  const yieldNoir = principalNoir * rate; // 3.0% for 90d
+  const totalNoir = principalNoir + yieldNoir;
+  const totalUsd = totalNoir * BNR_PRICE;
+  const effectiveRatio = minedBits > 0 ? (minedBits / totalNoir).toFixed(2) : '10.68';
+  return {
+    days,
+    rate,
+    ratePercent: (rate * 100).toFixed(1),
+    principalNoir,
+    yieldNoir,
+    totalNoir,
+    totalUsd,
+    effectiveRatio, // e.g. "10.68 Bits per Noir" with 90-day yield
+  };
+}
+
 export function stakeQuote(bits: number, days: number) {
   const rate = rateForDays(days);
   const principal = bitsToBnr(bits);
@@ -103,19 +136,27 @@ export function positionProgress(p: StakingPosition) {
   return { pct, daysLeft, daysDone: p.lockupDays - daysLeft };
 }
 
-export const TIERS = [
-  { name: 'Bronze', min: 0 },
-  { name: 'Silver', min: 500 },
-  { name: 'Gold', min: 1500 },
-  { name: 'Diamond', min: 5000 },
+export const FREE_SIGNUP_BITS = 100; // 100 Free Bits for every signup
+export const REFERRAL_REWARD_BITS = 100; // 100 Bits per verified referral
+export const REFERRAL_MIN_QUALIFY_USD = 100; // Min $100 purchase & stake required to verify
+export const REFERRAL_MIN_QUALIFY_BITS = REFERRAL_MIN_QUALIFY_USD * BITS_PER_USDT; // 1,000 Bits
+export const AIRDROP_SHARE_PERCENT = 8; // 8% of 21,000,000 fixed supply
+export const AIRDROP_SHARE_TOKENS = 1_680_000; // 1,680,000 Bitnoir Tokens
+export const AIRDROP_SHARE_BITS = 18_480_000; // 18,480,000 Community Grant Bits Pool ($1,848,000 USD / $0.10)
+
+export const BITS_TIERS = [
+  { name: 'Bronze Member', min: 0 },
+  { name: 'Silver Member', min: 500 },
+  { name: 'Gold Ambassador', min: 2500 },
+  { name: 'Diamond Node', min: 10000 },
 ] as const;
 
-export function tierFor(xp: number) {
+export function tierFor(bits: number) {
   let index = 0;
-  TIERS.forEach((t, i) => { if (xp >= t.min) index = i; });
-  const current = TIERS[index];
-  const next = TIERS[index + 1];
-  const pct = next ? (xp - current.min) / (next.min - current.min) : 1;
+  BITS_TIERS.forEach((t, i) => { if (bits >= t.min) index = i; });
+  const current = BITS_TIERS[index];
+  const next = BITS_TIERS[index + 1];
+  const pct = next ? (bits - current.min) / (next.min - current.min) : 1;
   return { current, next, pct };
 }
 
