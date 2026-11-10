@@ -2,15 +2,15 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type F
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
-  ChevronDown, ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Gift, Globe2, HelpCircle, Info,
+  ChevronDown, ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Globe2, HelpCircle, Info,
   Landmark, Layers3, Link as LinkIcon, Lock, LockKeyhole, LogOut, Menu, PieChart, Plus, QrCode, Radio, RefreshCw,
-  Search, Send, ShieldAlert, ShieldCheck, Sliders, Sparkles, Timer, TrendingUp, Trophy, UserCheck, Users, Wallet, X, Zap,
+  Search, Send, ShieldAlert, ShieldCheck, Sliders, Sparkles, Timer, TrendingUp, Trophy, Users, Wallet, X, Zap,
 } from 'lucide-react';
 import {
   getGetAdminAddressesQueryKey, getGetAdminDepositsQueryKey, getGetAdminSummaryQueryKey,
   getGetDepositAddressesQueryKey,
   getGetMyAccountQueryKey, getGetMyActivityQueryKey, getGetMyDepositsQueryKey,
-  getGetPresaleOverviewQueryKey, useApplyReferralCode, useCreateDeposit,
+  getGetPresaleOverviewQueryKey, useCreateDeposit,
   useDecideDeposit, useGetAdminAddresses, useGetAdminDeposits, useGetAdminSummary,
   useGetDepositAddresses,
   useGetMyAccount, useGetMyActivity, useGetMyDeposits, useGetPresaleOverview,
@@ -353,7 +353,6 @@ function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
         <Link href="/" className={location === '/' ? 'active' : ''}>Overview</Link>
         <Link href="/wallet" className={location.startsWith('/wallet') || location === '/deposit' ? 'active' : ''}>Wallet</Link>
         <Link href="/staking" className={location === '/staking' || location === '/mining' ? 'active' : ''}>Mining</Link>
-        <Link href="/statistics" className={location === '/statistics' || location === '/pool' ? 'active' : ''}>Statistics</Link>
         <Link href="/docs" className={location === '/docs' ? 'active' : ''}>Whitepaper</Link>
       </nav>
       <div className="top-actions">
@@ -1887,10 +1886,7 @@ function SignUpPage() {
 // Clean Coinbase-style unified tab architecture (eliminating tab clutter)
 const navMain = [
   { href: '/wallet', label: 'Wallet', description: 'Portfolio, balances & assets', icon: Wallet },
-  { href: '/staking', label: 'Bits Mining', description: 'Base 0.1/hr, team boost & burn SOL', icon: Flame },
-  { href: '/activity', label: 'Transactions', description: 'Complete ledger & audit history', icon: FileClock },
-  { href: '/statistics', label: 'Statistics', description: 'Overall stakers & protocol metrics', icon: Globe2 },
-  { href: '/referrals', label: 'Airdrop & Free Bits', description: '100 Free Bits signup & referral network', icon: Gift },
+  { href: '/staking', label: 'Bits Mining', description: 'Base 0.1/hr, team boost & SOL Power', icon: Flame },
   { href: '/docs', label: 'Whitepaper', description: 'Protocol specifications', icon: BookOpen },
 ];
 
@@ -1940,9 +1936,8 @@ function AppShell({
         <div className="side-caption">Ecosystem Navigation</div>
         <nav className="sidebar-nav">
           {navMain.map(({ href, label, description, icon: Icon }) => {
-            const isStatActive = href === '/statistics' && (active === '/statistics' || active === '/statics' || active === '/pool');
-            const isWalletActive = href === '/wallet' && (active === '/deposit' || active.startsWith('/asset'));
-            const isActive = active === href || isStatActive || isWalletActive;
+            const isWalletActive = href === '/wallet' && (active === '/deposit' || active.startsWith('/asset') || active === '/activity' || active === '/transactions');
+            const isActive = active === href || isWalletActive;
 
             return (
               <Link
@@ -3328,11 +3323,11 @@ function MiningGuideModal({ open, onClose }: { open: boolean; onClose: () => voi
 
           <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/8">
             <div className="flex items-center gap-2 mb-1 text-sm font-bold text-white">
-              <Flame size={15} className="text-[#ff8b2f]" />
-              <span>3. Burn SOL to Mine More Bits (0.1 to 10 SOL Max)</span>
+              <Zap size={15} className="text-[#ff8b2f]" />
+              <span>3. SOL Power (Max 10 SOL Contribution)</span>
             </div>
             <p className="text-slate-400 m-0 leading-relaxed">
-              Burn 0.1 to 10 SOL into the protocol null sink to supercharge your hash rate. Each 1 SOL burned grants +5.0000 Bits/hr (up to +50 Bits/hr).
+              Contribute SOL to acquire SOL Power. Each 1 SOL contributed grants +5.0000 Bits/hr of SOL Power to mine more Bits (up to max 10 SOL per account).
             </p>
           </div>
 
@@ -3358,7 +3353,7 @@ function MiningGuideModal({ open, onClose }: { open: boolean; onClose: () => voi
 }
 
 // ---------------------------------------------------------------------------
-// SOL MINING HASH POWER DYNAMIC CURVE
+// SOL MINING POWER DYNAMIC CURVE
 // ---------------------------------------------------------------------------
 function SolMiningPowerCurve({ solAmount }: { solAmount: number }) {
   const norm = Math.max(0, Math.min(1, (solAmount - 0.1) / (10 - 0.1)));
@@ -3368,7 +3363,7 @@ function SolMiningPowerCurve({ solAmount }: { solAmount: number }) {
   return (
     <div className="w-full h-[76px] my-2 bg-black/40 rounded-xl p-2 border border-white/5 relative overflow-hidden">
       <div className="absolute top-2 left-3 text-[10px] font-mono text-slate-400">
-        Hash Boost: <strong className="text-[#ff8b2f]">{(solAmount * 5).toFixed(1)} Bits/hr</strong>
+        SOL Power: <strong className="text-[#ff8b2f]">{(solAmount * 5).toFixed(1)} Bits/hr</strong>
       </div>
       <div className="absolute top-2 right-3 text-[10px] font-mono text-slate-400">
         Max: <strong className="text-[#00f59b]">50.0 Bits/hr (10 SOL)</strong>
@@ -3415,54 +3410,76 @@ function SolMiningPowerCurve({ solAmount }: { solAmount: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// BURN SOL TO MINE MORE BITS MODAL (0.1 TO 10 SOL MAX)
+// SOL POWER MODAL: CONTRIBUTE SOL TO ACQUIRE SOL POWER (MAX 10 SOL PER ACCOUNT)
 // ---------------------------------------------------------------------------
-function BurnSolMiningModal({
+function SolPowerModal({
   open,
   onClose,
-  onCommitBurn,
+  onCommitContribution,
+  currentContributed = 0.5,
   isPending = false,
 }: {
   open: boolean;
   onClose: () => void;
-  onCommitBurn: (solAmount: number) => Promise<void>;
+  onCommitContribution: (solAmount: number) => Promise<void>;
+  currentContributed?: number;
   isPending?: boolean;
 }) {
   if (!open) return null;
 
-  const [solAmount, setSolAmount] = useState<number>(1.0);
-  const minSol = 0.1;
-  const maxSol = 10.0;
+  const maxAccountSol = 10.0;
+  const remainingQuota = Math.max(0, Number((maxAccountSol - currentContributed).toFixed(2)));
+  const isCapped = remainingQuota <= 0;
 
-  const clampedSol = Math.max(minSol, Math.min(maxSol, solAmount));
+  const defaultSol = Math.min(1.0, Math.max(0.1, remainingQuota > 0 ? remainingQuota : 0.1));
+  const [solAmount, setSolAmount] = useState<number>(defaultSol);
+
+  const clampedSol = Math.max(0.1, Math.min(remainingQuota > 0 ? remainingQuota : 0.1, solAmount));
   const rateBoost = clampedSol * 5.0; // 1 SOL = +5.0 Bits/hr
   const dailyOutput = rateBoost * 24;
-  const monthlyOutput = dailyOutput * 30;
   const usdValue = clampedSol * 180;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+        {/* MODAL HEADER */}
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255, 139, 47, 0.12)', display: 'grid', placeItems: 'center', color: '#ff8b2f' }}>
-              <Flame size={18} />
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255, 139, 47, 0.15)', display: 'grid', placeItems: 'center', color: '#ff8b2f' }}>
+              <Zap size={18} />
             </div>
             <div>
-              <h3 style={{ margin: 0, color: '#fff', fontSize: 18 }}>Burn SOL to Mine More Bits</h3>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>Proof-of-Burn Hash Multiplier · 0.1 to 10 SOL Max</p>
+              <h3 style={{ margin: 0, color: '#fff', fontSize: 18, fontWeight: 700 }}>Contribute SOL</h3>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
+                Acquire SOL Power to mine more Bits · Max 10 SOL per account
+              </p>
             </div>
           </div>
           <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
         </div>
 
         <div className="flex flex-col gap-4">
-          {/* SLIDER & SELECTION */}
+          {/* ACCOUNT QUOTA PROGRESS - LESS TEXT, EASY UNDERSTANDABLE */}
+          <div className="p-3 rounded-xl bg-white/[0.02] border border-white/8 flex items-center justify-between text-xs font-mono">
+            <span className="text-slate-400 font-sans">Account Limit:</span>
+            <div className="flex items-center gap-2">
+              <span className="text-white font-bold tabular-nums">
+                {currentContributed.toFixed(1)} / {maxAccountSol.toFixed(1)} SOL
+              </span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                isCapped ? 'bg-red-500/20 text-red-400' : 'bg-[#00f59b]/15 text-[#00f59b]'
+              }`}>
+                {isCapped ? 'MAX REACHED' : `${remainingQuota.toFixed(1)} SOL REMAINING`}
+              </span>
+            </div>
+          </div>
+
+          {/* SLIDER & PRESETS (EXACT DESIGN) */}
           <div className="pob-input-box">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Burn Allocation</span>
+              <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">SOL Power Contribution</span>
               <span className="text-xs font-mono font-bold text-[#ff8b2f] bg-[#ff8b2f]/10 px-2 py-0.5 rounded">
-                +{rateBoost.toFixed(4)} Bits/hr Boost
+                +{rateBoost.toFixed(4)} Bits/hr
               </span>
             </div>
 
@@ -3472,70 +3489,191 @@ function BurnSolMiningModal({
               <input
                 type="range"
                 min="0.1"
-                max="10.0"
+                max={Math.max(0.1, remainingQuota)}
                 step="0.1"
+                disabled={isCapped}
                 value={clampedSol}
                 onChange={(e) => setSolAmount(Number(e.target.value))}
                 className="modern-range-line"
-                aria-label="SOL to burn"
+                aria-label="SOL to contribute"
               />
             </div>
 
             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-              {[0.1, 0.5, 1.0, 2.5, 5.0, 10.0].map((val) => (
+              {[0.5, 1.0, 2.0, 5.0].filter((val) => val <= remainingQuota).map((val) => (
                 <button
                   key={val}
                   type="button"
                   className={`pob-preset-btn ${clampedSol === val ? '!bg-[#ff8b2f]/20 !text-[#ff8b2f] !border-[#ff8b2f]/40 font-bold' : ''}`}
                   onClick={() => setSolAmount(val)}
                 >
-                  {val === 10.0 ? '10 SOL MAX' : `${val} SOL`}
+                  {val} SOL
                 </button>
               ))}
+              {remainingQuota > 0 && (
+                <button
+                  type="button"
+                  className={`pob-preset-btn ${clampedSol === remainingQuota ? '!bg-[#ff8b2f]/20 !text-[#ff8b2f] !border-[#ff8b2f]/40 font-bold' : ''}`}
+                  onClick={() => setSolAmount(remainingQuota)}
+                >
+                  MAX ({remainingQuota.toFixed(1)} SOL)
+                </button>
+              )}
             </div>
           </div>
 
-          {/* TELEMETRY RECEIPT */}
+          {/* CLEAN METRICS - LESS TEXT EASY UNDERSTANDABLE */}
           <div className="pob-panel-body flex flex-col gap-2.5 bg-black/30 p-3.5 rounded-xl border border-white/5 font-mono text-xs">
             <div className="flex justify-between items-center text-slate-300">
-              <span className="text-slate-400 font-sans">SOL to Burn:</span>
-              <span className="font-bold text-white tabular-nums">{clampedSol.toFixed(1)} SOL <span className="text-slate-500 font-normal font-sans">(≈ ${usdValue.toFixed(2)} USD)</span></span>
+              <span className="text-slate-400 font-sans">Contribute:</span>
+              <span className="font-bold text-white tabular-nums">{clampedSol.toFixed(1)} SOL <span className="text-slate-500 font-normal font-sans">(≈ ${usdValue.toFixed(2)})</span></span>
             </div>
             <div className="flex justify-between items-center text-slate-300">
-              <span className="text-slate-400 font-sans">Hash Power Boost:</span>
+              <span className="text-slate-400 font-sans">SOL Power Acquired:</span>
               <span className="font-bold text-[#ff8b2f] tabular-nums">+{rateBoost.toFixed(4)} Bits/hr</span>
             </div>
             <div className="flex justify-between items-center text-slate-300">
               <span className="text-slate-400 font-sans">24h Estimated Output:</span>
               <span className="font-bold text-[#00f59b] tabular-nums">+{dailyOutput.toFixed(1)} Bits</span>
             </div>
-            <div className="flex justify-between items-center text-slate-300">
-              <span className="text-slate-400 font-sans">30d Total Output:</span>
-              <span className="font-bold text-white tabular-nums">+{monthlyOutput.toLocaleString()} Bits</span>
-            </div>
-            <div className="h-px bg-white/10 my-0.5" />
-            <div className="flex justify-between items-center text-[11px] text-slate-400">
-              <span className="font-sans">Protocol Burn Sink:</span>
-              <span className="text-slate-300">9xQe...VFin (Null Sink)</span>
-            </div>
           </div>
 
+          {/* ACTION BUTTON */}
           <button
             type="button"
             className="clean-stake-confirm-btn !bg-gradient-to-r !from-[#ff8b2f] !to-[#ff5252] !text-black !font-bold"
-            disabled={isPending}
-            onClick={() => onCommitBurn(clampedSol)}
+            disabled={isPending || isCapped}
+            onClick={() => onCommitContribution(clampedSol)}
           >
             {isPending ? (
               <span className="flex items-center gap-2 justify-center">
-                <RefreshCw size={14} className="animate-spin" /> Burning SOL…
+                <RefreshCw size={14} className="animate-spin" /> Processing…
+              </span>
+            ) : isCapped ? (
+              <span className="flex items-center gap-2 justify-center">
+                <Check size={16} /> Max 10 SOL Contributed
               </span>
             ) : (
               <span className="flex items-center gap-2 justify-center">
-                <Flame size={16} /> Burn {clampedSol.toFixed(1)} SOL to Mine More Bits
+                <Zap size={16} /> Contribute {clampedSol.toFixed(1)} SOL to Acquire SOL Power
               </span>
             )}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Backward-compatibility alias
+const BurnSolMiningModal = SolPowerModal;
+
+// ---------------------------------------------------------------------------
+// CLAIMED POINTS OVERLAY MODAL (PERFECTION ARCHITECTURED OVERLAY)
+// ---------------------------------------------------------------------------
+function ClaimedPointsOverlayModal({
+  open,
+  onClose,
+  claimedTotalBits,
+  claimHistoryList,
+}: {
+  open: boolean;
+  onClose: () => void;
+  claimedTotalBits: number;
+  claimHistoryList: Array<{ id: number; amount: number; status: string }>;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-dialog"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 460,
+          padding: 24,
+          background: 'linear-gradient(180deg, #0c121d 0%, #070b12 100%)',
+          borderColor: 'rgba(0, 245, 155, 0.35)',
+          boxShadow: '0 24px 70px rgba(0, 0, 0, 0.85), 0 0 35px rgba(0, 245, 155, 0.18)',
+          borderRadius: 20,
+        }}
+      >
+        {/* MODAL HEADER */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <BitsMark size={32} className="drop-shadow-[0_0_12px_rgba(0,245,155,0.4)]" />
+            <div>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: '-0.01em' }}>
+                Claimed Points Ledger
+              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                <span className="font-mono text-xs font-bold text-[#00f59b] tabular-nums">
+                  {claimedTotalBits.toFixed(4)} BITS
+                </span>
+                <span className="text-[10px] font-mono text-slate-400">·</span>
+                <span className="text-[10px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
+                  {claimHistoryList.length} Settled
+                </span>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            aria-label="Close"
+            style={{ width: 34, height: 34 }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* CLEAN STYLE CLAIMED LIST - ZERO OVER-TEXTS */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 380, overflowY: 'auto', paddingRight: 2 }}>
+          {claimHistoryList.map((item, idx) => (
+            <div
+              key={item.id || idx}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 16px',
+                borderRadius: 12,
+                background: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span className="font-mono text-xs text-slate-500 w-5">0{idx + 1}</span>
+                <BitsMark size={24} />
+                <span className="font-mono font-extrabold text-base text-[#00f59b] tabular-nums">
+                  +{item.amount.toFixed(4)} BITS
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '4px 9px',
+                    borderRadius: 6,
+                    background: 'rgba(0, 245, 155, 0.1)',
+                    border: '1px solid rgba(0, 245, 155, 0.25)',
+                    color: '#00f59b',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  <Check size={12} strokeWidth={3} />
+                  Confirmed
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -3593,10 +3731,10 @@ function StakingPage({ account }: { account: UserAccount }) {
   const [, navigate] = useLocation();
 
   const [guideOpen, setGuideOpen] = useState(false);
-  const [burnModalOpen, setBurnModalOpen] = useState(false);
-  const [isBurning, setIsBurning] = useState(false);
+  const [solPowerModalOpen, setSolPowerModalOpen] = useState(false);
+  const [claimedOverlayOpen, setClaimedOverlayOpen] = useState(false);
+  const [isContributing, setIsContributing] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
-  const [showClaimedList, setShowClaimedList] = useState(false);
 
   // 1. Base Rate: 0.1 Bits Per Hour (Requested exact parameter)
   const baseRatePerHour = 0.1000;
@@ -3605,13 +3743,13 @@ function StakingPage({ account }: { account: UserAccount }) {
   const refCount = 3;
   const referralBoostPerHour = refCount * 0.025;
 
-  // 3. Burn SOL Multiplier: 0.1 to 10 SOL Max (+5 Bits/hr per SOL)
+  // 3. SOL Power Multiplier: Max 10 SOL per account (+5 Bits/hr per SOL)
   const accountMining = (account as any).mining || {};
-  const [burnedSol, setBurnedSol] = useState<number>(accountMining.burnedSol ?? 0.5);
-  const solBurnBoostPerHour = burnedSol * 5.0;
+  const [contributedSol, setContributedSol] = useState<number>(accountMining.burnedSol ?? accountMining.contributedSol ?? 0.5);
+  const solPowerBoostPerHour = contributedSol * 5.0;
 
   // Total Net Mining Hash Velocity
-  const totalMiningRatePerHour = baseRatePerHour + referralBoostPerHour + solBurnBoostPerHour;
+  const totalMiningRatePerHour = baseRatePerHour + referralBoostPerHour + solPowerBoostPerHour;
 
   // 4. Live Ticking Accumulated Mined Bits in Storage Tank (Stopwatch Precision)
   const [unclaimedBits, setUnclaimedBits] = useState<number>(accountMining.minedBitsUnclaimed ?? 14.8291);
@@ -3641,7 +3779,7 @@ function StakingPage({ account }: { account: UserAccount }) {
       id: 1,
       name: 'Network Base Engine',
       type: 'Base Protocol Rate',
-      solBurned: 0,
+      solContributed: 0,
       ratePerHour: 0.1000,
       multiplier: '1.0x Baseline',
       status: 'ACTIVE STREAMING',
@@ -3650,16 +3788,16 @@ function StakingPage({ account }: { account: UserAccount }) {
       id: 2,
       name: 'Qualified Referral Team',
       type: 'Team Hash Boost (3 Peers)',
-      solBurned: 0,
+      solContributed: 0,
       ratePerHour: 0.0750,
       multiplier: '+75% Boost',
       status: 'ACTIVE STREAMING',
     },
     {
       id: 3,
-      name: 'Proof-of-Burn Singularity',
-      type: 'Permanent SOL Burn',
-      solBurned: 0.5,
+      name: 'SOL Power Multiplier',
+      type: 'SOL Power Boost',
+      solContributed: 0.5,
       ratePerHour: 2.5000,
       multiplier: '+2,500% Boost',
       status: 'ACTIVE STREAMING',
@@ -3677,26 +3815,17 @@ function StakingPage({ account }: { account: UserAccount }) {
   const [claimHistoryList, setClaimHistoryList] = useState([
     {
       id: 1,
-      title: 'Claimed Mined Bits (24H PoB Cycle)',
-      detail: 'Proof-of-Burn Network Mining Rig · Cycle #14',
       amount: 48.2500,
-      createdAt: new Date(Date.now() - 24 * 3600000).toISOString(),
       status: 'Confirmed',
     },
     {
       id: 2,
-      title: 'Claimed Mined Bits (24H PoB Cycle)',
-      detail: 'Proof-of-Burn Network Mining Rig · Cycle #13',
       amount: 42.1000,
-      createdAt: new Date(Date.now() - 48 * 3600000).toISOString(),
       status: 'Confirmed',
     },
     {
       id: 3,
-      title: 'Claimed Mined Bits (24H PoB Cycle)',
-      detail: 'Proof-of-Burn Network Mining Rig · Cycle #12',
       amount: 30.1500,
-      createdAt: new Date(Date.now() - 72 * 3600000).toISOString(),
       status: 'Confirmed',
     },
   ]);
@@ -3722,10 +3851,7 @@ function StakingPage({ account }: { account: UserAccount }) {
       setClaimHistoryList((prev) => [
         {
           id: Date.now(),
-          title: 'Claimed Mined Bits (24H PoB Cycle)',
-          detail: '24h Storage Tank Cycle · Proof-of-Burn Settlement',
           amount: claimedAmount,
-          createdAt: new Date().toISOString(),
           status: 'Confirmed',
         },
         ...prev,
@@ -3741,10 +3867,7 @@ function StakingPage({ account }: { account: UserAccount }) {
       setClaimHistoryList((prev) => [
         {
           id: Date.now(),
-          title: 'Claimed Mined Bits (24H PoB Cycle)',
-          detail: '24h Storage Tank Cycle · Proof-of-Burn Settlement',
           amount: claimedAmount,
-          createdAt: new Date().toISOString(),
           status: 'Confirmed',
         },
         ...prev,
@@ -3755,41 +3878,41 @@ function StakingPage({ account }: { account: UserAccount }) {
     }
   };
 
-  // Burn SOL Handler
-  const handleCommitBurnSol = async (solAmount: number) => {
-    setIsBurning(true);
+  // Contribute SOL Handler (Max 10 SOL per account)
+  const handleCommitSolPower = async (solAmount: number) => {
+    setIsContributing(true);
     try {
-      const res = await fetch('/api/accounts/me/burn-sol', {
+      const res = await fetch('/api/accounts/me/contribute-sol', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ solAmount }),
       });
       const data = await res.json().catch(() => ({}));
       const boost = solAmount * 5.0;
-      setBurnedSol((prev) => Number((prev + solAmount).toFixed(2)));
+      setContributedSol((prev) => Number((prev + solAmount).toFixed(2)));
       setAllocations((prev) => [
         {
           id: Date.now(),
-          name: `Proof-of-Burn Allocation (${solAmount} SOL)`,
-          type: 'Permanent SOL Burn',
-          solBurned: solAmount,
+          name: `SOL Power (${solAmount} SOL)`,
+          type: 'SOL Power Boost',
+          solContributed: solAmount,
           ratePerHour: boost,
           multiplier: `+${Math.round((boost / 0.1) * 100)}% Boost`,
           status: 'ACTIVE STREAMING',
         },
         ...prev,
       ]);
-      setBurnModalOpen(false);
-      notify(data.message || `Burned ${solAmount} SOL! Mining speed boosted by +${boost.toFixed(4)} Bits/hr.`);
+      setSolPowerModalOpen(false);
+      notify(data.message || `Contributed ${solAmount} SOL! Acquired +${boost.toFixed(4)} Bits/hr SOL Power.`);
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
       void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
     } catch {
       const boost = solAmount * 5.0;
-      setBurnedSol((prev) => Number((prev + solAmount).toFixed(2)));
-      setBurnModalOpen(false);
-      notify(`Burned ${solAmount} SOL! Mining speed boosted by +${boost.toFixed(4)} Bits/hr.`);
+      setContributedSol((prev) => Number((prev + solAmount).toFixed(2)));
+      setSolPowerModalOpen(false);
+      notify(`Contributed ${solAmount} SOL! Acquired +${boost.toFixed(4)} Bits/hr SOL Power.`);
     } finally {
-      setIsBurning(false);
+      setIsContributing(false);
     }
   };
 
@@ -3809,14 +3932,6 @@ function StakingPage({ account }: { account: UserAccount }) {
           <button
             type="button"
             className="clean-action-btn-soft"
-            onClick={() => navigate('/referrals')}
-          >
-            <Users size={14} className="text-[#38bdf8]" />
-            <span>Referrals</span>
-          </button>
-          <button
-            type="button"
-            className="clean-action-btn-soft"
             onClick={() => setGuideOpen(true)}
           >
             <BookOpen size={14} />
@@ -3825,10 +3940,10 @@ function StakingPage({ account }: { account: UserAccount }) {
           <button
             type="button"
             className="clean-stake-confirm-btn !w-auto !min-h-[38px] !px-4 !py-1.5 !text-xs !bg-gradient-to-r !from-[#ff8b2f] !to-[#ff5252] !text-black !font-bold"
-            onClick={() => setBurnModalOpen(true)}
+            onClick={() => setSolPowerModalOpen(true)}
           >
-            <Flame size={14} />
-            <span>Burn SOL</span>
+            <Zap size={14} />
+            <span>SOL Power</span>
           </button>
         </div>
       </div>
@@ -3863,18 +3978,18 @@ function StakingPage({ account }: { account: UserAccount }) {
             </div>
           </div>
 
-          {/* TOP OF BUTTON: CLICK IT TO TOGGLE ATTACHED CLEAN CLAIMED POINTS LIST */}
+          {/* TOP OF BUTTON: CLICK IT TO OPEN OVERLAY CLAIMED POINTS LEDGER */}
           <div className="pob-live-action flex flex-col items-end">
             <button
               type="button"
-              className={`claimed-points-top-btn mb-2 ${showClaimedList ? 'active' : ''}`}
-              onClick={() => setShowClaimedList((prev) => !prev)}
-              title="Click to view claimed points ledger"
+              className="claimed-points-top-btn mb-2"
+              onClick={() => setClaimedOverlayOpen(true)}
+              title="Open Claimed Points Ledger"
             >
               <BitsMark size={16} />
               <span className="font-mono font-bold text-white tabular-nums text-xs">{claimedTotalBits.toFixed(4)}</span>
               <span className="text-[10px] font-mono text-[#00f59b] font-bold">BITS</span>
-              <ChevronDown size={13} className={`text-slate-400 transition-transform duration-200 ${showClaimedList ? 'rotate-180 text-[#00f59b]' : ''}`} />
+              <ChevronRight size={13} className="text-slate-400" />
             </button>
 
             {/* ATTACHED CLAIM BUTTON */}
@@ -3896,51 +4011,6 @@ function StakingPage({ account }: { account: UserAccount }) {
           </div>
         </div>
 
-        {/* ATTACHED CLAIMED POINTS LEDGER PANEL - 100% VISIBLE, NO POPUP CLIPPING, FULLY ARCHITECTURED */}
-        {showClaimedList && (
-          <div className="pob-attached-claimed-panel">
-            <div className="pob-attached-claimed-header">
-              <div className="flex items-center gap-2.5">
-                <BitsMark size={20} />
-                <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                  Claimed Points Ledger
-                </span>
-                <span className="text-[10px] font-mono font-bold text-[#00f59b] bg-[#00f59b]/10 px-2 py-0.5 rounded border border-[#00f59b]/25">
-                  {claimHistoryList.length} SETTLED CYCLES
-                </span>
-              </div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-xs font-mono text-slate-400">Total Claimed:</span>
-                <span className="text-sm font-mono font-extrabold text-[#00f59b] tabular-nums">
-                  {claimedTotalBits.toFixed(4)}
-                </span>
-                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">BITS</span>
-              </div>
-            </div>
-
-            <div className="pob-attached-claimed-list">
-              {claimHistoryList.map((item, idx) => (
-                <div key={item.id || idx} className="pob-attached-claimed-row">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-[11px] text-slate-500 w-5">0{idx + 1}</span>
-                    <BitsMark size={18} />
-                    <span className="font-mono font-bold text-sm text-[#00f59b] tabular-nums">
-                      +{item.amount.toFixed(4)} BITS
-                    </span>
-                    <span className="text-xs font-mono text-slate-400">· {item.detail}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
-                    <span>{shortDate(item.createdAt)}</span>
-                    <span className="flex items-center gap-1 text-[#00f59b] font-semibold text-[11px]">
-                      <Check size={12} strokeWidth={3} /> Confirmed
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* 3. PURE STATS MATRIX */}
         <div className="pob-cockpit-stats">
           <div className="pob-stat-cell">
@@ -3948,14 +4018,14 @@ function StakingPage({ account }: { account: UserAccount }) {
             <div className="pob-stat-val text-white tabular-nums">{baseRatePerHour.toFixed(4)} /h</div>
           </div>
           <div className="pob-stat-divider" />
-          <div className="pob-stat-cell cursor-pointer" onClick={() => navigate('/referrals')}>
-            <span className="pob-stat-label flex items-center gap-1">REFERRAL <ChevronRight size={11} className="text-[#38bdf8]" /></span>
+          <div className="pob-stat-cell">
+            <span className="pob-stat-label">REFERRAL</span>
             <div className="pob-stat-val text-[#38bdf8] tabular-nums">+{referralBoostPerHour.toFixed(4)} /h</div>
           </div>
           <div className="pob-stat-divider" />
-          <div className="pob-stat-cell cursor-pointer" onClick={() => setBurnModalOpen(true)}>
-            <span className="pob-stat-label flex items-center gap-1">BURN <ChevronRight size={11} className="text-[#ff8b2f]" /></span>
-            <div className="pob-stat-val text-[#ff8b2f] tabular-nums">+{solBurnBoostPerHour.toFixed(4)} /h</div>
+          <div className="pob-stat-cell cursor-pointer" onClick={() => setSolPowerModalOpen(true)}>
+            <span className="pob-stat-label flex items-center gap-1">SOL POWER <ChevronRight size={11} className="text-[#ff8b2f]" /></span>
+            <div className="pob-stat-val text-[#ff8b2f] tabular-nums">+{solPowerBoostPerHour.toFixed(4)} /h</div>
           </div>
           <div className="pob-stat-divider" />
           <div className="pob-stat-cell highlight">
@@ -3975,10 +4045,10 @@ function StakingPage({ account }: { account: UserAccount }) {
           <button
             type="button"
             className="text-xs font-semibold text-[#ff8b2f] hover:text-[#ffa04d] transition-colors flex items-center gap-1"
-            onClick={() => setBurnModalOpen(true)}
+            onClick={() => setSolPowerModalOpen(true)}
           >
             <Plus size={13} />
-            <span>Burn SOL</span>
+            <span>SOL Power</span>
           </button>
         </div>
 
@@ -3989,7 +4059,7 @@ function StakingPage({ account }: { account: UserAccount }) {
                 <th>#</th>
                 <th>Engine</th>
                 <th>Rate</th>
-                <th>Burned</th>
+                <th>Contributed</th>
                 <th style={{ textAlign: 'right' }}>Status</th>
               </tr>
             </thead>
@@ -4004,7 +4074,7 @@ function StakingPage({ account }: { account: UserAccount }) {
                     +{alloc.ratePerHour.toFixed(4)} /h
                   </td>
                   <td className="font-mono tabular-nums text-slate-300">
-                    {alloc.solBurned > 0 ? `${alloc.solBurned} SOL` : '—'}
+                    {alloc.solContributed > 0 ? `${alloc.solContributed} SOL` : '—'}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <span className="pob-status-tag active">Active</span>
@@ -4016,12 +4086,20 @@ function StakingPage({ account }: { account: UserAccount }) {
         </div>
       </div>
 
-      {/* 6. MODALS */}
-      <BurnSolMiningModal
-        open={burnModalOpen}
-        onClose={() => setBurnModalOpen(false)}
-        onCommitBurn={handleCommitBurnSol}
-        isPending={isBurning}
+      {/* 6. MODALS & OVERLAYS */}
+      <ClaimedPointsOverlayModal
+        open={claimedOverlayOpen}
+        onClose={() => setClaimedOverlayOpen(false)}
+        claimedTotalBits={claimedTotalBits}
+        claimHistoryList={claimHistoryList}
+      />
+
+      <SolPowerModal
+        open={solPowerModalOpen}
+        onClose={() => setSolPowerModalOpen(false)}
+        onCommitContribution={handleCommitSolPower}
+        currentContributed={contributedSol}
+        isPending={isContributing}
       />
 
       <MiningGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
@@ -4030,2389 +4108,6 @@ function StakingPage({ account }: { account: UserAccount }) {
   );
 }
 
-
-// ---------------------------------------------------------------------------
-// 10. PROTOCOL STATISTICS & STAKER METRICS GUIDE MODAL
-// ---------------------------------------------------------------------------
-function StatisticsGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  if (!open) return null;
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 640, maxHeight: '90vh', overflowY: 'auto' }}
-      >
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                background: 'rgba(0, 245, 155, 0.12)',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--neon-green)',
-              }}
-            >
-              <BookOpen size={20} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: 20, margin: 0, color: '#fff' }}>Protocol Statistics Guide & Details</h2>
-              <p style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--silver-dark)' }}>
-                Verifiable network metrics, tokenomics architecture, and mainnet node mining rules
-              </p>
-            </div>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingTop: 16 }}>
-          {/* Rule 1: Bits Points vs Bitnoir Token */}
-          <div style={{ padding: 18, background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <Globe2 size={16} color="var(--neon-green)" />
-              <strong style={{ color: '#fff', fontSize: 15 }}>1. Dual Asset Separation: Bits Points vs. Bitnoir Token</strong>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
-              • <strong>Bits Points</strong>: Internal protocol accounting points credited upon USDT deposits on BNB Smart Chain
-              (100 USDT = 1,000 Bits Points at $0.10 benchmark). Bits Points are committed and permanently burned into staking positions.<br />
-              • <strong>Bitnoir Token</strong>: The scarce cryptographic token hard-capped at 21,000,000 units. Valued at $1.10
-              accounting benchmark for rewards and principal redemptions upon term maturity.
-            </p>
-          </div>
-
-          {/* Rule 2: 21M Tokenomics & Staking & Burn */}
-          <div style={{ padding: 18, background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <Layers3 size={16} color="var(--token-orange)" />
-              <strong style={{ color: '#fff', fontSize: 15 }}>2. Tokenomics: Staking & Burn (40%) and Node Mining (20%)</strong>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
-              The 21,000,000 Bitnoir hard cap contains no public presale inflation:<br />
-              • <strong>40.0% (8,400,000 Bitnoir)</strong>: Staking & Burn Allocation — minted strictly as stakers lock Bits Points.<br />
-              • <strong>20.0% (4,200,000 Bitnoir)</strong>: Node Mining — dedicated to decentralized node operators once Network Mainnet is live.<br />
-              • <strong>21.0% (4,410,000 Bitnoir)</strong>: CEX Deep Liquidity orderbooks.<br />
-              • <strong>11.0% (2,310,000 Bitnoir)</strong>: Market Stability & Reserve.<br />
-              • <strong>8.0% (1,680,000 Bitnoir)</strong>: Ecosystem & Community Airdrop.
-            </p>
-          </div>
-
-          {/* Rule 3: Remaining Pool Share & Proof-of-Burn */}
-          <div style={{ padding: 18, background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <Flame size={16} color="#ff6b6b" />
-              <strong style={{ color: '#fff', fontSize: 15 }}>3. Remaining Pool Share & Proof-of-Burn Deflation</strong>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
-              • <strong>Pool Share</strong>: Stakers continuously earn from the 4,200,000 Bitnoir yield reservoir. As rewards are distributed,
-              the remaining pool balance contracts, ensuring transparent verifiability.<br />
-              • <strong>Proof-of-Burn Ratio</strong>: When Bitnoir tokens are claimed, <strong>11 Bits Points are burned per 1 Bitnoir claimed</strong>
-              ($1.10 / $0.10). Every reward claim permanently tightens internal point supply.
-            </p>
-          </div>
-        </div>
-
-        <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', padding: '16px 24px', display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="button" className="button button-primary" onClick={onClose} style={{ minHeight: 36, padding: '0 20px' }}>
-            Got It
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 10. TOKENOMICS SHARE OVERLAY MODAL (TOTAL SHARE OF BITNOIR TOKEN)
-// ---------------------------------------------------------------------------
-function TokenomicsShareModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  if (!open) return null;
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 580, maxHeight: '88vh', overflowY: 'auto' }}
-      >
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                background: 'rgba(0, 245, 155, 0.12)',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--neon-green)',
-                border: '1px solid rgba(0, 245, 155, 0.25)',
-              }}
-            >
-              <PieChart size={20} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: 19, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>
-                Total Share of Bitnoir Token
-              </h2>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-                21,000,000 Hard Cap · Verified Decentralized Allocation (No Public Sale)
-              </p>
-            </div>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 14 }}>
-          {/* Top Summary Card */}
-          <div
-            style={{
-              padding: '14px 18px',
-              background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 0, 0, 0.25) 100%)',
-              borderRadius: 12,
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 12,
-            }}
-          >
-            <div>
-              <span className="small-label" style={{ fontSize: 10, color: 'var(--silver-dark)' }}>
-                Fixed Hard Cap
-              </span>
-              <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: 'var(--token-orange)', marginTop: 2 }}>
-                21,000,000 Bitnoir
-              </div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <span className="small-label" style={{ fontSize: 10, color: 'var(--silver-dark)' }}>
-                Protocol Benchmark
-              </span>
-              <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: 'var(--neon-green)', marginTop: 2 }}>
-                $1.10 USD / Bitnoir
-              </div>
-            </div>
-          </div>
-
-          {/* Color Allocation Track */}
-          <div>
-            <div
-              style={{
-                height: 10,
-                borderRadius: 999,
-                display: 'flex',
-                overflow: 'hidden',
-                background: 'rgba(255, 255, 255, 0.05)',
-                marginBottom: 10,
-              }}
-            >
-              <div style={{ width: '40%', background: '#00f59b' }} title="Staking & Burn: 40% (8,400,000)" />
-              <div style={{ width: '20%', background: '#ff8b2f' }} title="Node Mining (Mainnet Live): 20% (4,200,000)" />
-              <div style={{ width: '21%', background: '#38bdf8' }} title="CEX Liquidity: 21% (4,410,000)" />
-              <div style={{ width: '11%', background: '#a855f7' }} title="Market Stability: 11% (2,310,000)" />
-              <div style={{ width: '8%', background: '#f5a623' }} title="Ecosystem & Airdrop: 8% (1,680,000)" />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--silver-dark)' }}>
-              <span>40% Staking & Burn · 20% Node Mining</span>
-              <span>21M Fixed Cap (No Presale)</span>
-            </div>
-          </div>
-
-          {/* The 5 Clean Allocation Rows */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {/* 1. Staking & Burn */}
-            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#00f59b' }} />
-                <div>
-                  <strong style={{ fontSize: 13, color: '#fff' }}>Staking & Burn Allocation</strong>
-                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Earned via Bits Points lockups & Proof-of-Burn</div>
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: '#00f59b' }}>
-                  40.0%
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>8,400,000 Bitnoir Tokens</div>
-              </div>
-            </div>
-
-            {/* 2. Node Mining (Network Mainnet Live) */}
-            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff8b2f' }} />
-                <div>
-                  <strong style={{ fontSize: 13, color: '#fff' }}>Node Mining (Network Mainnet Live)</strong>
-                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Decentralized node mining when network mainnet live</div>
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--token-orange)' }}>
-                  20.0%
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>4,200,000 Bitnoir Tokens</div>
-              </div>
-            </div>
-
-            {/* 3. CEX Deep Liquidity */}
-            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#38bdf8' }} />
-                <div>
-                  <strong style={{ fontSize: 13, color: '#fff' }}>CEX Deep Liquidity</strong>
-                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Tier-1 exchange listing orderbooks & market making</div>
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: '#38bdf8' }}>
-                  21.0%
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>4,410,000 Bitnoir Tokens</div>
-              </div>
-            </div>
-
-            {/* 4. Market Stability & Reserve */}
-            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#a855f7' }} />
-                <div>
-                  <strong style={{ fontSize: 13, color: '#fff' }}>Market Stability & Reserve</strong>
-                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Secondary market price stabilization reserve</div>
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: '#a855f7' }}>
-                  11.0%
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>2,310,000 Bitnoir Tokens</div>
-              </div>
-            </div>
-
-            {/* 5. Ecosystem & Airdrop */}
-            <div className="stat-tokenomics-row" style={{ padding: '10px 14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f5a623' }} />
-                <div>
-                  <strong style={{ fontSize: 13, color: '#fff' }}>Ecosystem & Community Airdrop</strong>
-                  <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Community contributor & reputation XP rewards</div>
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: '#f5a623' }}>
-                  8.0%
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>1,680,000 Bitnoir Tokens</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Rule Note */}
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: 8,
-              background: 'rgba(0, 245, 155, 0.04)',
-              border: '1px solid rgba(0, 245, 155, 0.15)',
-              fontSize: 12,
-              color: 'var(--silver-medium)',
-              lineHeight: 1.5,
-            }}
-          >
-            <strong style={{ color: '#fff' }}>Verifiable Deflationary Rule:</strong> When Bitnoir rewards are claimed,{' '}
-            <strong style={{ color: 'var(--neon-green)' }}>11 Bits Points are permanently destroyed</strong> per 1 Bitnoir claimed.
-            No public presale allocation exists.
-          </div>
-        </div>
-
-        <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="button" className="button button-primary" onClick={onClose} style={{ minHeight: 36, padding: '0 20px', fontSize: 12 }}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// 9.5 PROTOCOL SPECIFICATIONS OVERLAY MODAL (MATCHING REFERENCE ARCHITECTURE)
-// ---------------------------------------------------------------------------
-function ProtocolSpecsModal({ open, onClose, stats }: { open: boolean; onClose: () => void; stats: any }) {
-  if (!open) return null;
-
-  const totalCap = stats.totalReserveCap || 4200000;
-  const distributed = stats.totalBitnoirDistributed || 342850;
-  const distributedPercent = ((distributed / totalCap) * 100).toFixed(2);
-  const remainingTokens = stats.remainingPoolShareTokens || (totalCap - distributed);
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 580, maxHeight: '88vh', overflowY: 'auto' }}
-      >
-        {/* Header matching Guide & Total Share modals */}
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                background: 'rgba(255, 139, 47, 0.12)',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--token-orange)',
-                border: '1px solid rgba(255, 139, 47, 0.25)',
-              }}
-            >
-              <Coins size={20} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: 19, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>
-                Protocol Specifications
-              </h2>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-                Verifiable reservoir emissions, proof-of-burn ratio, and deflationary metrics
-              </p>
-            </div>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Modal Body with 3 Cards sized proportionally */}
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 14 }}>
-          {/* Card 1: STAKING RESERVOIR */}
-          <div
-            style={{
-              background: '#0f141f',
-              border: '1px solid rgba(255, 255, 255, 0.07)',
-              borderRadius: 14,
-              padding: '16px 18px',
-            }}
-          >
-            <div
-              style={{
-                color: '#00f59b',
-                fontSize: 11,
-                fontWeight: 800,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                marginBottom: 6,
-              }}
-            >
-              STAKING RESERVOIR
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-              <span
-                style={{
-                  fontSize: 26,
-                  fontWeight: 800,
-                  color: '#ffffff',
-                  letterSpacing: '-0.02em',
-                  lineHeight: 1,
-                }}
-              >
-                {number(totalCap)}
-              </span>
-              <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>Total Cap</span>
-            </div>
-
-            {/* Progress bar */}
-            <div
-              style={{
-                height: 7,
-                background: 'rgba(255, 255, 255, 0.08)',
-                borderRadius: 9999,
-                overflow: 'hidden',
-                marginBottom: 8,
-              }}
-            >
-              <div
-                style={{
-                  width: `${Math.max(6, 100 - stats.remainingPoolSharePercent)}%`,
-                  height: '100%',
-                  background: '#00f59b',
-                  borderRadius: 9999,
-                }}
-              />
-            </div>
-
-            {/* Sub-values */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                fontSize: 11,
-                fontWeight: 600,
-                flexWrap: 'wrap',
-                gap: 4,
-              }}
-            >
-              <span style={{ color: '#00f59b' }}>
-                {number(distributed)} Distributed ({distributedPercent}%)
-              </span>
-              <span style={{ color: '#38bdf8' }}>
-                {number(remainingTokens)} Remaining
-              </span>
-            </div>
-          </div>
-
-          {/* Card 2 & 3: BURN RATE & EMISSION SIDE-BY-SIDE */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {/* Left: BURN RATE */}
-            <div
-              style={{
-                background: 'rgba(255, 107, 107, 0.04)',
-                border: '1px solid rgba(255, 107, 107, 0.16)',
-                borderRadius: 14,
-                padding: '14px 16px',
-              }}
-            >
-              <div
-                style={{
-                  color: '#ff6b6b',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  marginBottom: 6,
-                }}
-              >
-                BURN RATE
-              </div>
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 800,
-                  color: '#ff6b6b',
-                  letterSpacing: '-0.02em',
-                  lineHeight: 1,
-                  marginBottom: 6,
-                }}
-              >
-                11 / 1
-              </div>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 500 }}>
-                Bits Points -&gt; Bitnoir
-              </div>
-            </div>
-
-            {/* Right: EMISSION */}
-            <div
-              style={{
-                background: 'rgba(0, 245, 155, 0.04)',
-                border: '1px solid rgba(0, 245, 155, 0.16)',
-                borderRadius: 14,
-                padding: '14px 16px',
-              }}
-            >
-              <div
-                style={{
-                  color: '#00f59b',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  marginBottom: 6,
-                }}
-              >
-                EMISSION
-              </div>
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 800,
-                  color: '#00f59b',
-                  letterSpacing: '-0.02em',
-                  lineHeight: 1,
-                  marginBottom: 6,
-                }}
-              >
-                {stats.emissionRatePerHour || '12.4'} /h
-              </div>
-              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 500 }}>
-                Continuous Velocity
-              </div>
-            </div>
-          </div>
-
-          {/* Card 4: DEFLATIONARY COMMITMENTS */}
-          <div
-            style={{
-              background: '#0f141f',
-              border: '1px solid rgba(255, 255, 255, 0.07)',
-              borderRadius: 14,
-              padding: '16px 18px',
-            }}
-          >
-            <div
-              style={{
-                color: '#ff8b2f',
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                marginBottom: 8,
-              }}
-            >
-              DEFLATIONARY COMMITMENTS
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {/* Row 1: Protocol Hard Cap */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '9px 0',
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-                }}
-              >
-                <span style={{ color: '#94a3b8', fontSize: 13 }}>Protocol Hard Cap</span>
-                <span style={{ color: '#ff8b2f', fontSize: 13, fontWeight: 700 }} className="mono">
-                  {number(stats.hardCapSupply || 21000000)} (Fixed)
-                </span>
-              </div>
-
-              {/* Row 2: Total Committed */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '9px 0',
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-                }}
-              >
-                <span style={{ color: '#94a3b8', fontSize: 13 }}>Total Committed</span>
-                <span style={{ color: '#ffffff', fontSize: 13, fontWeight: 700 }} className="mono">
-                  {number(stats.totalCommittedBits || 28650000)} Bits
-                </span>
-              </div>
-
-              {/* Row 3: Total Burned */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '9px 0',
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-                }}
-              >
-                <span style={{ color: '#94a3b8', fontSize: 13 }}>Total Burned</span>
-                <span style={{ color: '#ff6b6b', fontSize: 13, fontWeight: 700 }} className="mono">
-                  {number(stats.totalAmountBurnedBits || 24062250)} Bits
-                </span>
-              </div>
-
-              {/* Row 4: USD Destroyed */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '9px 0',
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-                }}
-              >
-                <span style={{ color: '#94a3b8', fontSize: 13 }}>USD Destroyed</span>
-                <span style={{ color: '#ffaa33', fontSize: 13, fontWeight: 700 }} className="mono">
-                  {money(stats.totalAmountBurnedBitsUsd || 2406225)}
-                </span>
-              </div>
-
-              {/* Row 5: Verified Nodes */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '9px 0 2px',
-                }}
-              >
-                <span style={{ color: '#94a3b8', fontSize: 13 }}>Verified Nodes</span>
-                <span style={{ color: '#00f59b', fontSize: 13, fontWeight: 700 }} className="mono">
-                  {number(stats.activeStakersCount || 1421)} Nodes
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer actions matching Guide and Total Share */}
-        <div
-          className="modal-footer"
-          style={{
-            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-            padding: '14px 24px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <Link
-            href="/staking"
-            onClick={onClose}
-            className="button button-primary"
-            style={{ minHeight: 36, padding: '0 18px', fontSize: 12 }}
-          >
-            <span>Enter Staking Terminal</span>
-            <ArrowRight size={13} />
-          </Link>
-          <button
-            type="button"
-            className="button button-ghost"
-            onClick={onClose}
-            style={{ minHeight: 36, padding: '0 18px', fontSize: 12 }}
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 10. CLEAN & PROFESSIONAL NETWORK STATISTICS PAGE (/statistics, /statics, /pool)
-// ---------------------------------------------------------------------------
-function StatisticsPage({ account }: { account: UserAccount }) {
-  const [guideOpen, setGuideOpen] = useState(false);
-  const [tokenomicsOpen, setTokenomicsOpen] = useState(false);
-  const [specsOpen, setSpecsOpen] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string>(() => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-
-  const userStakedBits = (account.balances as unknown as Record<string, number>)?.staked || 0;
-  const userClaimedTokens = (account.balances as unknown as Record<string, number>)?.claimed || 0;
-  const userBurnedBits = (account.balances as unknown as Record<string, number>)?.burned || 0;
-
-  const [stats, setStats] = useState({
-    totalBitsStaked: 14840000 + userStakedBits,
-    totalBitsStakedUsd: (14840000 + userStakedBits) * USDT_PER_BITS,
-    totalBitnoirDistributed: Number((342850 + userClaimedTokens).toFixed(4)),
-    totalBitnoirDistributedUsd: Number(((342850 + userClaimedTokens) * BITNOIR_REFERENCE_PRICE).toFixed(2)),
-    totalReserveCap: 4200000,
-    remainingPoolShareTokens: Number((4200000 - (342850 + userClaimedTokens)).toFixed(4)),
-    remainingPoolSharePercent: Number((((4200000 - (342850 + userClaimedTokens)) / 4200000) * 100).toFixed(2)),
-    totalAmountBurnedBits: 24062250 + userBurnedBits,
-    totalAmountBurnedBitsUsd: (24062250 + userBurnedBits) * USDT_PER_BITS,
-    totalCommittedBits: 28650000 + userStakedBits,
-    totalCommittedBitsUsd: (28650000 + userStakedBits) * USDT_PER_BITS,
-    activeStakersCount: 1421 + (userStakedBits > 0 ? 1 : 0),
-    totalUsersCount: 3842,
-    emissionRatePerHour: 12.4,
-    hardCapSupply: 21000000,
-  });
-
-  const loadStats = () => {
-    setIsRefreshing(true);
-    fetch('/api/statistics')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data) {
-          const distributed = Number(data.totalDistributed ?? (342850 + userClaimedTokens));
-          const reserve = Number(data.totalReserve ?? 4200000);
-          const remainingTokens = Number((reserve - distributed).toFixed(4));
-          const remainingPercent = Number(((remainingTokens / reserve) * 100).toFixed(2));
-
-          setStats((prev) => ({
-            ...prev,
-            totalBitsStaked: data.totalBitsStaked ?? prev.totalBitsStaked,
-            totalBitsStakedUsd: data.totalBitsStakedUsd ?? prev.totalBitsStakedUsd,
-            totalBitnoirDistributed: distributed,
-            totalBitnoirDistributedUsd: Number((distributed * BITNOIR_REFERENCE_PRICE).toFixed(2)),
-            totalReserveCap: reserve,
-            remainingPoolShareTokens: remainingTokens,
-            remainingPoolSharePercent: remainingPercent,
-            totalAmountBurnedBits: data.totalAmountBurnedBits ?? prev.totalAmountBurnedBits,
-            totalAmountBurnedBitsUsd: data.totalAmountBurnedBitsUsd ?? prev.totalAmountBurnedBitsUsd,
-            totalCommittedBits: data.totalCommittedBits ?? prev.totalCommittedBits,
-            totalCommittedBitsUsd: data.totalCommittedBitsUsd ?? prev.totalCommittedBitsUsd,
-            activeStakersCount: data.activeStakers ?? prev.activeStakersCount,
-            totalUsersCount: data.totalUsers ?? prev.totalUsersCount,
-            emissionRatePerHour: data.emissionRatePerHour ?? prev.emissionRatePerHour,
-          }));
-          setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        setTimeout(() => setIsRefreshing(false), 300);
-      });
-  };
-
-  useEffect(() => {
-    loadStats();
-    const interval = setInterval(loadStats, 20_000);
-    return () => clearInterval(interval);
-  }, [userStakedBits, userClaimedTokens, userBurnedBits]);
-
-  return (
-    <AppShell active="/statistics" admin={account.role === 'admin'}>
-      {/* 1. CLEAN TOP HEADER WITH GLOBE ICON, SUBTITLE & TOP OVERLAY BUTTONS */}
-      <div className="page-title-row" style={{ marginBottom: 20 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 12,
-                background: 'rgba(0, 245, 155, 0.1)',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--neon-green)',
-                border: '1px solid rgba(0, 245, 155, 0.25)',
-              }}
-            >
-              <Globe2 size={22} />
-            </div>
-            <div>
-              <h1 className="page-title" style={{ margin: 0, fontSize: 24, letterSpacing: '-0.02em' }}>
-                Protocol Statistics
-              </h1>
-              <p className="page-subtitle" style={{ margin: '2px 0 0', fontSize: 13, color: 'var(--silver-dark)' }}>
-                Real-time verified metrics for overall stakers, token burn velocity, and pool share
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* TOP BUTTONS: TOTAL SHARE (21M), PROTOCOL SPECS, GUIDE & RULES, REFRESH */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="clean-glass-btn"
-            onClick={() => setTokenomicsOpen(true)}
-            title="Total Share of Bitnoir Token (21M Allocation)"
-            style={{ borderColor: 'rgba(0, 245, 155, 0.35)', color: '#fff' }}
-          >
-            <PieChart size={14} color="var(--neon-green)" />
-            <span>Total Share (21M)</span>
-          </button>
-
-          <button
-            type="button"
-            className="clean-glass-btn"
-            onClick={() => setSpecsOpen(true)}
-            title="Protocol Specifications & Parameters"
-            style={{ borderColor: 'rgba(255, 139, 47, 0.35)', color: '#fff' }}
-          >
-            <Coins size={14} color="var(--token-orange)" />
-            <span>Protocol Specs</span>
-          </button>
-
-          <button
-            type="button"
-            className="clean-glass-btn"
-            onClick={() => setGuideOpen(true)}
-            title="Protocol Guidelines & Explanations"
-          >
-            <BookOpen size={14} />
-            <span>Guide & Rules</span>
-          </button>
-
-          <button
-            type="button"
-            className="clean-glass-btn"
-            onClick={loadStats}
-            disabled={isRefreshing}
-            title="Refresh Protocol Data"
-          >
-            <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
-            <span>{isRefreshing ? 'Syncing…' : `Synced ${lastUpdated}`}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 2. UNIFIED PROTOCOL HERO BANNER (MATCHING WALLET-PORTFOLIO-HERO ARCHITECTURE - SINGLE CLEAN LAYOUT) */}
-      <div className="stat-portfolio-hero" style={{ marginBottom: 20 }}>
-        <div className="stat-hero-top">
-          <div>
-            <div className="stat-hero-kicker">Bits Points Staked by Total Users</div>
-            <div className="stat-hero-main-val">
-              {number(stats.totalBitsStaked)}{' '}
-              <span style={{ fontSize: 16, color: 'var(--silver-dark)', fontWeight: 500 }}>Bits Points</span>
-            </div>
-            <div className="stat-hero-main-sub">
-              ≈ {money(stats.totalBitsStakedUsd)} USD Total Staked Capital
-            </div>
-          </div>
-
-          <div className="wallet-portfolio-status">
-            <span className="wallet-status-dot" />
-            <span>{number(stats.activeStakersCount)} Active Stakers · {number(stats.totalUsersCount)} Protocol Users</span>
-          </div>
-        </div>
-
-        {/* Integrated Core 4-Column Metric Strip (Architecture & Perfection Approach) */}
-        <div className="stat-metrics-strip-clean">
-          {/* Column 1: Bitnoir Tokens Distributed / Reserved */}
-          <div className="stat-strip-col">
-            <div className="stat-strip-label">Bitnoir Tokens Distributed / Reserved</div>
-            <div className="stat-strip-val" style={{ color: 'var(--token-orange)' }}>
-              {number(stats.totalBitnoirDistributed)}{' '}
-              <span style={{ fontSize: 12, color: 'var(--silver-dark)', fontWeight: 500 }}>
-                / {number(stats.totalReserveCap)} Bitnoir
-              </span>
-            </div>
-            <div className="stat-strip-sub">
-              ≈ {money(stats.totalBitnoirDistributedUsd)} USD distributed till now
-            </div>
-          </div>
-
-          {/* Column 2: Remaining Pool Share */}
-          <div className="stat-strip-col">
-            <div className="stat-strip-label">Remaining Reservoir Share</div>
-            <div className="stat-strip-val" style={{ color: '#38bdf8' }}>
-              {number(stats.remainingPoolShareTokens)} Bitnoir{' '}
-              <span style={{ fontSize: 12, color: 'var(--silver-dark)', fontWeight: 500 }}>
-                ({stats.remainingPoolSharePercent}%)
-              </span>
-            </div>
-            <div className="stat-strip-sub">
-              Algorithmic yield reservoir available for stakers
-            </div>
-          </div>
-
-          {/* Column 3: Total Amount Burned */}
-          <div className="stat-strip-col">
-            <div className="stat-strip-label">Total Amount Burned</div>
-            <div className="stat-strip-val" style={{ color: '#ff6b6b' }}>
-              {number(stats.totalAmountBurnedBits)}{' '}
-              <span style={{ fontSize: 12, color: 'var(--silver-dark)', fontWeight: 500 }}>Bits Points</span>
-            </div>
-            <div className="stat-strip-sub">
-              ≈ {money(stats.totalAmountBurnedBitsUsd)} USD permanently destroyed
-            </div>
-          </div>
-
-          {/* Column 4: Total Committed Bits Points */}
-          <div className="stat-strip-col">
-            <div className="stat-strip-label">Total Committed Bits Points</div>
-            <div className="stat-strip-val" style={{ color: 'var(--neon-green)' }}>
-              {number(stats.totalCommittedBits)}{' '}
-              <span style={{ fontSize: 12, color: 'var(--silver-dark)', fontWeight: 500 }}>Bits Points</span>
-            </div>
-            <div className="stat-strip-sub">
-              ≈ {money(stats.totalCommittedBitsUsd)} USD protocol commitment
-            </div>
-          </div>
-        </div>
-
-        {/* Integrated Progress Track */}
-        <div style={{ marginTop: 14 }}>
-          <div className="progress-track" style={{ height: 6, margin: '6px 0 8px' }}>
-            <div
-              className="progress-value"
-              style={{
-                width: `${100 - stats.remainingPoolSharePercent}%`,
-                background: 'linear-gradient(90deg, #00f59b 0%, #38bdf8 100%)',
-              }}
-            />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--silver-dark)', flexWrap: 'wrap', gap: 6 }}>
-            <span>
-              Distributed Till Now: <strong>{(100 - stats.remainingPoolSharePercent).toFixed(2)}%</strong> ({number(stats.totalBitnoirDistributed)} Bitnoir Tokens)
-            </span>
-            <span style={{ color: '#38bdf8' }}>
-              Remaining Reservoir Share: <strong>{stats.remainingPoolSharePercent}%</strong> ({number(stats.remainingPoolShareTokens)} Bitnoir Tokens)
-            </span>
-          </div>
-        </div>
-
-        {/* Sleek Institutional Strip & Direct Terminal CTA */}
-        <div
-          style={{
-            marginTop: 18,
-            paddingTop: 16,
-            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: 12,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--silver-dark)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ff6b6b' }} />
-              <span>Proof-of-Burn: <strong style={{ color: '#fff' }}>11 Bits Points / 1 Bitnoir</strong></span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--neon-green)' }} />
-              <span>Velocity: <strong style={{ color: 'var(--neon-green)' }}>{stats.emissionRatePerHour} Bitnoir / hr</strong></span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--token-orange)' }} />
-              <span>Hard Cap: <strong style={{ color: 'var(--token-orange)' }}>21M Bitnoir (Fixed)</strong></span>
-            </div>
-          </div>
-
-          <Link
-            href="/staking"
-            className="button button-primary"
-            style={{ minHeight: 36, padding: '0 18px', fontSize: 12 }}
-          >
-            <span>Enter Staking Terminal</span>
-            <ArrowRight size={13} />
-          </Link>
-        </div>
-      </div>
-
-      {/* 3. PROTOCOL OVERLAY MODALS */}
-      <StatisticsGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
-      <TokenomicsShareModal open={tokenomicsOpen} onClose={() => setTokenomicsOpen(false)} />
-      <ProtocolSpecsModal open={specsOpen} onClose={() => setSpecsOpen(false)} stats={stats} />
-    </AppShell>
-  );
-}
-
-// Backward-compatible alias for any residual routes/imports
-const PoolPage = StatisticsPage;
-
-// ---------------------------------------------------------------------------
-// 11. REPUTATION XP & REFERRAL NETWORK PORTAL (/referrals, /airdrop)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// 11. COMMUNITY FREE BITS AIRDROP & REFERRAL PROGRAM RULES MODAL
-// ---------------------------------------------------------------------------
-function CommunityGuideModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  if (!open) return null;
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 580, maxHeight: '88vh', overflowY: 'auto' }}
-      >
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                background: 'rgba(0, 245, 155, 0.12)',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--neon-green)',
-                border: '1px solid rgba(0, 245, 155, 0.25)',
-              }}
-            >
-              <BookOpen size={20} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: 19, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>
-                Free Bits Airdrop & Referral Program Rules
-              </h2>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-                100 Free Bits signup · 100 Bits per verified referral · 8% Total Airdrop Allocation
-              </p>
-            </div>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 14 }}>
-          {/* Section 1: 100 Free Bits Signup Grant */}
-          <div style={{ padding: '14px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <Gift size={15} color="var(--neon-green)" />
-              <strong style={{ color: '#fff', fontSize: 13 }}>1. 100 Free Bits Welcome Grant For Every User</strong>
-            </div>
-            <p style={{ fontSize: 12, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
-              Every newly registered member is granted <strong>100 Free Bits</strong> ($10.00 accounting valuation) automatically upon account initialization. Zero deposits or upfront purchases required. Free Bits can be held or committed to the 30–90 Day Proof-of-Burn engine to earn continuous 12% APY in Bitnoir Coin ($Noir).
-            </p>
-          </div>
-
-          {/* Section 2: Referral Verification Invariant */}
-          <div style={{ padding: '14px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <ShieldCheck size={15} color="var(--token-orange)" />
-              <strong style={{ color: '#fff', fontSize: 13 }}>2. Referral Verification Rule (Min. $100 Purchase & Stake)</strong>
-            </div>
-            <p style={{ fontSize: 12, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
-              When you invite a friend, you earn <strong>100 Bits</strong> per referral. However, to prevent Sybil bot abuse, all referred Bits remain strictly <strong>Unverified (Pending)</strong> until your referee purchases a <strong>minimum of $100 worth of Bits (1,000 Bits) and stakes them</strong> in the Proof-of-Burn engine. Once staked, the 100 Bits immediately unlock as <strong>Verified</strong> and can be claimed directly into your wallet.
-            </p>
-          </div>
-
-          {/* Section 3: 8% Total Community Airdrop Allocation */}
-          <div style={{ padding: '14px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <Sparkles size={15} color="#38bdf8" />
-              <strong style={{ color: '#fff', fontSize: 13 }}>3. The 8% Community Airdrop Share (1,680,000 $Noir)</strong>
-            </div>
-            <p style={{ fontSize: 12, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
-              Of the immutable 21,000,000 Bitnoir hard cap, exactly <strong>8.0% (1,680,000 Bitnoir tokens ≈ $1,848,000 USD benchmark value)</strong> is reserved exclusively for the community airdrop and free Bits pool (18,480,000 Bits equivalent). Bitnoir has zero private seed rounds, zero VC pre-mines, and zero variable insider unlocks.
-            </p>
-          </div>
-
-          {/* Section 4: Proof-of-Burn Continuous 12% APY Staking Yield */}
-          <div style={{ padding: '14px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <Flame size={15} color="#ff7657" />
-              <strong style={{ color: '#fff', fontSize: 13 }}>4. Continuous 12% APY Proof-of-Burn Staking Yield</strong>
-            </div>
-            <p style={{ fontSize: 12, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
-              All free Bits acquired through signups and verified referrals can be locked into 30–90 day staking. Bits are incinerated via Proof-of-Burn, generating real-time continuous streaming emissions at 12% annual APY (1.0% for 30D, 2.0% for 60D, 3.0% for 90D). At maturity, full principal and earned yields settle directly in Bitnoir Coin ($Noir).
-            </p>
-          </div>
-
-          {/* Section 5: Clean Username Referral Protocol */}
-          <div style={{ padding: '14px 16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              <UserCheck size={15} color="#38bdf8" />
-              <strong style={{ color: '#fff', fontSize: 13 }}>5. Clean Username Referral Codes</strong>
-            </div>
-            <p style={{ fontSize: 12, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
-              Referral codes are clean human usernames (e.g. @satoshi). No complex node IDs, prefixes, or hashes. Friends register directly through your clean invite link, immediately crediting pending Bits to your ledger.
-            </p>
-          </div>
-        </div>
-
-        <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="button" className="button button-primary" onClick={onClose} style={{ minHeight: 36, padding: '0 20px', fontSize: 12 }}>
-            Understood
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 11.5 LINK SPONSOR MODAL
-// ---------------------------------------------------------------------------
-function LinkSponsorModal({
-  open,
-  onClose,
-  onApply,
-  isPending,
-  error,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onApply: (code: string) => void;
-  isPending: boolean;
-  error: string;
-}) {
-  const [inputCode, setInputCode] = useState('');
-  if (!open) return null;
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 440, maxHeight: '88vh', overflowY: 'auto' }}
-      >
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                background: 'rgba(0, 245, 155, 0.12)',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--neon-green)',
-                border: '1px solid rgba(0, 245, 155, 0.25)',
-              }}
-            >
-              <Users size={18} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: 18, margin: 0, color: '#fff', letterSpacing: '-0.02em' }}>
-                Link Inviter Code
-              </h2>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-                Connect your account to an inviter node in the referral network
-              </p>
-            </div>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const clean = inputCode.trim().replace(/^bits-/i, '').replace(/^node[-_]/i, '').toLowerCase();
-            if (clean) onApply(clean);
-          }}
-          style={{ paddingTop: 16 }}
-        >
-          <div className="field-wrap" style={{ marginBottom: 14 }}>
-            <label className="field-label">Inviter Username</label>
-            <input
-              className="field mono"
-              placeholder="e.g. sarah_k"
-              value={inputCode}
-              onChange={(e) => setInputCode(e.target.value)}
-              autoFocus
-            />
-            {error && <div style={{ color: 'var(--danger)', fontSize: 11, marginTop: 4 }}>{error}</div>}
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-            <button
-              type="button"
-              className="button button-ghost"
-              onClick={onClose}
-              style={{ minHeight: 36, padding: '0 16px', fontSize: 12 }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="button button-primary"
-              disabled={isPending || !inputCode.trim()}
-              style={{ minHeight: 36, padding: '0 18px', fontSize: 12 }}
-            >
-              {isPending ? 'Linking…' : 'Link Inviter'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 11.2 INVITED TEAM & PARTICIPANTS MODAL
-// ---------------------------------------------------------------------------
-type TeamMember = {
-  id: string;
-  handle: string;
-  address: string;
-  joinedAt: string;
-  status: 'verified' | 'unverified' | 'active' | 'pending';
-  stakedBits: number;
-  volumeUsdt: number;
-  bitsReward?: number;
-  isVerified?: boolean;
-  verificationRequirement?: string;
-  tier?: string;
-};
-
-// ---------------------------------------------------------------------------
-// 11.2 REFERRAL TEAM LEDGER MODAL OVERLAY (FIXED ARCHITECTURE & SIZING)
-// ---------------------------------------------------------------------------
-function ReferralsModal({
-  open,
-  onClose,
-  teamMembers,
-  filterTab,
-  setFilterTab,
-}: {
-  open: boolean;
-  onClose: () => void;
-  teamMembers: TeamMember[];
-  filterTab: 'all' | 'verified' | 'unverified';
-  setFilterTab: (tab: 'all' | 'verified' | 'unverified') => void;
-}) {
-  if (!open) return null;
-
-  const verifiedMembers = teamMembers.filter(
-    (m) => m.status === 'verified' || m.isVerified || (m.volumeUsdt >= 100 && m.stakedBits >= 1000)
-  );
-  const unverifiedMembers = teamMembers.filter(
-    (m) => !(m.status === 'verified' || m.isVerified || (m.volumeUsdt >= 100 && m.stakedBits >= 1000))
-  );
-
-  const filteredMembers = teamMembers.filter((m) => {
-    const isQual = m.status === 'verified' || m.isVerified || (m.volumeUsdt >= 100 && m.stakedBits >= 1000);
-    if (filterTab === 'verified') return isQual;
-    if (filterTab === 'unverified') return !isQual;
-    return true;
-  });
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: 840,
-          width: '95%',
-          height: '620px',
-          maxHeight: '90vh',
-          display: 'flex',
-          flexDirection: 'column',
-          padding: 0,
-          overflow: 'hidden',
-          border: '1px solid rgba(0, 245, 155, 0.3)',
-          background: 'linear-gradient(180deg, #0e121a 0%, #080a10 100%)',
-          boxShadow: '0 24px 64px rgba(0, 0, 0, 0.75)',
-        }}
-      >
-        {/* MODAL HEADER */}
-        <div
-          className="modal-header"
-          style={{
-            padding: '18px 24px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                background: 'rgba(0, 245, 155, 0.12)',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--neon-green)',
-                border: '1px solid rgba(0, 245, 155, 0.25)',
-              }}
-            >
-              <Users size={18} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: 18, margin: 0, color: '#fff', letterSpacing: '-0.02em', fontWeight: 700 }}>
-                Referral Team Ledger
-              </h2>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-                Verification Rule: Referee must purchase min. $100 &amp; stake in Proof-of-Burn engine
-              </p>
-            </div>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* RIGID FILTER & STATS BAR (FIXED HEIGHT, NEVER JUMPS OR RESIZES) */}
-        <div
-          style={{
-            padding: '12px 24px',
-            background: 'rgba(255, 255, 255, 0.02)',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: 12,
-            flexShrink: 0,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              background: 'rgba(0, 0, 0, 0.4)',
-              padding: 3,
-              borderRadius: 8,
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            {(['all', 'verified', 'unverified'] as const).map((tab) => {
-              const label =
-                tab === 'all'
-                  ? `All (${teamMembers.length})`
-                  : tab === 'verified'
-                  ? `Verified (${verifiedMembers.length})`
-                  : `Pending (${unverifiedMembers.length})`;
-              const isActive = filterTab === tab;
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setFilterTab(tab)}
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: 6,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    border: 'none',
-                    background: isActive ? 'var(--neon-green)' : 'transparent',
-                    color: isActive ? '#03140a' : 'var(--silver-dark)',
-                    transition: 'all 0.15s',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span
-              style={{
-                fontSize: 11,
-                color: 'var(--neon-green)',
-                background: 'rgba(0, 245, 155, 0.08)',
-                border: '1px solid rgba(0, 245, 155, 0.25)',
-                padding: '3px 8px',
-                borderRadius: 6,
-                fontWeight: 600,
-                whiteSpace: 'nowrap',
-              }}
-              className="mono"
-            >
-              Verified: {verifiedMembers.length * 100} Bits Active
-            </span>
-            <span
-              style={{
-                fontSize: 11,
-                color: '#f59e0b',
-                background: 'rgba(245, 158, 11, 0.08)',
-                border: '1px solid rgba(245, 158, 11, 0.25)',
-                padding: '3px 8px',
-                borderRadius: 6,
-                fontWeight: 600,
-                whiteSpace: 'nowrap',
-              }}
-              className="mono"
-            >
-              Pending: {unverifiedMembers.length * 100} Bits
-            </span>
-          </div>
-        </div>
-
-        {/* RIGID FIXED-SIZE TABLE VIEWPORT WITH ZERO TEXT OVERLAY */}
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-            overflowX: 'auto',
-            background: 'rgba(6, 9, 14, 0.7)',
-          }}
-        >
-          <table
-            className="data-table"
-            style={{
-              margin: 0,
-              minWidth: 720,
-              width: '100%',
-              tableLayout: 'fixed',
-              borderCollapse: 'collapse',
-            }}
-          >
-            <colgroup>
-              <col style={{ width: '190px' }} />
-              <col style={{ width: '120px' }} />
-              <col style={{ width: '200px' }} />
-              <col style={{ width: '120px' }} />
-              <col style={{ width: '90px' }} />
-            </colgroup>
-            <thead>
-              <tr style={{ position: 'sticky', top: 0, background: '#0e121a', zIndex: 2 }}>
-                <th style={{ padding: '12px 18px', width: 190 }}>Member Handle</th>
-                <th style={{ padding: '12px 18px', width: 120 }}>Date Joined</th>
-                <th style={{ padding: '12px 18px', width: 200 }}>Status</th>
-                <th style={{ padding: '12px 18px', width: 120 }}>Staked Volume</th>
-                <th style={{ padding: '12px 18px', width: 90 }}>Reward</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredMembers.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={5}
-                    style={{
-                      textAlign: 'center',
-                      padding: '80px 16px',
-                      color: 'var(--silver-dark)',
-                      height: 300,
-                    }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                      <Users size={28} style={{ opacity: 0.25 }} />
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--silver-medium)' }}>
-                        No referral entries in this filter
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--silver-dark)' }}>
-                        Share your referral link with peers to expand your network
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filteredMembers.map((member) => {
-                  const isQual =
-                    member.status === 'verified' ||
-                    member.isVerified ||
-                    (member.volumeUsdt >= 100 && member.stakedBits >= 1000);
-                  return (
-                    <tr key={member.id} style={{ height: 62 }}>
-                      <td style={{ padding: '12px 18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <div style={{ fontWeight: 700, color: '#ffffff', fontSize: 13, lineHeight: '1.2' }}>
-                          @{member.handle}
-                        </div>
-                        <div className="mono text-xs" style={{ color: 'var(--silver-dark)', marginTop: 4, lineHeight: '1.2' }}>
-                          {member.address.slice(0, 6)}…{member.address.slice(-4)}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontSize: 12, color: 'var(--silver-medium)' }}>
-                          {new Date(member.joinedAt).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                          })}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
-                        {isQual ? (
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 5,
-                              padding: '4px 10px',
-                              borderRadius: 6,
-                              background: 'rgba(0, 245, 155, 0.1)',
-                              border: '1px solid rgba(0, 245, 155, 0.25)',
-                              color: 'var(--neon-green)',
-                              fontSize: 11,
-                              fontWeight: 700,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            <Check size={12} />
-                            Verified ($100+ Staked)
-                          </span>
-                        ) : (
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 5,
-                              padding: '4px 10px',
-                              borderRadius: 6,
-                              background: 'rgba(255, 193, 7, 0.08)',
-                              border: '1px solid rgba(255, 193, 7, 0.25)',
-                              color: '#f59e0b',
-                              fontSize: 11,
-                              fontWeight: 600,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            Pending (Min. $100 Req.)
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
-                        <div style={{ fontWeight: 700, color: '#ffffff', fontSize: 13, lineHeight: '1.2' }} className="mono">
-                          {number(member.stakedBits)} Bits
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--silver-dark)', marginTop: 4, lineHeight: '1.2' }}>
-                          ≈ {money(member.volumeUsdt)} USDT
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 18px', whiteSpace: 'nowrap' }}>
-                        <span
-                          className="mono"
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 700,
-                            color: isQual ? 'var(--neon-green)' : 'var(--silver-dark)',
-                          }}
-                        >
-                          {isQual ? '+100 Bits' : '100 Bits'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* MODAL FOOTER */}
-        <div
-          className="modal-footer"
-          style={{
-            padding: '14px 24px',
-            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexShrink: 0,
-            background: 'rgba(10, 13, 20, 0.95)',
-          }}
-        >
-          <div style={{ fontSize: 12, color: 'var(--silver-dark)' }}>
-            Each verified referee yields <strong>+100 Bits</strong> directly claimable into your balance.
-          </div>
-          <button
-            type="button"
-            className="button button-ghost"
-            onClick={onClose}
-            style={{ minHeight: 34, padding: '0 16px', fontSize: 12 }}
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 11.3 YIELD SIMULATOR MODAL OVERLAY (FIXED ARCHITECTURE & ZERO SIZING JUMP)
-// ---------------------------------------------------------------------------
-function YieldSimulatorModal({
-  open,
-  onClose,
-  calcFriends,
-  setCalcFriends,
-  calcTermDays,
-  setCalcTermDays,
-  calcTotalFreeBits,
-  calcTotalBitsUsd,
-  calcTermRate,
-  calcPrincipalNoir,
-  calcYieldNoir,
-  calcTotalNoir,
-  calcTotalUsdSettled,
-  referralUrl,
-  copy,
-}: {
-  open: boolean;
-  onClose: () => void;
-  calcFriends: number;
-  setCalcFriends: (n: number) => void;
-  calcTermDays: number;
-  setCalcTermDays: (n: number) => void;
-  calcTotalFreeBits: number;
-  calcTotalBitsUsd: number;
-  calcTermRate: number;
-  calcPrincipalNoir: number;
-  calcYieldNoir: number;
-  calcTotalNoir: number;
-  calcTotalUsdSettled: number;
-  referralUrl: string;
-  copy: (text: string, label: string) => void;
-}) {
-  if (!open) return null;
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: 780,
-          width: '95%',
-          maxHeight: '88vh',
-          overflowY: 'auto',
-          border: '1px solid rgba(56, 189, 248, 0.3)',
-          background: 'linear-gradient(180deg, #0e1420 0%, #080d15 100%)',
-          boxShadow: '0 24px 64px rgba(0, 0, 0, 0.75)',
-        }}
-      >
-        {/* HEADER */}
-        <div
-          className="modal-header"
-          style={{
-            padding: '18px 24px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                background: 'rgba(56, 189, 248, 0.12)',
-                display: 'grid',
-                placeItems: 'center',
-                color: '#38bdf8',
-                border: '1px solid rgba(56, 189, 248, 0.25)',
-              }}
-            >
-              <TrendingUp size={18} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: 18, margin: 0, color: '#fff', letterSpacing: '-0.02em', fontWeight: 700 }}>
-                Yield Simulator
-              </h2>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-                12.0% Annual APY Schedule · 30–90 Day Proof-of-Burn Settlement
-              </p>
-            </div>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* BODY */}
-        <div className="modal-body" style={{ padding: '22px 24px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: 20 }}>
-            {/* Controls Column */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* Control 1: Signup Grant */}
-              <div
-                style={{
-                  padding: '12px 14px',
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  borderRadius: 10,
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--silver-light)' }}>
-                  Signup Welcome Grant
-                </span>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: 'var(--neon-green)' }}>
-                  +100 Bits Free
-                </span>
-              </div>
-
-              {/* Control 2: Qualified Referrals */}
-              <div
-                style={{
-                  padding: '12px 14px',
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  borderRadius: 10,
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--silver-light)' }}>
-                    Verified Referrals
-                  </span>
-                  <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: '#38bdf8' }}>
-                    {calcFriends} Friends (+{calcFriends * 100} Bits)
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="50"
-                  step="1"
-                  value={calcFriends}
-                  onChange={(e) => setCalcFriends(Number(e.target.value))}
-                  className="modern-range-line"
-                  aria-label="Simulate verified friends"
-                />
-                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                  {[0, 3, 5, 10, 20, 50].map((count) => (
-                    <button
-                      key={count}
-                      type="button"
-                      onClick={() => setCalcFriends(count)}
-                      style={{
-                        flex: 1,
-                        padding: '4px 0',
-                        borderRadius: 6,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        border: '1px solid',
-                        borderColor: calcFriends === count ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255, 255, 255, 0.08)',
-                        background: calcFriends === count ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                        color: calcFriends === count ? '#38bdf8' : 'var(--silver-medium)',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {count}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Control 3: Lockup Term */}
-              <div
-                style={{
-                  padding: '12px 14px',
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  borderRadius: 10,
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--silver-light)' }}>
-                    Lockup Duration
-                  </span>
-                  <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: 'var(--neon-green)' }}>
-                    {calcTermDays} Days (+{(calcTermRate * 100).toFixed(1)}% Term)
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {[
-                    { days: 30, rateLabel: '+1.0%' },
-                    { days: 60, rateLabel: '+2.0%' },
-                    { days: 90, rateLabel: '+3.0%' },
-                  ].map((item) => (
-                    <button
-                      key={item.days}
-                      type="button"
-                      onClick={() => setCalcTermDays(item.days)}
-                      style={{
-                        flex: 1,
-                        padding: '6px 4px',
-                        borderRadius: 6,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        border: '1px solid',
-                        borderColor: calcTermDays === item.days ? 'rgba(0, 245, 155, 0.4)' : 'rgba(255, 255, 255, 0.08)',
-                        background: calcTermDays === item.days ? 'rgba(0, 245, 155, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                        color: calcTermDays === item.days ? 'var(--neon-green)' : 'var(--silver-medium)',
-                        transition: 'all 0.15s',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        paddingLeft: 10,
-                        paddingRight: 10,
-                      }}
-                    >
-                      <span>{item.days}D</span>
-                      <span style={{ fontSize: 10, opacity: 0.85 }}>{item.rateLabel}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Results Column */}
-            <div
-              style={{
-                background: 'rgba(0, 0, 0, 0.45)',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
-                borderRadius: 12,
-                padding: '18px 20px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--silver-medium)' }}>
-                  <span>Free Bits Pool</span>
-                  <span className="mono" style={{ color: '#fff', fontWeight: 700 }}>{number(calcTotalFreeBits)} Bits</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--silver-medium)' }}>
-                  <span>Capital Parity ($0.10/Bit)</span>
-                  <span className="mono" style={{ color: 'var(--neon-green)', fontWeight: 600 }}>≈ {money(calcTotalBitsUsd)} USD</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--silver-medium)' }}>
-                  <span>Principal Return at Maturity</span>
-                  <span className="mono" style={{ color: '#fff' }}>{calcPrincipalNoir.toFixed(4)} $Noir</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--silver-medium)' }}>
-                  <span>12% APY Yield Bonus</span>
-                  <span className="mono" style={{ color: 'var(--neon-green)', fontWeight: 600 }}>+{calcYieldNoir.toFixed(4)} $Noir</span>
-                </div>
-
-                <div style={{ height: 1, background: 'rgba(255, 255, 255, 0.08)', margin: '4px 0' }} />
-
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--neon-green)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>
-                    Total Bitnoir ($Noir) Settled
-                  </div>
-                  <div className="mono" style={{ fontSize: 28, fontWeight: 700, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-                    {calcTotalNoir.toFixed(4)} <span style={{ fontSize: 14, color: 'var(--silver-dark)', fontWeight: 400 }}>$Noir</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--silver-medium)', marginTop: 4 }}>
-                    ≈ {money(calcTotalUsdSettled)} USD (at $1.10 benchmark valuation)
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 16 }}>
-                <button
-                  type="button"
-                  className="button button-primary w-full"
-                  onClick={() => copy(referralUrl, 'Invite Link')}
-                  style={{ width: '100%', justifyContent: 'center', padding: '10px 14px', fontSize: 12 }}
-                >
-                  <Copy size={13} />
-                  <span>Copy Invite Link</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 11. COMMUNITY AIRDROP & FREE BITS REFERRAL PORTAL (/referrals, /airdrop)
-// ---------------------------------------------------------------------------
-function ReferralsPage({ account }: { account: UserAccount }) {
-  const apply = useApplyReferralCode();
-  const client = useQueryClient();
-  const { notify, notice } = useNotice();
-
-  const [error, setError] = useState('');
-  const [guideOpen, setGuideOpen] = useState(false);
-  const [sponsorModalOpen, setSponsorModalOpen] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [filterTab, setFilterTab] = useState<'all' | 'verified' | 'unverified'>('all');
-  const [referralsModalOpen, setReferralsModalOpen] = useState(false);
-  const [simulatorModalOpen, setSimulatorModalOpen] = useState(false);
-
-  // Free Bits State: 100 free Bits for signup + referral bits
-  const [referralBitsAvailable, setReferralBitsAvailable] = useState<number>(() => {
-    return (account as any).referralBitsAvailable ?? (account as any).referralXpAvailable ?? 200;
-  });
-  const [referralBitsClaimed, setReferralBitsClaimed] = useState<number>(() => {
-    return (account as any).referralBitsClaimed ?? 100;
-  });
-  const [isClaiming, setIsClaiming] = useState(false);
-
-  // Free Bits Yield Projection State
-  const [calcFriends, setCalcFriends] = useState<number>(5);
-  const [calcTermDays, setCalcTermDays] = useState<number>(90);
-
-  // Clean username without any "node" or "bits-" prefix/suffix
-  const rawUsername = account.referralCode || account.name || 'satoshi';
-  const cleanUsername = rawUsername
-    .replace(/node/gi, '')
-    .replace(/^bits[-_]?/i, '')
-    .replace(/[-_]$/, '')
-    .toLowerCase()
-    .trim() || 'satoshi';
-
-  const cleanSponsor = account.referredBy
-    ? account.referredBy.replace(/node/gi, '').replace(/^bits[-_]?/i, '').replace(/[-_]$/, '').toLowerCase().trim()
-    : null;
-
-  const referralUrl = `${window.location.origin}${basePath}/sign-up?ref=${encodeURIComponent(cleanUsername)}`;
-
-  // Team members with exact verification rules: referee must purchase min. $100 & stake
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([
-    {
-      id: 'member-1',
-      handle: 'marcus',
-      address: '0x3507e4978e0eb83315d20df86ca0b976c0e40ccb',
-      joinedAt: new Date(Date.now() - 4 * 86400000).toISOString(),
-      status: 'verified',
-      stakedBits: 25000,
-      volumeUsdt: 2500,
-      bitsReward: 100,
-      isVerified: true,
-      verificationRequirement: 'Qualified ($2,500 staked)',
-      tier: 'Gold Tier',
-    },
-    {
-      id: 'member-2',
-      handle: 'sarah',
-      address: '0x71C8360437E55928d11B3e264259837a7F9D7065',
-      joinedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-      status: 'verified',
-      stakedBits: 10000,
-      volumeUsdt: 1000,
-      bitsReward: 100,
-      isVerified: true,
-      verificationRequirement: 'Qualified ($1,000 staked)',
-      tier: 'Silver Tier',
-    },
-    {
-      id: 'member-3',
-      handle: 'elena',
-      address: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
-      joinedAt: new Date(Date.now() - 12 * 86400000).toISOString(),
-      status: 'verified',
-      stakedBits: 5000,
-      volumeUsdt: 500,
-      bitsReward: 100,
-      isVerified: true,
-      verificationRequirement: 'Qualified ($500 staked)',
-      tier: 'Bronze Tier',
-    },
-    {
-      id: 'member-4',
-      handle: 'david',
-      address: '0x12a95c80881912a7a40b1928374a56b192847c5d',
-      joinedAt: new Date(Date.now() - 1 * 86400000).toISOString(),
-      status: 'unverified',
-      stakedBits: 0,
-      volumeUsdt: 0,
-      bitsReward: 100,
-      isVerified: false,
-      verificationRequirement: 'Referee must purchase min. $100 & stake',
-      tier: 'New Member',
-    },
-    {
-      id: 'member-5',
-      handle: 'alex',
-      address: '0x9928f80881912a7a40b1928374a56b192847a11',
-      joinedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-      status: 'unverified',
-      stakedBits: 250,
-      volumeUsdt: 25,
-      bitsReward: 100,
-      isVerified: false,
-      verificationRequirement: 'Only $25 staked (Min. $100 required)',
-      tier: 'New Member',
-    },
-  ]);
-
-  useEffect(() => {
-    fetch('/api/accounts/me/team')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          // Normalize handles to clean names without node
-          const cleanData = data.map((item: any) => ({
-            ...item,
-            handle: String(item.handle || '').replace(/node/gi, '').replace(/[-_]$/, ''),
-          }));
-          setTeamMembers(cleanData);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
-
-  const verifiedMembers = teamMembers.filter(
-    (m) => m.status === 'verified' || m.isVerified || (m.volumeUsdt >= 100 && m.stakedBits >= 1000)
-  );
-  const unverifiedMembers = teamMembers.filter(
-    (m) => !(m.status === 'verified' || m.isVerified || (m.volumeUsdt >= 100 && m.stakedBits >= 1000))
-  );
-
-  const filteredTeamMembers = teamMembers.filter((m) => {
-    const isQual = m.status === 'verified' || m.isVerified || (m.volumeUsdt >= 100 && m.stakedBits >= 1000);
-    if (filterTab === 'verified') return isQual;
-    if (filterTab === 'unverified') return !isQual;
-    return true;
-  });
-
-  const pendingBitsCount = unverifiedMembers.length * 100;
-
-  const copy = async (text: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      if (label === 'Referral Code') {
-        setCopiedCode(true);
-        setTimeout(() => setCopiedCode(false), 2000);
-      } else {
-        setCopiedLink(true);
-        setTimeout(() => setCopiedLink(false), 2000);
-      }
-      notify(`${label} copied to clipboard!`);
-    } catch {
-      notify('Unable to access clipboard.');
-    }
-  };
-
-  const handleApplySponsor = (codeToApply: string) => {
-    setError('');
-    apply.mutate(
-      { data: { code: codeToApply } },
-      {
-        onSuccess: (result: { message?: string }) => {
-          setSponsorModalOpen(false);
-          notify(result.message || 'Inviter linked successfully!');
-          void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-          void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
-        },
-        onError: () => setError('Invalid inviter username or already linked.'),
-      }
-    );
-  };
-
-  const handleClaimReferralBits = async () => {
-    if (referralBitsAvailable <= 0 || isClaiming) return;
-    setIsClaiming(true);
-    try {
-      const res = await fetch('/api/accounts/me/claim-referral-bits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to claim referral Bits');
-
-      const claimed = data.claimedBits ?? referralBitsAvailable;
-      setReferralBitsClaimed((prev) => prev + claimed);
-      setReferralBitsAvailable(0);
-      notify(data.message || `Claimed +${claimed} Verified Bits directly into your balance!`);
-      void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-      void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
-    } catch (err: any) {
-      notify(err.message || 'Failed to claim referral Bits.');
-    } finally {
-      setIsClaiming(false);
-    }
-  };
-
-  // User's Free Bits: 100 Signup Bits + Claimed Verified Referral Bits
-  const userFreeSignupBits = 100;
-  const totalFreeBitsAcquired = userFreeSignupBits + referralBitsClaimed;
-  const totalFreeBitsValueUsd = totalFreeBitsAcquired * 0.10;
-
-  // Free Bits Calculator Projection
-  const calcTotalFreeBits = 100 + (calcFriends * 100);
-  const calcTotalBitsUsd = calcTotalFreeBits * 0.10;
-  const calcTermRate = (calcTermDays / 360) * 0.12; // 12% annual APY
-  const calcPrincipalNoir = calcTotalBitsUsd / BITNOIR_REFERENCE_PRICE;
-  const calcYieldNoir = calcPrincipalNoir * calcTermRate;
-  const calcTotalNoir = calcPrincipalNoir + calcYieldNoir;
-  const calcTotalUsdSettled = calcTotalNoir * BITNOIR_REFERENCE_PRICE;
-
-  return (
-    <AppShell active="/referrals" admin={account.role === 'admin'}>
-      {/* 1. TOP HARDENED ARCHITECTURAL HEADER & ACTIONS */}
-      <div className="page-title-row" style={{ marginBottom: 20 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 12,
-                background: 'rgba(0, 245, 155, 0.1)',
-                display: 'grid',
-                placeItems: 'center',
-                color: 'var(--neon-green)',
-                border: '1px solid rgba(0, 245, 155, 0.25)',
-              }}
-            >
-              <Gift size={20} />
-            </div>
-            <div>
-              <h1 className="page-title" style={{ margin: 0, fontSize: 22, letterSpacing: '-0.02em' }}>
-                Community Allocation
-              </h1>
-              <p className="page-subtitle mono" style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-                100 BITS Welcome Grant · 8.0% Hard Cap Reserve · 12.0% Fair APY
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGID ZERO-SHIFT TOP ACTIONS */}
-        <div className="hardened-top-actions">
-          {/* TOP BUTTON 1: REFERRALS (CLICK TO CLEANLY APPEAR AS MODAL OVERLAY) */}
-          <button
-            type="button"
-            className="button button-ghost hardened-action-btn"
-            onClick={() => setReferralsModalOpen(true)}
-            title="Open Referral Team Ledger"
-            style={{
-              minWidth: 130,
-              height: 38,
-              borderColor: 'rgba(0, 245, 155, 0.35)',
-              background: 'rgba(0, 245, 155, 0.08)',
-              color: '#fff',
-              transition: 'all 0.18s ease-in-out',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <Users size={14} color="var(--neon-green)" />
-            <span>Referrals ({teamMembers.length})</span>
-          </button>
-
-          {/* TOP BUTTON 2: YIELD SIMULATOR (CLICK TO CLEANLY APPEAR AS MODAL OVERLAY) */}
-          <button
-            type="button"
-            className="button button-ghost hardened-action-btn"
-            onClick={() => setSimulatorModalOpen(true)}
-            title="Open Yield Simulator"
-            style={{
-              minWidth: 140,
-              height: 38,
-              borderColor: 'rgba(56, 189, 248, 0.35)',
-              background: 'rgba(56, 189, 248, 0.08)',
-              color: '#fff',
-              transition: 'all 0.18s ease-in-out',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <TrendingUp size={14} color="#38bdf8" />
-            <span>Yield Simulator</span>
-          </button>
-
-          {/* CLEAN REFERRAL CODE BUTTON */}
-          <button
-            type="button"
-            className="button button-ghost hardened-action-btn"
-            onClick={() => copy(cleanUsername, 'Referral Code')}
-            title="Click to copy your clean referral code"
-            style={{ minWidth: 120, height: 38 }}
-          >
-            <UserCheck size={13} color="var(--neon-green)" />
-            <span className="mono">Code: <strong>@{cleanUsername}</strong></span>
-          </button>
-
-          {/* COPY REFERRAL LINK BUTTON */}
-          <button
-            type="button"
-            className="button button-ghost hardened-action-btn"
-            onClick={() => copy(referralUrl, 'Invite Link')}
-            title="Copy Invite Link"
-            style={{ minWidth: 105, height: 38 }}
-          >
-            {copiedLink ? <Check size={13} color="var(--neon-green)" /> : <LinkIcon size={13} color="var(--neon-green)" />}
-            <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
-          </button>
-
-          {/* LINK INVITER CODE BUTTON OR BADGE */}
-          {cleanSponsor ? (
-            <span
-              className="brand-badge"
-              style={{
-                height: 38,
-                padding: '0 12px',
-                fontSize: 11,
-                borderRadius: 10,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-              }}
-            >
-              <BadgeCheck size={13} color="var(--neon-green)" />
-              <span>Inviter: <strong className="mono">@{cleanSponsor}</strong></span>
-            </span>
-          ) : (
-            <button
-              type="button"
-              className="clean-action-btn-soft hardened-action-btn"
-              onClick={() => setSponsorModalOpen(true)}
-              style={{ minWidth: 115, height: 38 }}
-            >
-              <Users size={13} />
-              <span>Link Inviter</span>
-            </button>
-          )}
-
-          {/* GUIDE & RULES BUTTON (ALL INFORMATIONAL TEXTS LIVE HERE) */}
-          <button
-            type="button"
-            className="clean-glass-btn hardened-action-btn"
-            onClick={() => setGuideOpen(true)}
-            title="Open Guidelines & Program Rules"
-            style={{ borderColor: 'rgba(0, 245, 155, 0.4)', color: '#fff', minWidth: 120, height: 38 }}
-          >
-            <BookOpen size={13} color="var(--neon-green)" />
-            <span>Guide & Rules</span>
-          </button>
-        </div>
-      </div>
-
-      {/* ONE SINGLE PROGRESS GRID (UNIFIED PROGRESSION PIPELINE) */}
-      <div className="w-full rounded-2xl bg-[#080d16] border border-white/10 shadow-2xl overflow-hidden mb-6 p-6 md:p-8">
-        {/* TOP POOL ALLOCATION HEADER */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 mb-8 border-b border-white/8">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-xs font-bold text-[#00f59b] tracking-wider uppercase font-mono">
-              8.0% Community Reserve
-            </span>
-            <span className="text-white/20">|</span>
-            <span className="font-mono text-sm font-bold text-white">
-              1,680,000 $Noir
-            </span>
-            <span className="text-xs text-slate-400 font-mono">
-              (18,480,000 Bits)
-            </span>
-          </div>
-
-          <div className="flex items-center gap-4 min-w-[280px]">
-            <div className="text-xs font-mono text-slate-300 whitespace-nowrap">
-              Remaining: <strong className="text-white">13,050,000 Bits</strong> <span className="text-[#38bdf8]">(70.6%)</span>
-            </div>
-            <div className="flex-1 h-2 bg-white/8 rounded-full overflow-hidden min-w-[100px]">
-              <div
-                className="h-full bg-gradient-to-r from-[#00f59b] to-[#38bdf8] rounded-full"
-                style={{ width: '29.4%' }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* SINGLE PROGRESS TRACKER: CONNECTED 4-STAGE PIPELINE */}
-        <div className="relative">
-          {/* Continuous Progress Bar Line running through all 4 milestones */}
-          <div className="hidden lg:block absolute top-[27px] left-[12%] right-[12%] h-[3px] bg-white/8 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-[#00f59b] via-[#38bdf8] to-[#f5a623] rounded-full"
-              style={{ width: '70%' }}
-            />
-          </div>
-
-          {/* 4 Checkpoint Milestones along the Single Progress Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 relative z-10">
-            {/* 1. SIGNUP GRANT */}
-            <div className="flex flex-col items-start lg:items-center text-left lg:text-center">
-              <div className="w-14 h-14 rounded-full bg-[#00f59b]/10 border-2 border-[#00f59b] flex items-center justify-center mb-3.5 shadow-[0_0_15px_rgba(0,245,155,0.25)] bg-[#080d16]">
-                <Check size={20} className="text-[#00f59b]" />
-              </div>
-              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                Signup Grant
-              </div>
-              <div className="font-mono text-2xl md:text-3xl font-bold text-white tracking-tight leading-none mb-1.5">
-                100 <span className="text-xs font-normal text-slate-400">BITS</span>
-              </div>
-              <div className="font-mono text-xs text-[#00f59b]">
-                $10.00 USD
-              </div>
-            </div>
-
-            {/* 2. VERIFIED REWARDS */}
-            <div className="flex flex-col items-start lg:items-center text-left lg:text-center">
-              <div className="w-14 h-14 rounded-full bg-[#00f59b]/10 border-2 border-[#00f59b] flex items-center justify-center mb-3.5 shadow-[0_0_15px_rgba(0,245,155,0.2)] bg-[#080d16]">
-                <Users size={20} className="text-[#00f59b]" />
-              </div>
-              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                Verified Rewards
-              </div>
-              <div className="font-mono text-2xl md:text-3xl font-bold text-[#00f59b] tracking-tight leading-none mb-1.5 flex items-center gap-2">
-                <span>{number(referralBitsAvailable)}</span>
-                <span className="text-xs font-normal text-slate-400">BITS</span>
-                {referralBitsAvailable > 0 && (
-                  <button
-                    type="button"
-                    className="button button-primary !h-6 !px-2.5 !text-[11px] !rounded"
-                    disabled={isClaiming}
-                    onClick={handleClaimReferralBits}
-                  >
-                    {isClaiming ? <RefreshCw size={11} className="animate-spin" /> : null}
-                    <span>Claim</span>
-                  </button>
-                )}
-              </div>
-              <div
-                onClick={() => setReferralsModalOpen(true)}
-                className="font-mono text-xs text-slate-400 hover:text-white cursor-pointer transition-colors flex items-center gap-1"
-                title="Click to view Referral Ledger"
-              >
-                <span>{verifiedMembers.length} Qualified Peers</span>
-                <ChevronRight size={12} className="text-[#00f59b]" />
-              </div>
-            </div>
-
-            {/* 3. PENDING REWARDS */}
-            <div className="flex flex-col items-start lg:items-center text-left lg:text-center">
-              <div className="w-14 h-14 rounded-full bg-[#f5a623]/10 border-2 border-[#f5a623] flex items-center justify-center mb-3.5 shadow-[0_0_15px_rgba(245,166,35,0.2)] bg-[#080d16]">
-                <Timer size={20} className="text-[#f5a623]" />
-              </div>
-              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                Pending Rewards
-              </div>
-              <div className="font-mono text-2xl md:text-3xl font-bold text-[#f5a623] tracking-tight leading-none mb-1.5">
-                {number(pendingBitsCount)} <span className="text-xs font-normal text-slate-400">BITS</span>
-              </div>
-              <div
-                onClick={() => setReferralsModalOpen(true)}
-                className="font-mono text-xs text-slate-400 hover:text-white cursor-pointer transition-colors flex items-center gap-1"
-                title="Click to view Referral Ledger"
-              >
-                <span>{unverifiedMembers.length} Awaiting Stake</span>
-                <ChevronRight size={12} className="text-[#f5a623]" />
-              </div>
-            </div>
-
-            {/* 4. STAKABLE BALANCE */}
-            <div className="flex flex-col items-start lg:items-center text-left lg:text-center">
-              <div className="w-14 h-14 rounded-full bg-[#38bdf8]/10 border-2 border-[#38bdf8] flex items-center justify-center mb-3.5 shadow-[0_0_15px_rgba(56,189,248,0.25)] bg-[#080d16]">
-                <TrendingUp size={20} className="text-[#38bdf8]" />
-              </div>
-              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">
-                Stakable Balance
-              </div>
-              <div className="font-mono text-2xl md:text-3xl font-bold text-white tracking-tight leading-none mb-1.5">
-                {number(totalFreeBitsAcquired)} <span className="text-xs font-normal text-slate-400">BITS</span>
-              </div>
-              <div
-                onClick={() => setSimulatorModalOpen(true)}
-                className="font-mono text-xs text-[#38bdf8] hover:text-white cursor-pointer transition-colors flex items-center gap-1"
-                title="Click to open Yield Simulator"
-              >
-                <span>12% APY · {money(totalFreeBitsValueUsd)}</span>
-                <ChevronRight size={12} className="text-[#38bdf8]" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. REFERRALS TEAM LEDGER MODAL OVERLAY */}
-      <ReferralsModal
-        open={referralsModalOpen}
-        onClose={() => setReferralsModalOpen(false)}
-        teamMembers={teamMembers}
-        filterTab={filterTab}
-        setFilterTab={setFilterTab}
-      />
-
-      {/* 5. YIELD SIMULATOR MODAL OVERLAY (ZERO CALCULATOR WORD) */}
-      <YieldSimulatorModal
-        open={simulatorModalOpen}
-        onClose={() => setSimulatorModalOpen(false)}
-        calcFriends={calcFriends}
-        setCalcFriends={setCalcFriends}
-        calcTermDays={calcTermDays}
-        setCalcTermDays={setCalcTermDays}
-        calcTotalFreeBits={calcTotalFreeBits}
-        calcTotalBitsUsd={calcTotalBitsUsd}
-        calcTermRate={calcTermRate}
-        calcPrincipalNoir={calcPrincipalNoir}
-        calcYieldNoir={calcYieldNoir}
-        calcTotalNoir={calcTotalNoir}
-        calcTotalUsdSettled={calcTotalUsdSettled}
-        referralUrl={referralUrl}
-        copy={copy}
-      />
-
-      {/* Guidelines & Rules Modal (All Informational Copy Lives Here) */}
-      <CommunityGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
-
-      {/* Link Sponsor Modal */}
-      <LinkSponsorModal
-        open={sponsorModalOpen}
-        onClose={() => setSponsorModalOpen(false)}
-        onApply={handleApplySponsor}
-        isPending={apply.isPending}
-        error={error}
-      />
-
-      {notice}
-    </AppShell>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // 12. ADMIN CONTROL ROOM (/admin)
@@ -6724,30 +4419,14 @@ function App() {
                 {() => <ProtectedGate>{(account) => <StakingPage account={account} />}</ProtectedGate>}
               </Route>
 
-              {/* PROTOCOL STATISTICS & STAKER METRICS (/statistics, /statics, /pool) */}
-              <Route path="/statistics">
-                {() => <ProtectedGate>{(account) => <StatisticsPage account={account} />}</ProtectedGate>}
-              </Route>
-              <Route path="/statics">
-                {() => <ProtectedGate>{(account) => <StatisticsPage account={account} />}</ProtectedGate>}
-              </Route>
-              <Route path="/pool">
-                {() => <ProtectedGate>{(account) => <StatisticsPage account={account} />}</ProtectedGate>}
-              </Route>
-
-              {/* AIRDROP & REFERRAL NETWORK */}
-              <Route path="/referrals">
-                {() => <ProtectedGate>{(account) => <ReferralsPage account={account} />}</ProtectedGate>}
-              </Route>
-              <Route path="/airdrop">
-                {() => <ProtectedGate>{(account) => <ReferralsPage account={account} />}</ProtectedGate>}
-              </Route>
-              <Route path="/team">
-                {() => <ProtectedGate>{(account) => <ReferralsPage account={account} />}</ProtectedGate>}
-              </Route>
-              <Route path="/tasks">
-                {() => <ProtectedGate>{(account) => <ReferralsPage account={account} />}</ProtectedGate>}
-              </Route>
+              {/* REDIRECT REMOVED PAGES (STATISTICS, AIRDROP & FREE BITS) TO /wallet */}
+              <Route path="/statistics">{() => <Redirect to="/wallet" />}</Route>
+              <Route path="/statics">{() => <Redirect to="/wallet" />}</Route>
+              <Route path="/pool">{() => <Redirect to="/wallet" />}</Route>
+              <Route path="/referrals">{() => <Redirect to="/wallet" />}</Route>
+              <Route path="/airdrop">{() => <Redirect to="/wallet" />}</Route>
+              <Route path="/team">{() => <Redirect to="/wallet" />}</Route>
+              <Route path="/tasks">{() => <Redirect to="/wallet" />}</Route>
 
               {/* ADMIN GOVERNANCE */}
               <Route path="/admin">

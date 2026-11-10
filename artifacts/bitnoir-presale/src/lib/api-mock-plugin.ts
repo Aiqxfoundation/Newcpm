@@ -164,7 +164,7 @@ export function bitnoirApiPlugin(): Plugin {
       id: 105,
       kind: 'reward',
       title: 'Mined Bits Claimed',
-      detail: 'Claimed +120.5000 mined Bits from 24h Storage Tank Cycle into active balance.',
+      detail: 'Claimed +120.5000 Bits into available balance.',
       createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
     },
     {
@@ -544,14 +544,24 @@ export function bitnoirApiPlugin(): Plugin {
       });
     }
 
-    // Burn SOL to Mine More Bits endpoint (0.1 to 10 SOL Max)
-    if (url === '/api/accounts/me/burn-sol' && req.method === 'POST') {
+    // Contribute SOL to Acquire SOL Power endpoint (Max 10 SOL per account)
+    if ((url === '/api/accounts/me/burn-sol' || url === '/api/accounts/me/contribute-sol') && req.method === 'POST') {
       const body = await parseBody(req);
       const rawSol = Number(body.solAmount) || 0.1;
-      const solAmount = Number(Math.max(0.1, Math.min(10.0, rawSol)).toFixed(2));
+      const currentContributed = userAccount.mining.burnedSol || (userAccount.mining as any).contributedSol || 0;
+      const remainingQuota = Math.max(0, 10.0 - currentContributed);
+
+      if (remainingQuota <= 0) {
+        return sendJson(res, 400, {
+          error: 'Maximum contribution limit of 10 SOL per account reached.',
+        });
+      }
+
+      const solAmount = Number(Math.max(0.1, Math.min(remainingQuota, rawSol)).toFixed(2));
       const rateBoost = Number((solAmount * 5.0).toFixed(4)); // 1 SOL = +5 Bits/hr boost
 
-      userAccount.mining.burnedSol = Number((userAccount.mining.burnedSol + solAmount).toFixed(3));
+      userAccount.mining.burnedSol = Number((currentContributed + solAmount).toFixed(3));
+      (userAccount.mining as any).contributedSol = userAccount.mining.burnedSol;
       userAccount.mining.solBurnBoostPerHour = Number((userAccount.mining.solBurnBoostPerHour + rateBoost).toFixed(4));
       userAccount.mining.totalMiningRatePerHour = Number(
         (userAccount.mining.baseRatePerHour + userAccount.mining.referralBoostPerHour + userAccount.mining.solBurnBoostPerHour).toFixed(4)
@@ -560,7 +570,7 @@ export function bitnoirApiPlugin(): Plugin {
       const allocation = {
         id: Date.now(),
         kind: 'sol_burn' as const,
-        label: `Proof-of-Burn Power (${solAmount} SOL)`,
+        label: `SOL Power (${solAmount} SOL)`,
         solBurned: solAmount,
         ratePerHour: rateBoost,
         multiplier: `+${Math.round((rateBoost / 0.1) * 100)}% Boost`,
@@ -571,19 +581,20 @@ export function bitnoirApiPlugin(): Plugin {
 
       activityList.unshift({
         id: Date.now(),
-        kind: 'burn',
-        title: `Burned ${solAmount} SOL to Mine More Bits`,
-        detail: `Committed ${solAmount} SOL into protocol burn sink. Granted +${rateBoost} Bits/hr hash power boost.`,
+        kind: 'stake',
+        title: `Contributed ${solAmount} SOL for SOL Power`,
+        detail: `Acquired +${rateBoost} Bits/hr SOL Power to mine more Bits (${userAccount.mining.burnedSol}/10 SOL).`,
         createdAt: new Date().toISOString(),
       });
 
       return sendJson(res, 200, {
         success: true,
+        solContributed: solAmount,
         solBurned: solAmount,
         rateBoost,
         mining: userAccount.mining,
         miningAllocations,
-        message: `Burned ${solAmount} SOL! Mining speed boosted by +${rateBoost} Bits/hr.`,
+        message: `Contributed ${solAmount} SOL! Acquired +${rateBoost} Bits/hr SOL Power.`,
       });
     }
 
