@@ -6588,5 +6588,158 @@ a {
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 50px rgba(0, 245, 155, 0.08);
 }
 
+/* STOPWATCH PRECISION POINTS COUNTER & ATTACHED CLAIM BUTTON */
+.stopwatch-counter-cockpit {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: linear-gradient(180deg, rgba(16, 24, 38, 0.9) 0%, rgba(8, 13, 22, 0.95) 100%);
+  border: 1px solid rgba(0, 245, 155, 0.25);
+  border-radius: 16px;
+  padding: 12px 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+}
+
+/* Plain claim button state under 20% */
+.claim-btn-plane {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 12px;
+  font: 700 13px var(--app-font-sans);
+  background: #111722 !important;
+  color: #7b8ba5 !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+/* Active colorful claim button state when 20% is reached */
+.claim-btn-active-colorful {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 22px;
+  border-radius: 12px;
+  font: 800 14px var(--app-font-sans);
+  background: linear-gradient(135deg, #00f59b 0%, #22c55e 50%, #38bdf8 100%) !important;
+  color: #03140a !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  cursor: pointer !important;
+  box-shadow: 0 0 28px rgba(0, 245, 155, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.6) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+  animation: claim-btn-glow 2.5s infinite ease-in-out;
+}
+
+.claim-btn-active-colorful:hover {
+  transform: translateY(-1px) scale(1.02);
+  filter: brightness(1.1);
+  box-shadow: 0 0 38px rgba(0, 245, 155, 0.6), inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+}
+
+.claim-btn-active-colorful:active {
+  transform: translateY(0) scale(0.99);
+}
+
+@keyframes claim-btn-glow {
+  0%, 100% {
+    box-shadow: 0 0 24px rgba(0, 245, 155, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 36px rgba(0, 245, 155, 0.65), inset 0 1px 2px rgba(255, 255, 255, 0.8);
+  }
+}
+
+/* CLAIMED POINTS TOP OF BUTTON TRIGGER */
+.claimed-points-top-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: rgba(13, 20, 31, 0.95);
+  border: 1px solid rgba(0, 245, 155, 0.25);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.claimed-points-top-btn:hover,
+.claimed-points-top-btn.active {
+  background: rgba(18, 28, 44, 1);
+  border-color: #00f59b;
+  box-shadow: 0 0 16px rgba(0, 245, 155, 0.35);
+  transform: translateY(-1px);
+}
+
+.claimed-points-top-btn:active {
+  transform: translateY(0);
+}
+
+/* ATTACHED CLAIMED POINTS LEDGER PANEL - 100% VISIBLE, NO CLIPPING, PURE ARCHITECTURE */
+.pob-attached-claimed-panel {
+  background: #080c14;
+  border-top: 1px solid rgba(0, 245, 155, 0.22);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 20px 24px;
+  animation: attachedPanelSlide 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes attachedPanelSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pob-attached-claimed-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.pob-attached-claimed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.pob-attached-claimed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.15s ease;
+}
+
+.pob-attached-claimed-row:hover {
+  background: rgba(0, 245, 155, 0.04);
+  border-color: rgba(0, 245, 155, 0.2);
+  transform: translateX(2px);
+}
+
+
+
 
 

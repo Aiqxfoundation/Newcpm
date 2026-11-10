@@ -35,6 +35,7 @@ export function bitnoirApiPlugin(): Plugin {
     email: 'satoshi@bitnoir.io',
     role: 'admin',
     referralCode: 'satoshi',
+    referredBy: null as string | null,
     freeSignupBits: 100,      // 100 Free Bits credited for signup ($10 value)
     referralBitsAvailable: 200, // 200 Verified Referral Bits available to claim
     referralBitsClaimed: 100,   // 100 Verified Referral Bits already claimed
@@ -159,6 +160,13 @@ export function bitnoirApiPlugin(): Plugin {
   ];
 
   const activityList: Array<{ id: number; kind: string; title: string; detail: string; createdAt: string }> = [
+    {
+      id: 105,
+      kind: 'reward',
+      title: 'Mined Bits Claimed',
+      detail: 'Claimed +120.5000 mined Bits from 24h Storage Tank Cycle into active balance.',
+      createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
+    },
     {
       id: 104,
       kind: 'withdraw',
@@ -579,11 +587,16 @@ export function bitnoirApiPlugin(): Plugin {
       });
     }
 
-    // Claim accumulated mined Bits into available balance
+    // Claim accumulated mined Bits into available balance (20% minimum cycle threshold)
     if (url === '/api/accounts/me/claim-mined-bits' && req.method === 'POST') {
       const unclaimed = userAccount.mining.minedBitsUnclaimed || 0;
-      if (unclaimed <= 0) {
-        return sendJson(res, 400, { error: 'No mined Bits accumulated in storage tank.' });
+      const capacity = (userAccount.mining.totalMiningRatePerHour || 2.675) * 24;
+      const minThreshold = capacity * 0.20;
+
+      if (unclaimed < minThreshold) {
+        return sendJson(res, 400, {
+          error: 'Minimum claim threshold has not been reached yet.',
+        });
       }
 
       userAccount.mining.minedBitsTotalClaimed = Number(((userAccount.mining.minedBitsTotalClaimed || 0) + unclaimed).toFixed(4));
