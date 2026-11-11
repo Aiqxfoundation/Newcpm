@@ -53,8 +53,8 @@ export function bitnoirApiPlugin(): Plugin {
       baseRatePerHour: 0.1,         // Base Rate: 0.1 Bits Per Hour
       burnedSol: 0.5,               // Current burned SOL
       solBurnBoostPerHour: 2.5,     // 0.5 SOL * 5.0 Bits/hr
-      referralBoostPerHour: 0.075,  // 3 Verified Referral peers * 0.025 Bits/hr
-      totalMiningRatePerHour: 2.675, // Base 0.1 + Ref 0.075 + Burn 2.5
+      referralBoostPerHour: 0.03,   // 3 Active Direct Referrals * 10% of their 0.1000 Bits/hr mining power = +0.0300 Bits/hr
+      totalMiningRatePerHour: 2.63, // Base 0.1 + Ref 0.03 (10% of 3 active peers) + Burn 2.5
       minedBitsUnclaimed: 14.8291,  // Accumulated in storage tank ready to claim
       minedBitsTotalClaimed: 120.5,
       sessionStartedAt: new Date(Date.now() - 6 * 3600000).toISOString(),
@@ -86,9 +86,9 @@ export function bitnoirApiPlugin(): Plugin {
     {
       id: 2,
       kind: 'referral',
-      label: 'Qualified Referral Team (3 Peers)',
-      ratePerHour: 0.075,
-      multiplier: '+75% Boost',
+      label: 'Active Miners (3 Miners · 10% Mining Power)',
+      ratePerHour: 0.03,
+      multiplier: '+10% Direct Power',
       createdAt: new Date(Date.now() - 12 * 86400000).toISOString(),
       status: 'active',
     },
@@ -358,12 +358,15 @@ export function bitnoirApiPlugin(): Plugin {
           handle: 'marcus_v',
           address: '0x3507e4978e0eb83315d20df86ca0b976c0e40ccb',
           joinedAt: new Date(Date.now() - 4 * 86400000).toISOString(),
-          status: 'verified', // Qualified: >= $100 purchased & staked
+          status: 'verified', // Active miner
+          isActive: true,
+          miningPower: 0.1000,
+          providedPower: 0.0100, // 10% of active miner mining power
           stakedBits: 25000,
           volumeUsdt: 2500,
           bitsReward: 100,
           isVerified: true,
-          verificationRequirement: 'Qualified ($2,500 staked)',
+          verificationRequirement: 'Active Miner (Provides 10% Hash Power: +0.0100 Bits/hr)',
           tier: 'Gold Tier',
         },
         {
@@ -371,12 +374,15 @@ export function bitnoirApiPlugin(): Plugin {
           handle: 'sarah_k',
           address: '0x71C8360437E55928d11B3e264259837a7F9D7065',
           joinedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-          status: 'verified', // Qualified: >= $100 purchased & staked
+          status: 'verified', // Active miner
+          isActive: true,
+          miningPower: 0.1000,
+          providedPower: 0.0100, // 10% of active miner mining power
           stakedBits: 10000,
           volumeUsdt: 1000,
           bitsReward: 100,
           isVerified: true,
-          verificationRequirement: 'Qualified ($1,000 staked)',
+          verificationRequirement: 'Active Miner (Provides 10% Hash Power: +0.0100 Bits/hr)',
           tier: 'Silver Tier',
         },
         {
@@ -384,12 +390,15 @@ export function bitnoirApiPlugin(): Plugin {
           handle: 'elena_d',
           address: '0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7',
           joinedAt: new Date(Date.now() - 12 * 86400000).toISOString(),
-          status: 'verified', // Qualified: >= $100 purchased & staked
+          status: 'verified', // Active miner
+          isActive: true,
+          miningPower: 0.1000,
+          providedPower: 0.0100, // 10% of active miner mining power
           stakedBits: 5000,
           volumeUsdt: 500,
           bitsReward: 100,
           isVerified: true,
-          verificationRequirement: 'Qualified ($500 staked)',
+          verificationRequirement: 'Active Miner (Provides 10% Hash Power: +0.0100 Bits/hr)',
           tier: 'Bronze Tier',
         },
         {
@@ -397,12 +406,15 @@ export function bitnoirApiPlugin(): Plugin {
           handle: 'david_w',
           address: '0x12a95c80881912a7a40b1928374a56b192847c5d',
           joinedAt: new Date(Date.now() - 1 * 86400000).toISOString(),
-          status: 'unverified', // Unverified: Ref must purchase min. $100 & stake
+          status: 'unverified',
+          isActive: false,
+          miningPower: 0.0000,
+          providedPower: 0.0000, // Inactive miner: provides 0%
           stakedBits: 0,
           volumeUsdt: 0,
           bitsReward: 100,
           isVerified: false,
-          verificationRequirement: 'Unverified: Referee must purchase min. $100 (1,000 Bits) & stake',
+          verificationRequirement: 'Inactive Miner (Must stake min. $100 to activate 10% power boost)',
           tier: 'New Member',
         },
         {
@@ -410,12 +422,15 @@ export function bitnoirApiPlugin(): Plugin {
           handle: 'alex_c',
           address: '0x9928f80881912a7a40b1928374a56b192847a11',
           joinedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-          status: 'unverified', // Unverified: Only $25, needs $100 min
+          status: 'unverified',
+          isActive: false,
+          miningPower: 0.0000,
+          providedPower: 0.0000, // Inactive miner: provides 0%
           stakedBits: 250,
           volumeUsdt: 25,
           bitsReward: 100,
           isVerified: false,
-          verificationRequirement: 'Unverified: Only $25 staked (Min. $100 required)',
+          verificationRequirement: 'Inactive Miner (Must stake min. $100 to activate 10% power boost)',
           tier: 'New Member',
         },
       ];

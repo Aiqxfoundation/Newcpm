@@ -4005,6 +4005,35 @@ a {
   transform: none;
 }
 
+.phone-pill-btn-unclickable {
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: #64748b !important;
+  border: 1px dashed rgba(255, 255, 255, 0.14) !important;
+  cursor: not-allowed !important;
+  user-select: none;
+  font-weight: 600;
+  opacity: 0.8;
+  transition: none !important;
+  transform: none !important;
+}
+
+.phone-pill-btn-unclickable:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+  transform: none !important;
+}
+
+.phone-action-tag {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin-left: 2px;
+}
+
 .phone-activity-section {
   padding: 12px 20px 16px;
   flex: 1;
@@ -5796,7 +5825,6 @@ a {
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
-  min-width: 220px;
 }
 
 .pob-live-hint {
@@ -6605,11 +6633,13 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 0 20px;
-  border-radius: 12px;
-  font: 700 13px var(--app-font-sans);
+  gap: 6px;
+  height: 32px;
+  min-height: 32px;
+  min-width: 104px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font: 700 12px var(--app-font-sans);
   background: #111722 !important;
   color: #7b8ba5 !important;
   border: 1px solid rgba(255, 255, 255, 0.09) !important;
@@ -6624,16 +6654,18 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 0 22px;
-  border-radius: 12px;
-  font: 800 14px var(--app-font-sans);
+  gap: 6px;
+  height: 32px;
+  min-height: 32px;
+  min-width: 104px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font: 800 12px var(--app-font-sans);
   background: linear-gradient(135deg, #00f59b 0%, #22c55e 50%, #38bdf8 100%) !important;
   color: #03140a !important;
   border: 1px solid rgba(255, 255, 255, 0.5) !important;
   cursor: pointer !important;
-  box-shadow: 0 0 28px rgba(0, 245, 155, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.6) !important;
+  box-shadow: 0 0 20px rgba(0, 245, 155, 0.4), inset 0 1px 1.5px rgba(255, 255, 255, 0.6) !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
   animation: claim-btn-glow 2.5s infinite ease-in-out;
@@ -6642,7 +6674,7 @@ a {
 .claim-btn-active-colorful:hover {
   transform: translateY(-1px) scale(1.02);
   filter: brightness(1.1);
-  box-shadow: 0 0 38px rgba(0, 245, 155, 0.6), inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+  box-shadow: 0 0 28px rgba(0, 245, 155, 0.55), inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
 }
 
 .claim-btn-active-colorful:active {
@@ -6651,10 +6683,10 @@ a {
 
 @keyframes claim-btn-glow {
   0%, 100% {
-    box-shadow: 0 0 24px rgba(0, 245, 155, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.6);
+    box-shadow: 0 0 18px rgba(0, 245, 155, 0.35), inset 0 1px 1.5px rgba(255, 255, 255, 0.6);
   }
   50% {
-    box-shadow: 0 0 36px rgba(0, 245, 155, 0.65), inset 0 1px 2px rgba(255, 255, 255, 0.8);
+    box-shadow: 0 0 28px rgba(0, 245, 155, 0.55), inset 0 1px 2px rgba(255, 255, 255, 0.8);
   }
 }
 
@@ -6662,12 +6694,13 @@ a {
 .claimed-points-top-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 14px;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
   border-radius: 9999px;
   background: rgba(13, 20, 31, 0.95);
   border: 1px solid rgba(0, 245, 155, 0.25);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
@@ -6677,11 +6710,39 @@ a {
 .claimed-points-top-btn.active {
   background: rgba(18, 28, 44, 1);
   border-color: #00f59b;
-  box-shadow: 0 0 16px rgba(0, 245, 155, 0.35);
+  box-shadow: 0 0 14px rgba(0, 245, 155, 0.35);
   transform: translateY(-1px);
 }
 
 .claimed-points-top-btn:active {
+  transform: translateY(0);
+}
+
+/* REFERRAL POINTS TOP OF BUTTON TRIGGER (CYAN / ELECTRIC BLUE) */
+.referral-points-top-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  background: rgba(13, 20, 31, 0.95);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.referral-points-top-btn:hover,
+.referral-points-top-btn.active {
+  background: rgba(18, 28, 44, 1);
+  border-color: #38bdf8;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+  transform: translateY(-1px);
+}
+
+.referral-points-top-btn:active {
   transform: translateY(0);
 }
 
@@ -6739,7 +6800,121 @@ a {
   transform: translateX(2px);
 }
 
+/* ==========================================================================
+   CLEAN WALLET REDESIGN (TRUST WALLET / PHANTOM AESTHETIC)
+   ========================================================================== */
 
+.wallet-clean-page-wrapper {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 12px 16px 40px;
+}
 
+.wallet-clean-card {
+  max-width: 480px;
+  width: 100%;
+  background: #0a0f19;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 28px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+}
+
+.wallet-clean-token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 8px;
+  text-decoration: none;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+
+.wallet-clean-token-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.wallet-clean-token-row:active {
+  transform: translateY(0);
+}
+
+.wallet-activity-date-group {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  padding: 12px 6px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 4px;
+}
+
+.wallet-activity-clean-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  margin: 1px 0;
+}
+
+.wallet-activity-clean-row:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.wallet-action-clean-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 14px 6px 12px;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wallet-action-clean-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.wallet-action-clean-btn:active {
+  transform: translateY(0);
+}
+
+.wallet-action-clean-btn.highlight-swap {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+}
+
+.wallet-action-clean-btn.highlight-swap:hover {
+  background: rgba(99, 102, 241, 0.28);
+}
+
+.wallet-action-clean-btn.active-tab-btn {
+  background: rgba(0, 245, 155, 0.12);
+  border-color: rgba(0, 245, 155, 0.3);
+  color: #00f59b;
+}
 
 

@@ -10,7 +10,9 @@
     "lint": "tsc --build"
   },
   "private": true,
-  "dependencies": {},
+  "dependencies": {
+    "@solana/web3.js": "^3.2.1"
+  },
   "devDependencies": {
     "prettier": "^3.9.10",
     "typescript": "~5.9.3"

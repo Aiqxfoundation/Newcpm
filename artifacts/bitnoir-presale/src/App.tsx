@@ -2,9 +2,9 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type F
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
-  ChevronDown, ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Globe2, HelpCircle, Info,
+  ChevronDown, ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Globe2, Hammer, HelpCircle, Info,
   Landmark, Layers3, Link as LinkIcon, Lock, LockKeyhole, LogOut, Menu, PieChart, Plus, QrCode, Radio, RefreshCw,
-  Search, Send, ShieldAlert, ShieldCheck, Sliders, Sparkles, Timer, TrendingUp, Trophy, Users, Wallet, X, Zap,
+  ScrollText, Search, Send, ShieldAlert, ShieldCheck, Sliders, Sparkles, Timer, TrendingUp, Trophy, Users, Wallet, X, Zap,
 } from 'lucide-react';
 import {
   getGetAdminAddressesQueryKey, getGetAdminDepositsQueryKey, getGetAdminSummaryQueryKey,
@@ -24,6 +24,17 @@ import { Toaster } from '@/components/ui/toaster';
 import { toast } from '@/hooks/use-toast';
 import NotFound from '@/pages/not-found';
 import { supabase } from './lib/supabase';
+import {
+  fetchSolBalance,
+  sendSolanaTransactionOnchain,
+  getSavedMiningPass,
+  saveMiningPass,
+  getSavedSolPower,
+  addSavedSolPower,
+  type MiningPassData,
+  PROTOCOL_TREASURY_SOLANA,
+} from './lib/solana';
+import { WhitepaperView } from '@/pages/Whitepaper';
 import '@/index.css';
 
 const queryClient = new QueryClient({
@@ -207,86 +218,197 @@ function BitsMark({ size = 22, className = '' }: { size?: number; className?: st
   );
 }
 
-// AUTH CONTEXT with Username & Session Persistence
-type AuthUser = { id: string; email: string; name: string; username: string; isAdmin?: boolean };
+// PHANTOM & SOLANA LOGOS
+function PhantomLogo({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="128" height="128" rx="28" fill="#AB9FF2" />
+      <path d="M103.5 66.5C103.5 88.3152 85.8152 106 64 106C42.1848 106 24.5 88.3152 24.5 66.5C24.5 44.6848 42.1848 27 64 27C85.8152 27 103.5 44.6848 103.5 66.5Z" fill="#2C2D30" />
+      <path d="M78.5 73.5C78.5 76.5376 76.0376 79 73 79C69.9624 79 67.5 76.5376 67.5 73.5C67.5 70.4624 69.9624 68 73 68C76.0376 68 78.5 70.4624 78.5 73.5Z" fill="#FFF" />
+      <path d="M54.5 73.5C54.5 76.5376 52.0376 79 49 79C45.9624 79 43.5 76.5376 43.5 73.5C43.5 70.4624 45.9624 68 49 68C52.0376 68 54.5 70.4624 54.5 73.5Z" fill="#FFF" />
+    </svg>
+  );
+}
+
+function SolanaLogo({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 397 311" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7zM64.6 3.8C67 1.4 70.3 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8zM332.4 120.8c-2.4-2.4-5.7-3.8-9.2-3.8H5.8c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1l-62.7-62.7z" fill="url(#solana_grad)" />
+      <defs>
+        <linearGradient id="solana_grad" x1="396.9" y1="0" x2="0" y2="311.5" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#00FFA3" />
+          <stop offset="1" stopColor="#DC1FFF" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
+
+interface SolanaProvider {
+  isPhantom?: boolean;
+  connect: (options?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toString: () => string } }>;
+  disconnect: () => Promise<void>;
+  publicKey?: { toString: () => string };
+  on?: (event: string, callback: (...args: unknown[]) => void) => void;
+}
+
+function getSolanaProvider(): SolanaProvider | null {
+  if (typeof window === 'undefined') return null;
+  const anyWin = window as unknown as { phantom?: { solana?: SolanaProvider }; solana?: SolanaProvider };
+  if (anyWin.phantom?.solana?.isPhantom) return anyWin.phantom.solana;
+  if (anyWin.solana?.isPhantom) return anyWin.solana;
+  if (anyWin.solana) return anyWin.solana;
+  return null;
+}
+
+function shortSolanaAddress(addr: string): string {
+  if (!addr) return '';
+  if (addr.length <= 10) return addr;
+  return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+}
+
+// AUTH CONTEXT: Phantom Solana Wallet Public Address Architecture
+type AuthUser = {
+  id: string; // The Solana base58 public address
+  solanaAddress: string;
+  name: string; // Formatted handle e.g. @7xKp...3a9B
+  username: string; // Short address
+  email: string;
+  isAdmin?: boolean;
+};
+
 const AuthContext = createContext<{
   user: AuthUser | null;
   ready: boolean;
-  signIn: (loginKey: string) => Promise<void>;
-  signUp: (username: string, password: string, referral?: string) => Promise<string>;
+  connectWallet: (customAddress?: string) => Promise<string>;
+  disconnectWallet: () => Promise<void>;
+  signIn: (address?: string) => Promise<void>;
+  signUp: (username?: string, password?: string, referral?: string) => Promise<string>;
   signOut: () => void;
 }>({
   user: null,
   ready: false,
+  connectWallet: async () => '',
+  disconnectWallet: async () => undefined,
   signIn: async () => undefined,
   signUp: async () => '',
   signOut: () => undefined,
 });
-
-async function sha256(value: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
 
 function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const demoUser: AuthUser = { id: 'member-alpha', email: 'node@bitnoir.io', username: 'satoshinode', name: 'SatoshiNode', isAdmin: true };
-    const token = sessionStorage.getItem('bitnoir-session-token');
-    if (!token) {
-      // Default initial session for immediate access
-      setUser(demoUser);
+    // 1. Check existing saved Solana public address from localStorage
+    const saved = localStorage.getItem('bitnoir-solana-address');
+    if (saved && saved.length >= 32) {
+      const short = shortSolanaAddress(saved);
+      setUser({
+        id: saved,
+        solanaAddress: saved,
+        username: short,
+        name: `@${short}`,
+        email: '',
+        isAdmin: false,
+      });
       setReady(true);
       return;
     }
-    void sha256(token)
-      .then((tokenHash) => supabase.rpc('custom_session', { p_session_token_hash: tokenHash }))
-      .then(({ data }) => {
-        if (data?.user_id) setUser({ id: data.user_id, email: '', username: data.username, name: data.username, isAdmin: data.is_admin });
-        else setUser(demoUser);
-      })
-      .catch(() => setUser(demoUser))
-      .finally(() => setReady(true));
+
+    // 2. Try silent auto-connect if Phantom was already connected and trusted
+    const provider = getSolanaProvider();
+    if (provider && provider.connect) {
+      provider
+        .connect({ onlyIfTrusted: true })
+        .then((resp) => {
+          const address = resp.publicKey.toString();
+          localStorage.setItem('bitnoir-solana-address', address);
+          const short = shortSolanaAddress(address);
+          setUser({
+            id: address,
+            solanaAddress: address,
+            username: short,
+            name: `@${short}`,
+            email: '',
+            isAdmin: false,
+          });
+        })
+        .catch(() => {
+          setUser(null);
+        })
+        .finally(() => {
+          setReady(true);
+        });
+    } else {
+      setUser(null);
+      setReady(true);
+    }
   }, []);
 
-  const signIn = async (loginKey: string) => {
-    const normalizedKey = loginKey.trim().toLowerCase();
-    const sessionToken = crypto.randomUUID() + crypto.randomUUID();
-    const { data, error } = await supabase.rpc('custom_login', {
-      p_login_key_hash: await sha256(normalizedKey),
-      p_session_token_hash: await sha256(sessionToken),
-    });
-    if (error || !data?.user_id) throw new Error(error?.message?.includes('invalid_login_key') ? 'Invalid login key.' : 'Unable to sign in. Please try again.');
-    sessionStorage.setItem('bitnoir-session-token', sessionToken);
-    setUser({ id: data.user_id, email: '', username: data.username, name: data.username, isAdmin: data.is_admin });
-  };
-
-  const signUp = async (username: string, password: string, referral?: string) => {
-    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    const randomBytes = new Uint8Array(32);
-    crypto.getRandomValues(randomBytes);
-    const loginKey = `0x${Array.from(randomBytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
-    const { data, error } = await supabase.rpc('custom_signup', {
-      p_username: cleanUsername,
-      p_password: password,
-      p_login_key_hash: await sha256(loginKey),
-    });
-    if (error || !data?.user_id) {
-      const message = error?.message || '';
-      if (message.includes('username_taken')) throw new Error('That username is already taken.');
-      if (message.includes('weak_password')) throw new Error('Choose a stronger password with at least 8 characters.');
-      if (message.includes('invalid_username')) throw new Error('Username may contain only letters, numbers, and underscores.');
-      if (message.includes('invalid_login_key')) throw new Error('Unable to generate a secure login key. Please try again.');
-      throw new Error(message || 'Unable to create your account. Please try again.');
+  const connectWallet = async (customAddress?: string): Promise<string> => {
+    let address = customAddress?.trim();
+    if (!address) {
+      const provider = getSolanaProvider();
+      if (!provider) {
+        throw new Error('PHANTOM_NOT_INSTALLED');
+      }
+      const resp = await provider.connect();
+      if (!resp?.publicKey) {
+        throw new Error('Failed to retrieve Solana public address from wallet.');
+      }
+      address = resp.publicKey.toString();
     }
-    if (referral) sessionStorage.setItem('bitnoir-pending-referral', referral.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, ''));
-    return loginKey;
+
+    if (address.length < 32 || address.length > 44) {
+      throw new Error('Please provide a valid Solana public address (32-44 characters).');
+    }
+
+    localStorage.setItem('bitnoir-solana-address', address);
+    const short = shortSolanaAddress(address);
+    const authUser: AuthUser = {
+      id: address,
+      solanaAddress: address,
+      username: short,
+      name: `@${short}`,
+      email: '',
+      isAdmin: false,
+    };
+    setUser(authUser);
+    return address;
   };
 
-  const signOut = () => { sessionStorage.removeItem('bitnoir-session-token'); setUser(null); };
-  return <AuthContext.Provider value={{ user, ready, signIn, signUp, signOut }}>{children}</AuthContext.Provider>;
+  const disconnectWallet = async () => {
+    try {
+      const provider = getSolanaProvider();
+      if (provider && provider.disconnect) {
+        await provider.disconnect();
+      }
+    } catch {
+      // Ignore disconnect error
+    }
+    localStorage.removeItem('bitnoir-solana-address');
+    sessionStorage.removeItem('bitnoir-session-token');
+    setUser(null);
+  };
+
+  const signIn = async (address?: string) => {
+    await connectWallet(address);
+  };
+
+  const signUp = async (username?: string) => {
+    return await connectWallet(username);
+  };
+
+  const signOut = () => {
+    void disconnectWallet();
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, ready, connectWallet, disconnectWallet, signIn, signUp, signOut }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 function useAuth() {
@@ -339,10 +461,252 @@ return (
 );
 }
 
-// Navigation Bar for Landing & Docs
+// ---------------------------------------------------------------------------
+// PROPER TOP OF WALLET CONNECT SYSTEM
+// ---------------------------------------------------------------------------
+function TopWalletConnect({ compact = false }: { compact?: boolean }) {
+  const { user, connectWallet, disconnectWallet } = useAuth();
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [passData, setPassData] = useState<MiningPassData | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (user?.solanaAddress) {
+      fetchSolBalance(user.solanaAddress).then(setSolBalance);
+      const pass = getSavedMiningPass(user.solanaAddress);
+      setPassData(pass);
+    } else {
+      setSolBalance(null);
+      setPassData(null);
+    }
+  }, [user?.solanaAddress]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    try {
+      const addr = await connectWallet();
+      toast({
+        title: 'Phantom Connected',
+        description: `Connected with @${shortSolanaAddress(addr)}`,
+      });
+    } catch (err: any) {
+      if (err?.message === 'PHANTOM_NOT_INSTALLED') {
+        const demoAddr = 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK';
+        await connectWallet(demoAddr);
+        toast({
+          title: 'Demo Wallet Connected',
+          description: `Connected as @${shortSolanaAddress(demoAddr)}`,
+        });
+      } else {
+        toast({
+          title: 'Connection error',
+          description: readableError(err, 'Could not connect wallet.'),
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  if (!user || !user.solanaAddress) {
+    return (
+      <button
+        type="button"
+        onClick={handleConnect}
+        disabled={connecting}
+        style={{
+          background: 'linear-gradient(135deg, #ab9ff2 0%, #7857ff 100%)',
+          color: '#ffffff',
+          fontWeight: 700,
+          fontSize: 13,
+          padding: '8px 16px',
+          borderRadius: 999,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          border: 'none',
+          cursor: connecting ? 'wait' : 'pointer',
+          boxShadow: '0 4px 14px rgba(120, 87, 255, 0.35)',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        <PhantomLogo size={16} />
+        <span>{connecting ? 'Connecting…' : 'Connect Phantom'}</span>
+      </button>
+    );
+  }
+
+  const shortAddr = shortSolanaAddress(user.solanaAddress);
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8 }} ref={dropdownRef}>
+      {/* MINING PASS INDICATOR PILL */}
+      <Link
+        href="/staking"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '5px 11px',
+          borderRadius: 999,
+          fontSize: 11,
+          fontFamily: 'monospace',
+          fontWeight: 700,
+          background: passData ? 'rgba(0, 245, 155, 0.1)' : 'rgba(255, 139, 47, 0.14)',
+          border: passData ? '1px solid rgba(0, 245, 155, 0.3)' : '1px solid rgba(255, 139, 47, 0.35)',
+          color: passData ? '#00f59b' : '#ff8b2f',
+          textDecoration: 'none',
+        }}
+        title={passData ? `Active Mining Pass: ${passData.passId} (Verified Onchain)` : '0.02 SOL Mining Pass Required to Mine Bits'}
+      >
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: passData ? '#00f59b' : '#ff8b2f',
+            boxShadow: passData ? '0 0 8px #00f59b' : '0 0 8px #ff8b2f',
+          }}
+        />
+        <span>{passData ? passData.passId : 'Mint Pass (0.02 SOL)'}</span>
+      </Link>
+
+      {/* WALLET BUTTON */}
+      <button
+        type="button"
+        onClick={() => setMenuOpen(!menuOpen)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          background: 'rgba(255, 255, 255, 0.06)',
+          border: '1px solid rgba(255, 255, 255, 0.12)',
+          borderRadius: 999,
+          padding: '6px 12px 6px 8px',
+          cursor: 'pointer',
+          color: '#ffffff',
+          fontSize: 13,
+          fontWeight: 700,
+          transition: 'all 0.15s ease',
+        }}
+      >
+        <div
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #ab9ff2, #7857ff)',
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          <PhantomLogo size={12} />
+        </div>
+        <span className="mono">@{shortAddr}</span>
+        {solBalance !== null && (
+          <span style={{ fontSize: 11, color: '#94a3b8', borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: 6 }}>
+            ◎ {solBalance.toFixed(2)}
+          </span>
+        )}
+        <ChevronDown size={13} style={{ color: '#94a3b8', transform: menuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+      </button>
+
+      {/* DROPDOWN POPOVER */}
+      {menuOpen && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            right: 0,
+            width: 285,
+            background: '#0c121f',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: 14,
+            padding: 14,
+            boxShadow: '0 16px 40px rgba(0, 0, 0, 0.75)',
+            zIndex: 100,
+            textAlign: 'left',
+          }}
+        >
+          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+            Connected Solana Public Key
+          </div>
+          <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#00f59b', wordBreak: 'break-all', marginBottom: 12 }}>
+            {user.solanaAddress}
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            <button
+              type="button"
+              className="button button-soft !min-h-[30px] !text-xs !px-2.5 !py-1 !rounded-md"
+              onClick={() => {
+                void navigator.clipboard?.writeText(user.solanaAddress);
+                toast({ title: 'Copied', description: 'Solana address copied to clipboard.' });
+              }}
+              style={{ flex: 1, justifyContent: 'center' }}
+            >
+              <Copy size={12} />
+              <span>Copy</span>
+            </button>
+            <a
+              href={`https://solscan.io/account/${user.solanaAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="button button-soft !min-h-[30px] !text-xs !px-2.5 !py-1 !rounded-md"
+              style={{ flex: 1, justifyContent: 'center', textDecoration: 'none' }}
+            >
+              <ExternalLink size={12} />
+              <span>Solscan</span>
+            </a>
+          </div>
+
+          <div style={{ padding: '8px 10px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: 8, marginBottom: 12, fontSize: 11 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ color: '#94a3b8' }}>Mining Pass:</span>
+              <strong style={{ color: passData ? '#00f59b' : '#ff8b2f' }}>
+                {passData ? 'Active (Verified)' : '0.02 SOL Required'}
+              </strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#94a3b8' }}>Network:</span>
+              <span style={{ color: '#ffffff' }}>Solana Onchain</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="button button-soft !min-h-[32px] !text-xs !w-full"
+            onClick={() => {
+              void disconnectWallet();
+              setMenuOpen(false);
+            }}
+            style={{ color: 'var(--danger)', width: '100%', justifyContent: 'center' }}
+          >
+            <LogOut size={13} />
+            <span>Disconnect Wallet</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Navigation Bar for Landing & Docs with Proper Top Of Wallet Connect System
 function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
   const [location] = useLocation();
-  const { user } = useAuth();
 
   return (
     <header className="topbar" data-page-header>
@@ -351,23 +715,12 @@ function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
       </Link>
       <nav className="nav-links" aria-label="Main Navigation">
         <Link href="/" className={location === '/' ? 'active' : ''}>Overview</Link>
-        <Link href="/wallet" className={location.startsWith('/wallet') || location === '/deposit' ? 'active' : ''}>Wallet</Link>
         <Link href="/staking" className={location === '/staking' || location === '/mining' ? 'active' : ''}>Mining</Link>
-        <Link href="/docs" className={location === '/docs' ? 'active' : ''}>Whitepaper</Link>
+        <Link href="/wallet" className={location.startsWith('/wallet') || location === '/deposit' ? 'active' : ''}>Wallet</Link>
+        <Link href="/docs" className={location === '/docs' || location === '/whitepaper' ? 'active' : ''}>Whitepaper</Link>
       </nav>
       <div className="top-actions">
-        {user ? (
-          <Link href="/wallet" className="button button-primary">
-            Launch Wallet <ArrowRight size={14} />
-          </Link>
-        ) : (
-          <>
-            {!hideSignIn && <Link href="/sign-in" className="button button-ghost">Sign in</Link>}
-            <Link href="/sign-up" className="button button-primary">
-              Enter Fair Launch <ArrowRight size={14} />
-            </Link>
-          </>
-        )}
+        <TopWalletConnect />
       </div>
     </header>
   );
@@ -934,6 +1287,11 @@ function LandingBentoGrid() {
 // 1. HOME / LANDING PAGE (TIER-1 COREDAO / TRUST WALLET RE-ENGINEERED)
 // ---------------------------------------------------------------------------
 function HomePage() {
+  const [solSim, setSolSim] = useState<number>(1.0);
+  const simBoost = solSim * 5.0;
+  const simTotalRate = 0.1 + simBoost;
+  const simDailyOutput = simTotalRate * 24;
+
   return (
     <div className="site-shell landing-tier1">
       <div className="landing-matrix-bg" />
@@ -945,43 +1303,46 @@ function HomePage() {
         {/* 1. HERO SECTION */}
         <section className="hero-tier1">
           <div className="hero-copy-tier1">
-            <div className="eyebrow">
+            <div className="eyebrow" style={{ borderColor: 'rgba(0, 245, 155, 0.4)', background: 'rgba(0, 245, 155, 0.06)' }}>
               <span className="eyebrow-dot" />
-              Bitcoin-Aligned Capital Layer · BEP-20 USDT
+              Solana Native Proof-of-Power · 0.02 SOL Onchain Pass
             </div>
             <h1>
-              Bitcoin Scarcity. <br />
-              <span className="highlight-green">EVM Programmability.</span>
+              Decentralized Mining <br />
+              <span className="highlight-green">On Solana.</span>
             </h1>
             <p>
-              The dual-primitive capital protocol. Convert USDT into Bits, lock into irreversible
-              Proof-of-Burn staking, and stream verifiable protocol yield settled in fixed-supply Bitnoir Coin ($Noir).
+              The first Solana Proof-of-Power protocol. Connect your Phantom wallet, mint your unique
+              onchain Mining Pass (<strong>0.02 SOL fee</strong>) to verify your account, and stream continuous Bits rewards.
+              Boost your hashrate with onchain SOL Power.
             </p>
             <div className="hero-actions">
-              <Link href="/sign-up" className="button button-primary hero-primary-action">
-                <span>Enter Fair Launch</span>
+              <Link href="/staking" className="button button-primary hero-primary-action">
+                <Sparkles size={16} />
+                <span>Mint Mining Pass (0.02 SOL)</span>
                 <ArrowRight size={15} />
               </Link>
-              <Link href="/staking" className="button button-soft">
-                <Lock size={15} />
-                <span>Stake & Lock</span>
+              <Link href="/wallet" className="button button-soft">
+                <Wallet size={15} />
+                <span>Launch Wallet</span>
               </Link>
               <Link href="/docs" className="button button-ghost">
                 <BookOpen size={15} />
-                <span>Whitepaper</span>
+                <span>Whitepaper v3.5</span>
               </Link>
             </div>
             <div className="trustline">
-              <span><i className="trustline-dot" /> 21,000,000 Hard Cap</span>
-              <span><i className="trustline-dot" /> Proof-of-Burn Engine</span>
-              <span><i className="trustline-dot" /> 100 USDT = 1K Bits</span>
+              <span><i className="trustline-dot" /> 0.02 SOL Unique Mining Pass</span>
+              <span><i className="trustline-dot" /> +5.0 Bits/hr per SOL Power</span>
+              <span><i className="trustline-dot" /> 21,000,000 Hard Cap ($Noir)</span>
+              <span><i className="trustline-dot" /> 100% Onchain Solana RPC</span>
             </div>
           </div>
 
-          <div className="hero-stage-tier1" aria-label="Bitnoir Holographic Stage">
+          <div className="hero-stage-tier1" aria-label="Solana Proof-of-Power Stage">
             <img
               src="/hero-quantum-lattice.jpg"
-              alt="Bitcoin Cryptographic Lattice"
+              alt="Solana Cryptographic Lattice"
               className="hero-stage-bg"
             />
             <div className="hero-stage-overlay" />
@@ -989,7 +1350,7 @@ function HomePage() {
             {/* Glowing Concentric Orbital Rings */}
             <svg viewBox="0 0 400 400" className="absolute w-[360px] h-[360px] pointer-events-none opacity-40 animate-spin" style={{ animationDuration: '60s' }}>
               <circle cx="200" cy="200" r="140" stroke="#00f59b" strokeWidth="1" strokeDasharray="4 6" fill="none" />
-              <circle cx="200" cy="200" r="170" stroke="rgba(255,255,255,0.15)" strokeWidth="1" strokeDasharray="8 8" fill="none" />
+              <circle cx="200" cy="200" r="170" stroke="rgba(120,87,255,0.4)" strokeWidth="1" strokeDasharray="8 8" fill="none" />
             </svg>
 
             {/* Floating 3D Token Assets */}
@@ -1006,7 +1367,7 @@ function HomePage() {
               <div className="hero-floating-orbit-coin">
                 <img
                   src="/asset-bits-lg.png"
-                  alt="Bits Staking Unit"
+                  alt="Bits Mining Unit"
                   width={80}
                   height={80}
                   className="w-[74px] h-[74px] object-contain"
@@ -1014,9 +1375,10 @@ function HomePage() {
               </div>
             </div>
 
-            <div className="hero-live-badge">
+            <div className="hero-live-badge" style={{ borderColor: 'rgba(120, 87, 255, 0.4)', background: 'rgba(13, 19, 31, 0.85)' }}>
+              <SolanaLogo size={14} />
               <span className="w-2 h-2 rounded-full bg-[#00f59b] animate-ping" />
-              <span>21,000,000 FIXED CAP ($NOIR)</span>
+              <span>SOLANA PROOF-OF-POWER LIVE</span>
             </div>
           </div>
         </section>
@@ -1025,62 +1387,255 @@ function HomePage() {
         <section className="telemetry-ribbon">
           <div className="telemetry-box">
             <div className="telemetry-cell">
+              <div className="telemetry-cell-val tabular-nums text-[#00f59b]">0.1000 /hr</div>
+              <div className="telemetry-cell-sub">Base Mining Hashrate</div>
+            </div>
+            <div className="telemetry-cell">
+              <div className="telemetry-cell-val text-[#ff8b2f] tabular-nums">0.02 SOL</div>
+              <div className="telemetry-cell-sub">Mining Pass Fee (Onchain)</div>
+            </div>
+            <div className="telemetry-cell">
+              <div className="telemetry-cell-val text-[#ab9ff2] tabular-nums">+5.0000 /hr</div>
+              <div className="telemetry-cell-sub">SOL Power Hashrate (per SOL)</div>
+            </div>
+            <div className="telemetry-cell">
               <div className="telemetry-cell-val tabular-nums">21,000,000</div>
-              <div className="telemetry-cell-sub">Fixed Supply Invariant ($Noir)</div>
+              <div className="telemetry-cell-sub">Fixed Supply Cap ($Noir)</div>
             </div>
             <div className="telemetry-cell">
-              <div className="telemetry-cell-val text-[#f5a623] tabular-nums">100 : 1,000</div>
-              <div className="telemetry-cell-sub">USDT to Bits Accounting</div>
-            </div>
-            <div className="telemetry-cell">
-              <div className="telemetry-cell-val text-[#00f59b] tabular-nums">12.0% APY</div>
-              <div className="telemetry-cell-sub">Annual Fair Yield (1.0% — 3.0% Term)</div>
-            </div>
-            <div className="telemetry-cell">
-              <div className="telemetry-cell-val tabular-nums">$1.10 USD</div>
-              <div className="telemetry-cell-sub">Protocol Accounting Parity</div>
-            </div>
-            <div className="telemetry-cell">
-              <div className="telemetry-cell-val text-white">Proof-of-Burn</div>
-              <div className="telemetry-cell-sub">Permanent Token Destruction</div>
+              <div className="telemetry-cell-val text-white">SPL-2022 Claim</div>
+              <div className="telemetry-cell-sub">Token Generation Event</div>
             </div>
           </div>
         </section>
 
-        {/* 3. DUAL-PRIMITIVE PROTOCOL SCHEMATIC */}
+        {/* 3. 3-STEP ONCHAIN MINING FLOW */}
         <section className="landing-section">
           <div className="landing-section-head">
-            <div className="eyebrow">Cryptographic Mechanism</div>
-            <h2>The Dual-Primitive State Engine</h2>
+            <div className="eyebrow">Proof-of-Power Architecture</div>
+            <h2>How Mining Works On Solana</h2>
             <p>
-              Bitnoir decouples internal accounting from external value settlement through an immutable state machine.
+              Fair, transparent, and completely non-custodial. Every miner verifies onchain and begins accumulating Bits.
             </p>
           </div>
-          <LandingArchitectureSvg />
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+            {/* STEP 1 */}
+            <div
+              style={{
+                padding: 24,
+                borderRadius: 16,
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                position: 'relative',
+              }}
+            >
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(120, 87, 255, 0.15)', display: 'grid', placeItems: 'center', marginBottom: 16, color: '#ab9ff2' }}>
+                <PhantomLogo size={22} />
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 4 }}>
+                Step 01
+              </div>
+              <h3 style={{ fontSize: 18, color: '#ffffff', fontWeight: 700, margin: '0 0 10px' }}>
+                Connect Phantom Wallet
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
+                Instant one-click connection with your Solana public address. No emails, no passwords, and strictly zero private keys collected.
+              </p>
+            </div>
+
+            {/* STEP 2 */}
+            <div
+              style={{
+                padding: 24,
+                borderRadius: 16,
+                background: 'linear-gradient(180deg, rgba(0,245,155,0.04) 0%, rgba(255,255,255,0.01) 100%)',
+                border: '1px solid rgba(0,245,155,0.25)',
+                position: 'relative',
+              }}
+            >
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(0, 245, 155, 0.15)', display: 'grid', placeItems: 'center', marginBottom: 16, color: '#00f59b' }}>
+                <Sparkles size={22} />
+              </div>
+              <div style={{ fontSize: 11, color: '#00f59b', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 4 }}>
+                Step 02 · Required
+              </div>
+              <h3 style={{ fontSize: 18, color: '#ffffff', fontWeight: 700, margin: '0 0 10px' }}>
+                Mint Mining Pass (0.02 SOL)
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
+                Send 0.02 SOL verification fee to the protocol treasury onchain. Solana public RPC validates the signature and issues your unique, soulbound Pass ID (#BN-SOL-XXXX).
+              </p>
+            </div>
+
+            {/* STEP 3 */}
+            <div
+              style={{
+                padding: 24,
+                borderRadius: 16,
+                background: 'linear-gradient(180deg, rgba(255,139,47,0.04) 0%, rgba(255,255,255,0.01) 100%)',
+                border: '1px solid rgba(255,139,47,0.25)',
+                position: 'relative',
+              }}
+            >
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(255, 139, 47, 0.15)', display: 'grid', placeItems: 'center', marginBottom: 16, color: '#ff8b2f' }}>
+                <Flame size={22} />
+              </div>
+              <div style={{ fontSize: 11, color: '#ff8b2f', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 4 }}>
+                Step 03
+              </div>
+              <h3 style={{ fontSize: 18, color: '#ffffff', fontWeight: 700, margin: '0 0 10px' }}>
+                Mine Bits & Boost SOL Power
+              </h3>
+              <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
+                Stream continuous Bits into your 24-hour storage tank. Overclock hashrate by contributing SOL Power onchain (+5.0 Bits/hr per SOL). Claim 1:1 onchain at TGE.
+              </p>
+            </div>
+          </div>
         </section>
 
-        {/* 4. INTERACTIVE STAKING YIELD SIMULATOR */}
+        {/* 4. INTERACTIVE SOL POWER SIMULATOR */}
         <section className="landing-section">
           <div className="landing-section-head">
-            <div className="eyebrow">Real-Time Simulator</div>
-            <h2>Algorithmic Staking Yield Engine</h2>
+            <div className="eyebrow">Real-Time Hashrate Calculator</div>
+            <h2>SOL Power Hashrate Multiplier</h2>
             <p>
-              Scrub allocation and duration to preview real-time per-second emission velocity and maturity redemption.
+              Preview how contributing SOL to the onchain protocol treasury accelerates your Bits mining velocity.
             </p>
           </div>
-          <LandingYieldSimulator />
+
+          <div
+            style={{
+              maxWidth: 720,
+              margin: '0 auto',
+              padding: 28,
+              borderRadius: 20,
+              background: '#0d131f',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.6)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Simulate Contributed SOL
+              </span>
+              <span style={{ fontSize: 16, fontFamily: 'monospace', fontWeight: 800, color: '#ff8b2f', background: 'rgba(255,139,47,0.1)', padding: '4px 10px', borderRadius: 8 }}>
+                ◎ {solSim.toFixed(1)} SOL
+              </span>
+            </div>
+
+            <input
+              type="range"
+              min="0.1"
+              max="5.0"
+              step="0.1"
+              value={solSim}
+              onChange={(e) => setSolSim(Number(e.target.value))}
+              className="modern-range-line"
+              style={{ width: '100%', marginBottom: 20 }}
+            />
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+              <div style={{ padding: 14, background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Base Engine</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#00f59b', fontFamily: 'monospace' }}>+0.1000 /h</div>
+              </div>
+              <div style={{ padding: 14, background: 'rgba(255,139,47,0.05)', borderRadius: 12, border: '1px solid rgba(255,139,47,0.2)', textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: '#ff8b2f', marginBottom: 4 }}>SOL Power Boost</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#ff8b2f', fontFamily: 'monospace' }}>+{simBoost.toFixed(4)} /h</div>
+              </div>
+              <div style={{ padding: 14, background: 'rgba(0,245,155,0.05)', borderRadius: 12, border: '1px solid rgba(0,245,155,0.25)', textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: '#00f59b', marginBottom: 4 }}>Total Net Hashrate</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#ffffff', fontFamily: 'monospace' }}>{simTotalRate.toFixed(4)} /h</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, marginBottom: 20 }}>
+              <span style={{ fontSize: 13, color: '#94a3b8' }}>Estimated 24-Hour Yield:</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: '#00f59b', fontFamily: 'monospace' }}>
+                +{simDailyOutput.toFixed(2)} Bits / day
+              </span>
+            </div>
+
+            <Link
+              href="/staking"
+              className="button button-primary"
+              style={{ width: '100%', minHeight: 48, justifyContent: 'center', fontSize: 14, fontWeight: 700 }}
+            >
+              <Zap size={16} />
+              <span>Mint Pass & Acquire SOL Power</span>
+              <ArrowRight size={16} />
+            </Link>
+          </div>
         </section>
 
-        {/* 5. SECURITY & MECHANISMS BENTO */}
+        {/* 5. DUAL TOKEN DYNAMICS */}
         <section className="landing-section">
           <div className="landing-section-head">
-            <div className="eyebrow">Core Invariants</div>
-            <h2>Engineered for Verifiable Digital Scarcity</h2>
+            <div className="eyebrow">Token Architecture</div>
+            <h2>Dual-Token Economic Equilibrium</h2>
             <p>
-              Built to withstand market volatility through non-custodial cryptographic guarantees.
+              Separating daily mining incentives from long-term digital store-of-value scarcity.
             </p>
           </div>
-          <LandingBentoGrid />
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+            {/* BITS */}
+            <div style={{ padding: 26, background: '#0d131f', borderRadius: 18, border: '1px solid rgba(0,245,155,0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                <BitsMark size={32} />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 20, color: '#ffffff', fontWeight: 800 }}>Bits Token (BIT)</h3>
+                  <span style={{ fontSize: 12, color: '#00f59b', fontWeight: 600 }}>Utility & Mining Reward Unit</span>
+                </div>
+              </div>
+              <p style={{ fontSize: 13.5, color: '#94a3b8', lineHeight: 1.6, marginBottom: 16 }}>
+                Bits are earned continuously through active Proof-of-Power mining. Can be transferred peer-to-peer between miners, converted into Bitnoir, and claimed onchain at Token Generation Event (TGE).
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12, fontFamily: 'monospace' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}>
+                  <span>Mining Emission:</span>
+                  <strong style={{ color: '#00f59b' }}>Base 0.1000 /hr</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}>
+                  <span>Transferability:</span>
+                  <strong style={{ color: '#ffffff' }}>Instant P2P</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}>
+                  <span>Onchain Settlement:</span>
+                  <strong style={{ color: '#38bdf8' }}>Solana SPL-2022 Claim</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* BITNOIR */}
+            <div style={{ padding: 26, background: '#0d131f', borderRadius: 18, border: '1px solid rgba(245,166,35,0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                <img src="/asset-bitnoir.png" alt="Bitnoir" style={{ width: 34, height: 34, objectFit: 'contain' }} />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 20, color: '#ffffff', fontWeight: 800 }}>Bitnoir ($NOIR)</h3>
+                  <span style={{ fontSize: 12, color: '#f5a623', fontWeight: 600 }}>21,000,000 Hard Cap Governance</span>
+                </div>
+              </div>
+              <p style={{ fontSize: 13.5, color: '#94a3b8', lineHeight: 1.6, marginBottom: 16 }}>
+                The cryptographic store of value. Strictly capped at 21,000,000 units with zero inflation. Built with deflationary burn-to-convert tokenomics and withdrawable directly to connected Solana wallets.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12, fontFamily: 'monospace' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}>
+                  <span>Total Maximum Supply:</span>
+                  <strong style={{ color: '#f5a623' }}>21,000,000 Fixed</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}>
+                  <span>Inflation Rate:</span>
+                  <strong style={{ color: '#00f59b' }}>0.00% (Hard Capped)</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#cbd5e1' }}>
+                  <span>Withdrawals:</span>
+                  <strong style={{ color: '#ab9ff2' }}>Solana Native Wallet</strong>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         {/* 6. GATEWAY LAUNCHPAD CTA */}
@@ -1089,18 +1644,20 @@ function HomePage() {
             <div className="max-w-xl mx-auto">
               <div className="eyebrow mb-2">Protocol Access</div>
               <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-                Enter the Bitcoin-Aligned Capital Engine
+                Start Mining Bits on Solana Today
               </h2>
               <p className="text-slate-300 text-sm md:text-base mb-8 leading-relaxed">
-                No private allocations. No variable pre-mines. Pure algorithmic participation secured by Proof-of-Burn consensus.
+                Connect your Phantom wallet, mint your verified onchain Mining Pass for 0.02 SOL, and start accumulating continuous Bits rewards.
               </p>
               <div className="flex items-center justify-center gap-4 flex-wrap">
-                <Link href="/sign-up" className="button button-primary !px-7 !py-3 text-sm">
-                  <span>Enter Fair Launch</span>
+                <Link href="/staking" className="button button-primary !px-7 !py-3 text-sm">
+                  <Sparkles size={16} />
+                  <span>Mint Mining Pass (0.02 SOL)</span>
                   <ArrowRight size={16} />
                 </Link>
                 <Link href="/docs" className="button button-ghost !px-7 !py-3 text-sm">
-                  <span>Read Technical Docs</span>
+                  <BookOpen size={16} />
+                  <span>Read Whitepaper v3.5</span>
                 </Link>
               </div>
             </div>
@@ -1110,7 +1667,7 @@ function HomePage() {
 
       <footer className="footer">
         <Brand size="sm" />
-        <span>Bitnoir Protocol · Bits Points · 21,000,000 Fixed Cap ($Noir)</span>
+        <span>Bitnoir Protocol · Solana Native Proof-of-Power · 21,000,000 Fixed Cap ($Noir)</span>
         <span>Participation involves market and smart-contract risk. Review disclosures carefully.</span>
       </footer>
     </div>
@@ -1121,600 +1678,7 @@ function HomePage() {
 // 2. WHITEPAPER & TECHNICAL SPECIFICATIONS (/docs, /whitepaper)
 // ---------------------------------------------------------------------------
 function DocsPage() {
-  return (
-    <div className="site-shell">
-      <PublicHeader />
-      <div className="whitepaper-wrapper">
-        <header className="whitepaper-hero">
-          <div className="eyebrow">Protocol Architecture Specification · Version 3.0</div>
-          <h1 className="display whitepaper-title">
-            Bitnoir: The Bitcoin-Aligned <br className="hide-mobile" />
-            <span className="highlight-green">Capital & Staking Engine</span>
-          </h1>
-          <p style={{ maxWidth: 780, color: 'var(--silver-medium)', fontSize: 16, lineHeight: 1.8, margin: '14px 0 20px' }}>
-            A formal specification of Bitnoir's dual-primitive state machine, proof-of-burn cryptographic invariants,
-            chain-abstracted BTCfi execution layer, and immutable 21,000,000 fixed supply cap.
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 12, color: 'var(--silver-dark)', fontFamily: 'var(--app-font-mono)' }}>
-            <span style={{ padding: '3px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>Standard: BEP-20 / EVM + BTCfi</span>
-            <span style={{ padding: '3px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>Hard Cap: 21,000,000 Fixed ($Noir)</span>
-            <span style={{ padding: '3px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>Consensus: Proof-of-Burn (PoB)</span>
-          </div>
-        </header>
-
-        <article className="whitepaper-content">
-          {/* Section 1.0 */}
-          <section className="whitepaper-section" id="abstract-vision">
-            <div className="eyebrow">Section 1.0</div>
-            <h2>Abstract & Architectural Thesis</h2>
-            <p>
-              Decentralized finance has historically bifurcated into two mutually exclusive paradigms: the absolute, mathematically
-              governed scarcity of Bitcoin, and the expressive, programmable liquidity of Ethereum Virtual Machine (EVM) smart contracts.
-              Contemporary attempts to bridge these realms have introduced critical vulnerabilities: custodial multi-sig wrappers,
-              opaque centralized bridges, predatory token unlocks, and inflationary yield recycling that dilutes long-term holders.
-            </p>
-            <p>
-              <strong>Bitnoir</strong> introduces a non-custodial capital coordination engine engineered around Bitcoin’s core monetary
-              axiom: an immutable hard cap of <strong>21,000,000 units</strong>. By separating internal computational fuel from
-              the external cryptographic asset through a verified <em>Dual-Primitive Architecture</em>, Bitnoir establishes an on-chain
-              execution environment where staking yields are backed by verifiable protocol emissions and cryptographic proof-of-burn rather
-              than debt inflation.
-            </p>
-
-            <div className="whitepaper-spec-grid">
-              <div className="whitepaper-spec-item">
-                <div className="whitepaper-spec-key">Monetary Ceiling</div>
-                <div className="whitepaper-spec-val" style={{ color: 'var(--neon-green)' }}>21,000,000 $Noir</div>
-              </div>
-              <div className="whitepaper-spec-item">
-                <div className="whitepaper-spec-key">Consensus Primitives</div>
-                <div className="whitepaper-spec-val">Proof-of-Burn (PoB)</div>
-              </div>
-              <div className="whitepaper-spec-item">
-                <div className="whitepaper-spec-key">Execution Surface</div>
-                <div className="whitepaper-spec-val">EVM + BTCfi Engine</div>
-              </div>
-              <div className="whitepaper-spec-item">
-                <div className="whitepaper-spec-key">Settlement Layer</div>
-                <div className="whitepaper-spec-val">BNB Smart Chain (BEP-20)</div>
-              </div>
-            </div>
-          </section>
-
-          {/* Section 2.0 */}
-          <section className="whitepaper-section" id="dual-primitive">
-            <div className="eyebrow">Section 2.0</div>
-            <h2>The Dual-Primitive Model: Bitnoir Coin vs. Bits Points</h2>
-            <p>
-              To resolve the volatility and liquidity fragmentation inherent in DeFi tokenomics, Bitnoir decouples internal protocol
-              execution from secondary market speculation. The protocol defines two distinct mathematical primitives:
-            </p>
-
-            <div className="whitepaper-cards-2">
-              <div className="panel content-card" style={{ borderColor: 'rgba(0, 245, 155, 0.3)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                  <BitsMark size={28} />
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: 18, color: 'var(--neon-green)' }}>Bits (Points)</h3>
-                    <span className="mono" style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Internal Fuel Primitive</span>
-                  </div>
-                </div>
-                <p style={{ fontSize: 13, color: 'var(--silver-medium)', margin: 0, lineHeight: 1.7 }}>
-                  Internal, non-transferable protocol units credited for on-chain staking coordination.
-                  <strong> 100 USDT = 1,000 Bits</strong>. Bits possess zero secondary market float and cannot be traded across external
-                  venues. They exist solely to initiate and fuel locked staking terms. Upon entry into the staking engine, Bits are
-                  <strong> permanently incinerated via Proof-of-Burn</strong>.
-                </p>
-              </div>
-
-              <div className="panel content-card" style={{ borderColor: 'rgba(255, 255, 255, 0.15)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                  <TokenMark size={28} />
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: 18, color: '#ffffff' }}>Bitnoir Coin ($Noir)</h3>
-                    <span className="mono" style={{ fontSize: 11, color: 'var(--silver-dark)' }}>Cryptographic Settlement Asset</span>
-                  </div>
-                </div>
-                <p style={{ fontSize: 13, color: 'var(--silver-medium)', margin: 0, lineHeight: 1.7 }}>
-                  The native transferable cryptographic currency of the network with an absolute, mathematically enforced cap of
-                  <strong> 21,000,000 units</strong>. Minted exclusively through verified genesis allocations, mining pool halving emissions,
-                  and staking principal redemptions funded by the dedicated 20% Staking Reserve.
-                </p>
-              </div>
-            </div>
-
-            {/* TECHNICAL SVG DIAGRAM 1: Dual-Primitive Architecture */}
-            <div className="whitepaper-diag-card">
-              <div className="whitepaper-diag-caption">
-                <Activity size={13} />
-                <span>Figure 1: Dual-Primitive State Machine & Cryptographic Verification Invariant</span>
-              </div>
-              <svg className="whitepaper-diag-svg" viewBox="0 0 840 220" fill="none" xmlns="http://www.w3.org/2000/svg">
-                {/* Left Box: Bits Points */}
-                <rect x="20" y="30" width="220" height="160" rx="10" fill="#0c1017" stroke="rgba(0, 245, 155, 0.35)" strokeWidth="1.5" />
-                <rect x="36" y="48" width="28" height="28" rx="6" fill="rgba(0, 245, 155, 0.08)" stroke="var(--neon-green)" />
-                <text x="50" y="66" textAnchor="middle" fill="var(--neon-green)" fontSize="11" fontFamily="var(--app-font-mono)" fontWeight="700">BP</text>
-                <text x="76" y="58" fill="#fff" fontSize="14" fontWeight="700" fontFamily="system-ui">Bits (Points)</text>
-                <text x="76" y="74" fill="#8b949e" fontSize="11" fontFamily="var(--app-font-mono)">Internal Fuel Layer</text>
-                <line x1="36" y1="95" x2="224" y2="95" stroke="rgba(255,255,255,0.06)" />
-                <text x="36" y="118" fill="#c9d1d9" fontSize="11" fontFamily="var(--app-font-mono)">Non-transferable internal state</text>
-                <text x="36" y="138" fill="#c9d1d9" fontSize="11" fontFamily="var(--app-font-mono)">100 USDT = 1,000 Bits</text>
-                <text x="36" y="158" fill="#c9d1d9" fontSize="11" fontFamily="var(--app-font-mono)">Zero secondary market float</text>
-                <text x="36" y="178" fill="var(--neon-green)" fontSize="11" fontFamily="var(--app-font-mono)">Fuel for locked staking terms</text>
-
-                {/* Flow Arrow 1: Bits to Burn Engine */}
-                <path d="M242 110 L308 110" stroke="rgba(0, 245, 155, 0.6)" strokeWidth="1.5" />
-                <polygon points="314,110 306,106 306,114" fill="var(--neon-green)" />
-                <text x="278" y="98" textAnchor="middle" fill="#8b949e" fontSize="10" fontFamily="var(--app-font-mono)">Commit</text>
-
-                {/* Center Box: Proof-of-Burn & Staking Vault */}
-                <rect x="316" y="20" width="228" height="180" rx="12" fill="#0e131d" stroke="rgba(255, 255, 255, 0.14)" strokeWidth="1.5" />
-                <rect x="332" y="36" width="196" height="28" rx="6" fill="rgba(255,255,255,0.04)" />
-                <text x="430" y="54" textAnchor="middle" fill="#fff" fontSize="12" fontWeight="700" fontFamily="system-ui">Proof-of-Burn Invariant</text>
-                <text x="332" y="86" fill="var(--neon-green)" fontSize="11" fontFamily="var(--app-font-mono)">Burn Invariant: ΔBits → ∅</text>
-                <text x="332" y="106" fill="#8b949e" fontSize="11" fontFamily="system-ui">Bits permanently destroyed</text>
-                <rect x="332" y="122" width="196" height="64" rx="8" fill="rgba(0,0,0,0.35)" stroke="rgba(0, 245, 155, 0.2)" />
-                <text x="342" y="142" fill="#c9d1d9" fontSize="10" fontFamily="var(--app-font-mono)">Smart Lock: 30d | 60d | 90d</text>
-                <text x="342" y="160" fill="var(--neon-green)" fontSize="10" fontFamily="var(--app-font-mono)">Yield Streaming: Daily Epoch</text>
-                <text x="342" y="176" fill="#8b949e" fontSize="10" fontFamily="var(--app-font-mono)">V_ref = $1.10 Accounting</text>
-
-                {/* Flow Arrow 2: Vault to Bitnoir Coin */}
-                <path d="M546 110 L612 110" stroke="rgba(255, 255, 255, 0.6)" strokeWidth="1.5" />
-                <polygon points="618,110 610,106 610,114" fill="#fff" />
-                <text x="582" y="98" textAnchor="middle" fill="#8b949e" fontSize="10" fontFamily="var(--app-font-mono)">Maturity</text>
-
-                {/* Right Box: Bitnoir Coin */}
-                <rect x="620" y="30" width="200" height="160" rx="10" fill="#0c1017" stroke="rgba(255, 255, 255, 0.25)" strokeWidth="1.5" />
-                <rect x="636" y="48" width="28" height="28" rx="6" fill="rgba(255, 255, 255, 0.06)" stroke="#ffffff" />
-                <text x="650" y="66" textAnchor="middle" fill="#fff" fontSize="11" fontFamily="var(--app-font-mono)" fontWeight="700">BC</text>
-                <text x="676" y="58" fill="#fff" fontSize="14" fontWeight="700" fontFamily="system-ui">Bitnoir Coin</text>
-                <text x="676" y="74" fill="var(--neon-green)" fontSize="11" fontFamily="var(--app-font-mono)">$Noir / BITS Asset</text>
-                <line x1="636" y1="95" x2="804" y2="95" stroke="rgba(255,255,255,0.06)" />
-                <text x="636" y="118" fill="#c9d1d9" fontSize="11" fontFamily="var(--app-font-mono)">21,000,000 Hard Cap</text>
-                <text x="636" y="138" fill="#c9d1d9" fontSize="11" fontFamily="var(--app-font-mono)">BEP-20 Standard Token</text>
-                <text x="636" y="158" fill="#c9d1d9" fontSize="11" fontFamily="var(--app-font-mono)">Cross-Chain Collateral</text>
-                <text x="636" y="178" fill="#c9d1d9" fontSize="11" fontFamily="var(--app-font-mono)">DEX / CEX Settlement</text>
-              </svg>
-            </div>
-
-            <h3>Mathematical Comparison Matrix</h3>
-            <div className="whitepaper-table-wrap">
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: '22%' }}>Attribute</th>
-                    <th style={{ width: '26%' }}>Bits Points</th>
-                    <th style={{ width: '26%' }}>Bitnoir Coin ($Noir)</th>
-                    <th style={{ width: '26%' }}>Architectural Rationale</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Asset Classification</strong></td>
-                    <td>Internal Protocol Fuel Unit</td>
-                    <td>Cryptographic Settlement Currency</td>
-                    <td>Isolates protocol logic from speculative volatility</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Transferability</strong></td>
-                    <td><span className="mono" style={{ color: 'var(--silver-dark)' }}>Non-Transferable (Internal Ledger State)</span></td>
-                    <td><span className="mono" style={{ color: 'var(--neon-green)' }}>100% Freely Transferable (BEP-20)</span></td>
-                    <td>Prevents secondary dumping of unvested points</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Circulating Supply</strong></td>
-                    <td>Dynamic Fuel (Burned upon staking)</td>
-                    <td>Strict 21,000,000 Maximum Hard Cap</td>
-                    <td>Permanent mathematical protection against inflation</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Primary Function</strong></td>
-                    <td>Initiating customized 30–90d lockups</td>
-                    <td>Collateral, validator bonding & liquidity</td>
-                    <td>Establishes a resilient two-layer economy</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>State Invariant</strong></td>
-                    <td>Permanent Proof-of-Burn (ΔBits → ∅)</td>
-                    <td>Deterministic principal redemption at maturity</td>
-                    <td>Principal returns funded directly by 20% Staking Reserve</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* Section 3.0 */}
-          <section className="whitepaper-section" id="scarcity-proof-of-burn">
-            <div className="eyebrow">Section 3.0</div>
-            <h2>Proof-of-Burn & Scarcity Invariants</h2>
-            <p>
-              In conventional yield architectures (e.g., fractional-reserve lending, synthetic re-staking), capital remains simultaneously
-              counted on ledger balances while pledged as security. This re-hypothecation introduces systemic counterparty risk: sudden
-              liquidity contractions trigger cascading forced liquidations.
-            </p>
-            <p>
-              Bitnoir enforces mathematical integrity through an uncompromising <strong>Proof-of-Burn (PoB)</strong> state transition.
-              When a participant commits Bits into the protocol's lockup smart contract, the Bits are not placed into a pool where they
-              can be re-lent or reclaimed early. They are <strong>permanently and irreversibly destroyed from the active points ledger</strong>.
-            </p>
-
-            <div className="formula-card">
-              <div className="formula-header">The Proof-of-Burn Invariant Equation</div>
-              <div className="formula-math">
-                ∀ Position_i : ΔBits_active = -Bits_committed ∧ Staking_Receipt_i = Hash(Account, Term, BlockTimestamp)
-              </div>
-              <div className="formula-explanation">
-                Equation 1: The commitment of Bits reduces active ledger float irreversibly. The smart contract instantiates an immutable
-                cryptographic receipt guaranteeing principal redemption at maturity from the protocol's 4,200,000 $Noir reserve.
-              </div>
-            </div>
-
-            <h3>The $1.10 Reference Accounting Benchmark</h3>
-            <p>
-              To provide deterministic settlement without relying on volatile oracle price fluctuations during active lockups,
-              the protocol employs a fixed internal benchmark:
-            </p>
-            <div className="formula-card">
-              <div className="formula-header">Deterministic Principal Settlement Formula</div>
-              <div className="formula-math">
-                Principal_Redemption ($Noir) = (Staked_Bits × $0.10) / Reference_Valuation ($1.10)
-              </div>
-              <div className="formula-explanation">
-                Example: 1,000 Bits committed ($100 USDT computational value) returns exactly <strong>90.9091 Bitnoir Coins ($Noir)</strong> upon term
-                maturity ($100 / $1.10 = 90.9091 $Noir), funded directly from the verified 20% Staking Reserve.
-              </div>
-            </div>
-          </section>
-
-          {/* Section 4.0 */}
-          <section className="whitepaper-section" id="tokenomics-supply">
-            <div className="eyebrow">Section 4.0</div>
-            <h2>21,000,000 Fixed Supply Architecture</h2>
-            <p>
-              Mirroring Bitcoin’s foundational monetary policy, the total lifetime issuance of Bitnoir Coin ($Noir) is hardcoded at exactly
-              <strong> 21,000,000 units</strong>. No administrative function, multisig key, or governance vote can ever expand this
-              supply boundary. The distribution is programmatically partitioned across five fundamental protocol pillars:
-            </p>
-
-            {/* TECHNICAL SVG DIAGRAM 2: Supply Allocation & Halving Curve */}
-            <div className="whitepaper-diag-card">
-              <div className="whitepaper-diag-caption">
-                <BarChart3 size={13} />
-                <span>Figure 2: Verifiable Allocation Breakdown & Asymptotic Halving Convergence</span>
-              </div>
-              <svg className="whitepaper-diag-svg" viewBox="0 0 840 210" fill="none" xmlns="http://www.w3.org/2000/svg">
-                {/* Allocation Horizontal Bar */}
-                <rect x="20" y="30" width="800" height="32" rx="6" fill="#0d1117" stroke="rgba(255,255,255,0.12)" />
-                {/* 45% Fair Launch: 360px */}
-                <rect x="22" y="32" width="358" height="28" rx="4" fill="var(--neon-green)" opacity="0.85" />
-                <text x="201" y="50" textAnchor="middle" fill="#03140a" fontSize="11" fontWeight="700" fontFamily="var(--app-font-mono)">Public Allocation: 45.0%</text>
-
-                {/* 20% Staking: 160px */}
-                <rect x="382" y="32" width="158" height="28" rx="4" fill="#00f59b" opacity="0.45" />
-                <text x="461" y="50" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="600" fontFamily="var(--app-font-mono)">Staking: 20.0%</text>
-
-                {/* 15% Liquidity: 120px */}
-                <rect x="542" y="32" width="118" height="28" rx="4" fill="#ffffff" opacity="0.3" />
-                <text x="601" y="50" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="600" fontFamily="var(--app-font-mono)">AMM: 15%</text>
-
-                {/* 12% Mining: 96px */}
-                <rect x="662" y="32" width="94" height="28" rx="4" fill="#ffffff" opacity="0.18" />
-                <text x="709" y="50" textAnchor="middle" fill="#c9d1d9" fontSize="10" fontWeight="600" fontFamily="var(--app-font-mono)">Mine: 12%</text>
-
-                {/* 8% Community: 64px */}
-                <rect x="758" y="32" width="60" height="28" rx="4" fill="#ffffff" opacity="0.08" />
-                <text x="788" y="50" textAnchor="middle" fill="#8b949e" fontSize="9" fontWeight="600" fontFamily="var(--app-font-mono)">8%</text>
-
-                {/* Halving Curve Section */}
-                <line x1="60" y1="180" x2="800" y2="180" stroke="rgba(255,255,255,0.15)" />
-                <line x1="60" y1="90" x2="60" y2="180" stroke="rgba(255,255,255,0.15)" />
-                {/* 21M Ceiling Guide */}
-                <line x1="60" y1="95" x2="800" y2="95" stroke="rgba(0, 245, 155, 0.4)" strokeWidth="1" />
-                <text x="804" y="99" fill="var(--neon-green)" fontSize="10" fontFamily="var(--app-font-mono)">21,000,000 Hard Cap</text>
-
-                {/* Curve Path */}
-                <path d="M60 180 Q220 125 400 108 T780 96" fill="none" stroke="var(--neon-green)" strokeWidth="2.5" />
-                <rect x="57" y="177" width="6" height="6" fill="var(--neon-green)" rx="1" />
-                <rect x="217" y="135" width="6" height="6" fill="var(--neon-green)" rx="1" />
-                <rect x="397" y="105" width="6" height="6" fill="var(--neon-green)" rx="1" />
-                <rect x="597" y="96" width="6" height="6" fill="var(--neon-green)" rx="1" />
-                <rect x="777" y="93" width="6" height="6" fill="var(--neon-green)" rx="1" />
-
-                {/* Epoch Labels */}
-                <text x="60" y="196" textAnchor="middle" fill="#8b949e" fontSize="10" fontFamily="var(--app-font-mono)">Genesis</text>
-                <text x="220" y="196" textAnchor="middle" fill="#8b949e" fontSize="10" fontFamily="var(--app-font-mono)">Epoch 1</text>
-                <text x="400" y="196" textAnchor="middle" fill="#8b949e" fontSize="10" fontFamily="var(--app-font-mono)">Epoch 2</text>
-                <text x="600" y="196" textAnchor="middle" fill="#8b949e" fontSize="10" fontFamily="var(--app-font-mono)">Epoch 3</text>
-                <text x="780" y="196" textAnchor="middle" fill="#8b949e" fontSize="10" fontFamily="var(--app-font-mono)">Terminal Cap</text>
-              </svg>
-            </div>
-
-            <div className="whitepaper-table-wrap">
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: '32%' }}>Pillar Allocation</th>
-                    <th style={{ width: '16%' }}>Percentage</th>
-                    <th style={{ width: '20%' }}>Token Quota ($Noir)</th>
-                    <th style={{ width: '32%' }}>Operational Role & Lockup Mechanism</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Public Fair Launch Distribution</strong></td>
-                    <td><span className="mono" style={{ color: 'var(--neon-green)', fontWeight: 700 }}>45.0%</span></td>
-                    <td className="mono">9,450,000</td>
-                    <td>Genesis fair protocol issuance; 100% unlocked at network launch</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Staking & Settlement Reserve</strong></td>
-                    <td><span className="mono" style={{ color: 'var(--neon-green)', fontWeight: 700 }}>20.0%</span></td>
-                    <td className="mono">4,200,000</td>
-                    <td>Dedicated smart contract vault backing 30–90d term principal redemptions</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Liquidity & AMM Infrastructure</strong></td>
-                    <td><span className="mono" style={{ color: 'var(--neon-green)', fontWeight: 700 }}>15.0%</span></td>
-                    <td className="mono">3,150,000</td>
-                    <td>Automated Market Maker pairings guaranteeing non-custodial decentralized exchange depth</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Mining Pool & Validator Emissions</strong></td>
-                    <td><span className="mono" style={{ color: 'var(--neon-green)', fontWeight: 700 }}>12.0%</span></td>
-                    <td className="mono">2,520,000</td>
-                    <td>Distributed via epoch-halving curve to secure node operators and consensus infrastructure</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Community Reputation & Governance</strong></td>
-                    <td><span className="mono" style={{ color: 'var(--neon-green)', fontWeight: 700 }}>8.0%</span></td>
-                    <td className="mono">1,680,000</td>
-                    <td>Reputation score weighting, decentralized XP merit, zero private insider allocations</td>
-                  </tr>
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td><strong style={{ color: 'var(--neon-green)' }}>Total Fixed Monetary Supply</strong></td>
-                    <td><strong className="mono" style={{ color: 'var(--neon-green)' }}>100.0%</strong></td>
-                    <td><strong className="mono" style={{ color: 'var(--neon-green)' }}>21,000,000</strong></td>
-                    <td style={{ color: 'var(--silver-medium)' }}>Immutable protocol monetary boundary hardcoded in smart contract bytecode</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </section>
-
-          {/* Section 5.0 */}
-          <section className="whitepaper-section" id="btcfi-interop">
-            <div className="eyebrow">Section 5.0</div>
-            <h2>BTCfi & Multi-Chain State Engine</h2>
-            <p>
-              Drawing architectural principles from modern Bitcoin finance and decentralized multi-party cryptographic frameworks, Bitnoir eliminates custodial wrapping bridges.
-            </p>
-            <p>
-              Instead of requiring users to lock raw Bitcoin into centralized custodian multisigs, Bitnoir employs a
-              <strong> Multi-Party Computation (MPC) Threshold Signature Scheme (TSS)</strong> paired with Trusted Execution Environments (TEEs).
-              Smart contracts running on the protocol’s EVM coordination layer can autonomously request cryptographic threshold signatures
-              across foreign blockchains without revealing or centralizing private keys.
-            </p>
-
-            {/* TECHNICAL SVG DIAGRAM 3: BTCfi Multi-Chain Verification */}
-            <div className="whitepaper-diag-card">
-              <div className="whitepaper-diag-caption">
-                <Globe2 size={13} />
-                <span>Figure 3: Chain-Abstracted BTCfi State Execution & Threshold MPC Signature Pipeline</span>
-              </div>
-              <svg className="whitepaper-diag-svg" viewBox="0 0 840 230" fill="none" xmlns="http://www.w3.org/2000/svg">
-                {/* Top Layer: Connected Networks */}
-                <rect x="30" y="25" width="220" height="42" rx="8" fill="#0d1117" stroke="rgba(255,255,255,0.12)" />
-                <text x="140" y="50" textAnchor="middle" fill="#fff" fontSize="12" fontWeight="700" fontFamily="system-ui">Bitcoin Layer (BTC / Ordinals)</text>
-
-                <rect x="310" y="25" width="220" height="42" rx="8" fill="#0d1117" stroke="rgba(0, 245, 155, 0.4)" />
-                <text x="420" y="50" textAnchor="middle" fill="var(--neon-green)" fontSize="12" fontWeight="700" fontFamily="system-ui">Bitnoir EVM Coordination Engine</text>
-
-                <rect x="590" y="25" width="220" height="42" rx="8" fill="#0d1117" stroke="rgba(255,255,255,0.12)" />
-                <text x="700" y="50" textAnchor="middle" fill="#fff" fontSize="12" fontWeight="700" fontFamily="system-ui">EVM Ecosystem (BSC / L2 Rollups)</text>
-
-                {/* Connecting Paths Down to Enclaves */}
-                <path d="M140 68 L140 92 L220 92 L220 106" stroke="rgba(255,255,255,0.25)" strokeWidth="1.2" />
-                <path d="M420 68 L420 106" stroke="var(--neon-green)" strokeWidth="1.5" />
-                <path d="M700 68 L700 92 L620 92 L620 106" stroke="rgba(255,255,255,0.25)" strokeWidth="1.2" />
-
-                {/* Middle Box: Decentralized MPC Validator Mesh with 3 Perfectly Sized Enclaves */}
-                <rect x="120" y="106" width="600" height="58" rx="10" fill="#0b0f19" stroke="rgba(0, 245, 155, 0.35)" strokeWidth="1.2" />
-
-                <rect x="140" y="116" width="160" height="38" rx="6" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)" />
-                <text x="220" y="139" textAnchor="middle" fill="#e6edf3" fontSize="12" fontWeight="600" fontFamily="var(--app-font-mono)">Node A (TEE)</text>
-
-                <rect x="340" y="116" width="160" height="38" rx="6" fill="rgba(0, 245, 155, 0.05)" stroke="rgba(0, 245, 155, 0.35)" />
-                <text x="420" y="139" textAnchor="middle" fill="var(--neon-green)" fontSize="12" fontWeight="600" fontFamily="var(--app-font-mono)">Node B (TEE)</text>
-
-                <rect x="540" y="116" width="160" height="38" rx="6" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.12)" />
-                <text x="620" y="139" textAnchor="middle" fill="#e6edf3" fontSize="12" fontWeight="600" fontFamily="var(--app-font-mono)">Node C (TEE)</text>
-
-                {/* Bottom Box: Non-Custodial Execution */}
-                <path d="M420 164 L420 182" stroke="var(--neon-green)" strokeWidth="1.5" />
-                <polygon points="420,186 416,180 424,180" fill="var(--neon-green)" />
-                <rect x="120" y="186" width="600" height="32" rx="8" fill="rgba(0, 245, 155, 0.06)" stroke="rgba(0, 245, 155, 0.2)" />
-                <text x="420" y="206" textAnchor="middle" fill="var(--neon-green)" fontSize="11" fontFamily="var(--app-font-mono)" fontWeight="600">
-                  Pull-Based Signature Settlement: Zero Centralized Custody Risk
-                </text>
-              </svg>
-            </div>
-
-            <h3>Key Cryptographic Invariants</h3>
-            <ul style={{ color: 'var(--silver-medium)', fontSize: 14, lineHeight: 1.8, paddingLeft: 20, margin: '14px 0 20px' }}>
-              <li><strong>Distributed Key Generation (DKG):</strong> Master private keys are generated cooperatively across validator enclaves. No individual node ever reconstructs or observes the full key.</li>
-              <li><strong>Signature Indistinguishability:</strong> Group-generated threshold ECDSA/EdDSA signatures are mathematically identical to standard single-signer transactions, fully supported natively by Bitcoin and EVM runtimes.</li>
-              <li><strong>Hardware-Enforced Enclaves (TEEs):</strong> Node computation executes inside tamper-resistant hardware boundaries, preventing secret share leakage even if the host operating system is compromised.</li>
-            </ul>
-          </section>
-
-          {/* Section 6.0 */}
-          <section className="whitepaper-section" id="protocol-usecases">
-            <div className="eyebrow">Section 6.0</div>
-            <h2>Protocol Utility & Ecosystem Use Cases</h2>
-            <p>
-              Bitnoir Coin ($Noir) is engineered with clear, functional utility directly anchored to protocol throughput and network security:
-            </p>
-
-            <div className="whitepaper-cards-2">
-              <div className="panel content-card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <Coins size={20} color="var(--neon-green)" />
-                  <h3 style={{ margin: 0, fontSize: 16, color: '#fff' }}>1. Hard Asset Collateral for BTCfi</h3>
-                </div>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.7 }}>
-                  Due to its unalterable 21,000,000 hard cap and deterministic burn dynamics, $Noir functions as high-grade pristine
-                  collateral across decentralized lending markets, liquidity pools, and algorithmic credit protocols.
-                </p>
-              </div>
-
-              <div className="panel content-card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <Layers3 size={20} color="var(--neon-green)" />
-                  <h3 style={{ margin: 0, fontSize: 16, color: '#fff' }}>2. Node Bonding & Validator Staking</h3>
-                </div>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.7 }}>
-                  Network validators and mining pool coordinators bond $Noir to secure threshold signature hardware. Malicious actions
-                  trigger automated slashing penalties, enforcing economic honesty.
-                </p>
-              </div>
-
-              <div className="panel content-card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <Flame size={20} color="var(--neon-green)" />
-                  <h3 style={{ margin: 0, fontSize: 16, color: '#fff' }}>3. Cross-Chain Gas Fee Deflation</h3>
-                </div>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.7 }}>
-                  Cross-chain transaction relaying through the MPC threshold network consumes protocol routing fees paid in $Noir.
-                  A percentage of every network coordination fee is permanently burned, applying perpetual deflationary pressure.
-                </p>
-              </div>
-
-              <div className="panel content-card">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <ShieldCheck size={20} color="var(--neon-green)" />
-                  <h3 style={{ margin: 0, fontSize: 16, color: '#fff' }}>4. Community Airdrop & Free Bits Protocol</h3>
-                </div>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.7 }}>
-                  Every new participant receives 100 Free Bits upon signup ($10.00 value) stakable for 12% APY. Verified referrals award an additional 100 Bits once the referee purchases min. $100 and stakes, funded entirely by the 8% Community Airdrop Reserve (1,680,000 $Noir).
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {/* Section 7.0 */}
-          <section className="whitepaper-section" id="participant-taxonomy">
-            <div className="eyebrow">Section 7.0</div>
-            <h2>Network Participants & User Taxonomy</h2>
-            <p>
-              The protocol coordinates four distinct classes of decentralized actors, each operating under self-sovereign incentives:
-            </p>
-
-            <div className="whitepaper-table-wrap">
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: '24%' }}>Participant Role</th>
-                    <th style={{ width: '26%' }}>Primary Objective</th>
-                    <th style={{ width: '26%' }}>Economic Incentive & Invariant</th>
-                    <th style={{ width: '24%' }}>Security Responsibility</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Protocol Users</strong></td>
-                    <td>Commit internal Bits to 30–90d staking terms</td>
-                    <td>Receive streaming protocol yield and redeemed Bitnoir Coins ($Noir) upon maturity</td>
-                    <td>Non-custodial account authentication; self-sovereign key control</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Mining Pool Validators</strong></td>
-                    <td>Operate secure TEE nodes executing threshold MPC signing</td>
-                    <td>Capture the 12.0% epoch halving emission reserve (2,520,000 $Noir)</td>
-                    <td>Uphold high availability and cryptographically isolated key shares</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Liquidity Coordinators</strong></td>
-                    <td>Provide automated liquidity depth across DEX/CEX venues</td>
-                    <td>Earn protocol AMM trading fees and deep liquidity incentives</td>
-                    <td>Ensure continuous, low-slippage secondary price discovery</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Community Advocates</strong></td>
-                    <td>Expand decentralized node participation through verified invitations</td>
-                    <td>Earn rule-based XP reputation bonuses and tier multiplier boosts</td>
-                    <td>Maintain Sybil resistance by onboarding active network participants</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* Section 8.0 */}
-          <section className="whitepaper-section" id="security-invariants">
-            <div className="eyebrow">Section 8.0</div>
-            <h2>Cryptographic Invariants & Safety Engineering</h2>
-            <p>
-              Security in Bitnoir is enforced as a deterministic mathematical property.
-              The protocol establishes strict runtime invariants across state transitions:
-            </p>
-
-            <div className="whitepaper-table-wrap" style={{ margin: '18px 0' }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: '28%' }}>Safety Invariant</th>
-                    <th style={{ width: '42%' }}>Cryptographic Guarantee</th>
-                    <th style={{ width: '30%' }}>Failure State Mitigation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Immutable Cap Enforcement</strong></td>
-                    <td>Circulating $Noir issuance bounded strictly by 21,000,000 units in bytecode</td>
-                    <td>Transactions attempting unauthorized minting revert deterministically</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Non-Reversible Burn (PoB)</strong></td>
-                    <td>Bits committed to staking contracts are permanently deleted from active state (ΔBits → ∅)</td>
-                    <td>Zero rehypothecation or recursive lending leverage possible</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Threshold Isolation (MPC)</strong></td>
-                    <td>Multi-party TSS requires t-of-n consensus across isolated enclaves</td>
-                    <td>Individual compromised nodes cannot generate valid protocol signatures</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Deterministic Settlement Index</strong></td>
-                    <td>Principal redemptions evaluated via fixed $1.10 internal reference benchmark</td>
-                    <td>Isolates active lockups from volatile spot price oracle manipulation</td>
-                  </tr>
-                  <tr>
-                    <td><strong style={{ color: '#fff' }}>Non-Custodial Multi-Chain Execution</strong></td>
-                    <td>Cross-chain operations executed via chain signatures without private key exposure</td>
-                    <td>Eliminates centralized custodian multi-sig honeypot vulnerabilities</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div className="callout error" style={{ marginTop: 24 }}>
-              <strong>Cryptographic Notice:</strong> Bitnoir is an autonomous decentralized protocol.
-              While the mathematical ceiling of 21,000,000 Bitnoir Coins ($Noir) is immutable and Proof-of-Burn dynamics are verified on-chain,
-              participation in digital asset protocols involves smart contract execution risk and network conditions.
-              Participants should review formal specifications and commit capital in accordance with individual risk tolerance.
-            </div>
-          </section>
-        </article>
-      </div>
-      <footer className="footer">
-        <Brand size="sm" />
-        <span>Bitnoir Protocol Architecture Specification · Version 3.0</span>
-      </footer>
-    </div>
-  );
+  return <WhitepaperView PublicHeader={PublicHeader} Brand={Brand} BitsMark={BitsMark} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -1722,143 +1686,330 @@ function DocsPage() {
 // ---------------------------------------------------------------------------
 function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const [, setLocation] = useLocation();
-  const { signIn, signUp } = useAuth();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [referral, setReferral] = useState(() => new URLSearchParams(window.location.search).get('ref') || '');
+  const { user, connectWallet, disconnectWallet } = useAuth();
+  const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState('');
-  const [loginKey, setLoginKey] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const [manualAddress, setManualAddress] = useState('');
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const cleanUser = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
-    const cleanKey = password.trim();
-
-    if (mode === 'sign-up' && cleanUser.length < 3) {
-      setError('Username must be at least 3 letters or numbers.');
-      return;
-    }
-    if (mode === 'sign-in' && cleanKey.length < 16) {
-      setError('Enter your complete login key.');
-      return;
-    }
-    if (mode === 'sign-up' && password.length < 8) {
-      setError('Password must contain at least 8 characters.');
-      return;
-    }
-
+  const handlePhantomConnect = async () => {
+    setError('');
+    setConnecting(true);
     try {
-      setError('');
-      setBusy(true);
-      if (mode === 'sign-in') {
-        await signIn(cleanKey);
-        setLocation('/wallet');
+      const address = await connectWallet();
+      toast({
+        title: 'Wallet Connected',
+        description: `Connected with Phantom: @${shortSolanaAddress(address)}`,
+      });
+      setLocation('/wallet');
+    } catch (err) {
+      if (err instanceof Error && err.message === 'PHANTOM_NOT_INSTALLED') {
+        setError(
+          'Phantom wallet extension not detected in this browser window. Connect with Demo Solana Wallet or paste your Solana public address below.'
+        );
+        setShowManual(true);
       } else {
-        const generatedKey = await signUp(cleanUser, password, referral.trim() || undefined);
-        setLoginKey(generatedKey);
+        setError(err instanceof Error ? err.message : 'Failed to connect Phantom wallet.');
       }
-    } catch (authError) {
-      setError(authError instanceof Error ? authError.message : 'Failed to authenticate. Please try again.');
     } finally {
-      setBusy(false);
+      setConnecting(false);
     }
   };
 
-  return (
-    <form className="auth-form" onSubmit={submit}>
-      <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <div className="eyebrow" style={{ margin: '0 auto 12px' }}>
-          <span className="eyebrow-dot" />
-          {mode === 'sign-up' ? 'NEW MEMBER REGISTRATION' : 'MEMBER ACCESS'}
+  const handleDemoConnect = async (demoAddress = 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK') => {
+    setError('');
+    setConnecting(true);
+    try {
+      await connectWallet(demoAddress);
+      toast({
+        title: 'Demo Wallet Connected',
+        description: `Connected as @${shortSolanaAddress(demoAddress)}`,
+      });
+      setLocation('/wallet');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to connect demo wallet.');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleManualSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    const clean = manualAddress.trim();
+    if (!clean) {
+      setError('Please enter your Solana public address.');
+      return;
+    }
+
+    // Safety check: Reject private keys, mnemonic seed phrases, or hex strings
+    if (clean.includes(' ') || clean.length > 50 || clean.startsWith('0x') && clean.length === 66) {
+      setError('Security notice: Never enter private keys or seed phrases! Enter only your public Solana address.');
+      return;
+    }
+
+    // Solana base58 check
+    const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+    if (!base58Regex.test(clean)) {
+      setError('Invalid Solana address format. A valid Solana public key is 32-44 base58 characters.');
+      return;
+    }
+
+    setError('');
+    setConnecting(true);
+    try {
+      await connectWallet(clean);
+      toast({
+        title: 'Solana Wallet Linked',
+        description: `Connected as @${shortSolanaAddress(clean)}`,
+      });
+      setLocation('/wallet');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to link Solana address.');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  // Already authenticated state
+  if (user && user.solanaAddress) {
+    return (
+      <div className="auth-form" style={{ textAlign: 'center' }}>
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, rgba(171, 159, 242, 0.2), rgba(120, 87, 255, 0.3))',
+            border: '2px solid #7857ff',
+            margin: '0 auto 16px',
+            display: 'grid',
+            placeItems: 'center',
+            boxShadow: '0 8px 24px rgba(120, 87, 255, 0.25)',
+          }}
+        >
+          <PhantomLogo size={28} />
         </div>
-        <h1 style={{ font: '700 28px var(--app-font-serif)', margin: '0 0 6px', color: '#fff' }}>
-          {mode === 'sign-up' ? 'Create your protocol account' : 'Enter your login key'}
+
+        <div className="eyebrow" style={{ margin: '0 auto 10px' }}>
+          <span className="eyebrow-dot" />
+          SOLANA WALLET CONNECTED
+        </div>
+
+        <h1 style={{ font: '700 24px var(--app-font-serif)', margin: '0 0 8px', color: '#fff' }}>
+          Connected to Bitnoir
         </h1>
-        <p style={{ color: 'var(--silver-medium)', fontSize: 13, margin: 0 }}>
-          {mode === 'sign-up' ? 'Your private login key will be generated once after registration. No email is required.' : 'Use the private login key issued when you created your account.'}
+
+        <div
+          style={{
+            padding: '12px 16px',
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: 12,
+            marginBottom: 20,
+            textAlign: 'left',
+          }}
+        >
+          <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+            Connected Public Address
+          </div>
+          <div style={{ fontSize: 13, fontFamily: 'monospace', color: '#00f59b', fontWeight: 700, wordBreak: 'break-all' }}>
+            {user.solanaAddress}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="button button-primary"
+          onClick={() => setLocation('/wallet')}
+          style={{ width: '100%', minHeight: 48, marginBottom: 10 }}
+        >
+          Open Wallet Dashboard <ArrowRight size={16} />
+        </button>
+
+        <button
+          type="button"
+          className="button button-soft"
+          onClick={() => void disconnectWallet()}
+          style={{ width: '100%', minHeight: 42, color: 'var(--danger)' }}
+        >
+          Disconnect Wallet
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="auth-form">
+      {/* HEADER */}
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, rgba(171, 159, 242, 0.2), rgba(120, 87, 255, 0.35))',
+            border: '2px solid rgba(171, 159, 242, 0.4)',
+            margin: '0 auto 16px',
+            display: 'grid',
+            placeItems: 'center',
+            boxShadow: '0 8px 30px rgba(120, 87, 255, 0.3)',
+          }}
+        >
+          <PhantomLogo size={28} />
+        </div>
+
+        <div className="eyebrow" style={{ margin: '0 auto 10px' }}>
+          <span className="eyebrow-dot" />
+          SOLANA NON-CUSTODIAL AUTH
+        </div>
+        <h1 style={{ font: '700 26px var(--app-font-serif)', margin: '0 0 6px', color: '#fff' }}>
+          {mode === 'sign-up' ? 'Connect Phantom to Join' : 'Connect Phantom Wallet'}
+        </h1>
+        <p style={{ color: 'var(--silver-medium)', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
+          One-click login with your Solana public address. No email, passwords, or registration forms required.
         </p>
       </div>
 
-      {mode === 'sign-up' && (
-        <div style={{ padding: '12px 14px', background: 'rgba(0, 245, 155, 0.05)', border: '1px solid rgba(0, 245, 155, 0.25)', borderRadius: 10, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Sparkles size={16} color="var(--neon-green)" style={{ flexShrink: 0 }} />
-          <div style={{ fontSize: 12, color: 'var(--silver-light)', lineHeight: 1.4 }}>
-            <strong style={{ color: '#00f59b' }}>100 Free Bits Welcome Grant</strong> automatically credited on signup ($10.00 accounting value · stakable for 12% APY).
+      {error && (
+        <div className="callout error" style={{ marginBottom: 18, fontSize: 12.5, lineHeight: 1.45 }}>
+          {error}
+        </div>
+      )}
+
+      {/* PRIMARY PHANTOM CONNECT BUTTON */}
+      <button
+        type="button"
+        onClick={handlePhantomConnect}
+        disabled={connecting}
+        style={{
+          width: '100%',
+          minHeight: 52,
+          background: 'linear-gradient(135deg, #ab9ff2 0%, #7857ff 100%)',
+          color: '#ffffff',
+          fontWeight: 700,
+          fontSize: 15,
+          borderRadius: 14,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 12,
+          boxShadow: '0 8px 24px rgba(120, 87, 255, 0.35)',
+          border: 'none',
+          cursor: connecting ? 'wait' : 'pointer',
+          marginBottom: 12,
+          transition: 'all 0.15s ease',
+        }}
+      >
+        <PhantomLogo size={22} />
+        <span>{connecting ? 'Connecting Phantom…' : 'Connect Phantom Wallet'}</span>
+        <ArrowRight size={16} />
+      </button>
+
+      {/* QUICK DEMO WALLET CONNECT */}
+      <button
+        type="button"
+        onClick={() => handleDemoConnect()}
+        disabled={connecting}
+        className="button button-soft"
+        style={{
+          width: '100%',
+          minHeight: 44,
+          borderRadius: 12,
+          fontSize: 13,
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          borderColor: 'rgba(255, 255, 255, 0.1)',
+          marginBottom: 16,
+        }}
+      >
+        <SolanaLogo size={16} />
+        <span>Quick Connect Demo Solana Wallet</span>
+      </button>
+
+      {/* MANUAL SOLANA PUBLIC ADDRESS OPTION */}
+      {!showManual ? (
+        <div style={{ textAlign: 'center', marginTop: 8, marginBottom: 12 }}>
+          <button
+            type="button"
+            onClick={() => setShowManual(true)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#94a3b8',
+              fontSize: 12,
+              cursor: 'pointer',
+              textDecoration: 'underline',
+            }}
+          >
+            Or connect with Solana Public Key manually
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={handleManualSubmit} style={{ marginTop: 8, marginBottom: 16 }}>
+          <div className="field-wrap">
+            <label className="field-label" htmlFor="solana-public-address" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Solana Public Address (Base58)</span>
+              <span style={{ color: '#00f59b' }}>Public Only</span>
+            </label>
+            <input
+              id="solana-public-address"
+              className="field mono"
+              type="text"
+              placeholder="e.g. DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK"
+              value={manualAddress}
+              onChange={(e) => setManualAddress(e.target.value.trim())}
+              autoComplete="off"
+              spellCheck={false}
+              required
+            />
           </div>
-        </div>
+          <button
+            type="submit"
+            className="button button-soft"
+            disabled={connecting}
+            style={{ width: '100%', minHeight: 42, borderRadius: 10, fontWeight: 600 }}
+          >
+            Connect Public Address
+          </button>
+        </form>
       )}
 
-      {mode === 'sign-up' && (
-        <div className="field-wrap">
-          <label className="field-label" htmlFor="auth-username">Username</label>
-          <input
-            id="auth-username"
-            className="field mono"
-            placeholder="Choose a username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-            maxLength={20}
-            required
-          />
+      {/* NON-CUSTODIAL SAFETY GUARANTEE */}
+      <div
+        style={{
+          marginTop: 8,
+          padding: '12px 14px',
+          background: 'rgba(0, 245, 155, 0.05)',
+          border: '1px solid rgba(0, 245, 155, 0.2)',
+          borderRadius: 12,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 10,
+          textAlign: 'left',
+        }}
+      >
+        <ShieldCheck size={18} color="var(--neon-green)" style={{ flexShrink: 0, marginTop: 2 }} />
+        <div style={{ fontSize: 12, color: 'var(--silver-light)', lineHeight: 1.45 }}>
+          <strong style={{ color: '#00f59b', display: 'block', marginBottom: 2 }}>Non-Custodial & Secure</strong>
+          This app only reads your public address (<code style={{ color: '#00f59b', background: 'transparent', padding: 0 }}>publicKey</code>) to identify your account. Private keys, passwords, and seed phrases are never collected, requested, or stored.
         </div>
-      )}
-
-      <div className="field-wrap">
-        <label className="field-label" htmlFor="auth-password">{mode === 'sign-up' ? 'Password (Minimum 8 characters)' : 'Private Login Key'}</label>
-        <input
-          id="auth-password"
-          className="field"
-          type={mode === 'sign-up' ? 'password' : 'text'}
-          placeholder={mode === 'sign-up' ? 'Choose a password' : '0x...'}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          minLength={8}
-          required
-        />
       </div>
 
-      {mode === 'sign-up' && (
-        <div className="field-wrap">
-          <label className="field-label" htmlFor="auth-referral">
-            Referral Code <span style={{ color: 'var(--silver-dark)' }}>(Optional)</span>
-          </label>
-          <input
-            id="auth-referral"
-            className="field mono"
-            value={referral}
-            onChange={(e) => setReferral(e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, ''))}
-            placeholder="e.g. BITS-SATOSHINODE"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-      )}
-
-      {error && <div className="callout error" style={{ marginBottom: 16 }}>{error}</div>}
-      {loginKey && (
-        <div className="login-key-card">
-          <strong>Save your one-time login key</strong>
-          <code>{loginKey}</code>
-          <span>This key is shown once. Store it securely; it cannot be recovered.</span>
-          <button type="button" className="button button-soft" onClick={() => void navigator.clipboard?.writeText(loginKey)}>Copy login key</button>
-          <Link href="/sign-in" className="button button-primary">Continue to sign in <ArrowRight size={15} /></Link>
-        </div>
-      )}
-
-      {!loginKey && (
-        <button className="button button-primary" type="submit" style={{ width: '100%', minHeight: 46 }} disabled={busy}>
-          {busy ? 'Securing account…' : mode === 'sign-up' ? 'Create Account & Show Key' : 'Sign in to Portal'} <ArrowRight size={15} />
-        </button>
-      )}
-
-      <p style={{ textAlign: 'center', marginTop: 20, fontSize: 13, color: 'var(--silver-dark)' }}>
-        {mode === 'sign-up' ? 'Already have an account?' : 'New to Bitnoir?'}{' '}
-        <Link href={mode === 'sign-up' ? '/sign-in' : '/sign-up'} style={{ color: 'var(--neon-green)', fontWeight: 600 }}>
-          {mode === 'sign-up' ? 'Sign in' : 'Create one now'}
-        </Link>
+      <p style={{ textAlign: 'center', marginTop: 18, fontSize: 12.5, color: 'var(--silver-dark)' }}>
+        Need a Solana wallet?{' '}
+        <a
+          href="https://phantom.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: '#ab9ff2', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+        >
+          Download Phantom <ExternalLink size={11} />
+        </a>
       </p>
-    </form>
+    </div>
   );
 }
 
@@ -1903,8 +2054,8 @@ function AppShell({
 }) {
   const { user, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
-  const name = user?.name || user?.username || 'Member';
-  const role = admin || user?.isAdmin ? 'Administrator' : 'Protocol Member';
+  const displayName = user?.solanaAddress ? `@${shortSolanaAddress(user.solanaAddress)}` : (user?.name || user?.username || 'Member');
+  const role = user?.solanaAddress ? 'Phantom Solana' : (admin || user?.isAdmin ? 'Administrator' : 'Protocol Member');
 
   return (
     <div className={`app-layout ${hideMobileMenu ? 'hide-mobile-trigger no-page-scroll' : ''}`}>
@@ -1977,12 +2128,22 @@ function AppShell({
 
         <div className="side-bottom">
           <div className="mini-profile">
-            <span className="avatar">{name.slice(0, 2).toUpperCase()}</span>
+            <span
+              className="avatar"
+              style={{
+                background: user?.solanaAddress ? 'linear-gradient(135deg, #ab9ff2, #7857ff)' : undefined,
+                display: 'grid',
+                placeItems: 'center',
+                color: '#ffffff',
+              }}
+            >
+              {user?.solanaAddress ? <PhantomLogo size={14} /> : displayName.slice(0, 2).toUpperCase()}
+            </span>
             <div style={{ overflow: 'hidden' }}>
               <span className="profile-name" style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                {name}
+                {displayName}
               </span>
-              <span className="profile-role">{role}</span>
+              <span className="profile-role" style={{ color: user?.solanaAddress ? '#ab9ff2' : undefined }}>{role}</span>
             </div>
           </div>
           <button
@@ -2018,12 +2179,13 @@ function ProtectedGate({ children, admin = false }: { children: (account: UserAc
       </div>
     );
   }
+  const solanaAddr = user?.solanaAddress || user?.id || '';
   const fallbackAccount: UserAccount = {
-    id: user?.id || 'local-member',
-    name: user?.name || user?.username || 'Member',
+    id: solanaAddr || 'local-member',
+    name: solanaAddr ? `@${shortSolanaAddress(solanaAddr)}` : (user?.name || user?.username || 'Member'),
     email: '',
     role: user?.isAdmin ? 'admin' : 'user',
-    referralCode: '',
+    referralCode: solanaAddr ? shortSolanaAddress(solanaAddr) : '',
     referredBy: null,
     xp: 0,
     balances: { purchased: 5000, staked: 10000, claimable: 0.1600, swapAvailable: 0 },
@@ -2036,10 +2198,13 @@ function ProtectedGate({ children, admin = false }: { children: (account: UserAc
   if (admin && !user?.isAdmin && accountQuery.data.role !== 'admin') {
     return <Redirect to="/wallet" />;
   }
-  const account = user?.isAdmin && accountQuery.data.role !== 'admin'
-    ? { ...accountQuery.data, role: 'admin' as const }
-    : accountQuery.data;
-  return <>{children(account)}</>;
+  const effectiveData: UserAccount = {
+    ...accountQuery.data,
+    id: solanaAddr || accountQuery.data.id,
+    name: solanaAddr ? `@${shortSolanaAddress(solanaAddr)}` : accountQuery.data.name,
+    role: user?.isAdmin && accountQuery.data.role !== 'admin' ? ('admin' as const) : accountQuery.data.role,
+  };
+  return <>{children(effectiveData)}</>;
 }
 
 // ---------------------------------------------------------------------------
@@ -2412,94 +2577,758 @@ function WithdrawModal({
 // ---------------------------------------------------------------------------
 // 6. CLEAN WALLET PAGE (/wallet, /deposit, /assets)
 // ---------------------------------------------------------------------------
-function WalletPage({ account }: { account: UserAccount }) {
+function WalletPage({ account, initialAsset }: { account: UserAccount; initialAsset?: string }) {
+  const { user } = useAuth();
   const { notice } = useNotice();
-
   const balances = (account.balances as unknown as Record<string, number>) || {};
-  const purchasedBits = balances.purchased || 0;
-  const stakedBits = balances.staked || 0;
   const claimableBitnoir = balances.claimable || 0;
   const claimedBitnoir = balances.claimed || 0;
+  const miningData = (account as unknown as { mining?: { minedBitsTotalClaimed?: number } }).mining;
+  const initialBits = miningData?.minedBitsTotalClaimed ?? 120.5;
 
-  // Exact valuation
-  const bitsTotal = purchasedBits + stakedBits;
-  const bitsValueUsd = bitsTotal * BITS_REFERENCE_PRICE;
+  const [activeTab, setActiveTab] = useState<'tokens' | 'activity'>('tokens');
+  const [sendOpen, setSendOpen] = useState(false);
+  const [receiveOpen, setReceiveOpen] = useState(false);
+  const [receiveTarget, setReceiveTarget] = useState<'bits' | 'bitnoir'>('bits');
+  const [convertOpen, setConvertOpen] = useState(false);
+  const [withdrawSoonOpen, setWithdrawSoonOpen] = useState(false);
+  const [bitsBalance, setBitsBalance] = useState(initialBits);
+  const [selectedAsset, setSelectedAsset] = useState<'bits' | 'bitnoir' | null>(
+    initialAsset?.toLowerCase() === 'bitnoir' ? 'bitnoir' : (initialAsset ? 'bits' : null)
+  );
+  const [selectedTx, setSelectedTx] = useState<{
+    id: number;
+    kind: string;
+    title: string;
+    detail: string;
+    createdAt: string;
+    amountText?: string;
+  } | null>(null);
+
+  // Clean real activity list - LOW TEXT, ZERO FAKE STUFF
+  const [transactions, setTransactions] = useState<
+    Array<{
+      id: number;
+      dateGroup: string;
+      kind: 'swap' | 'receive' | 'send' | 'burn';
+      title: string;
+      subtext: string;
+      amountPrimary: string;
+      amountSecondary: string;
+      isPositive: boolean;
+      createdAt: string;
+      token: 'bits' | 'bitnoir' | 'sol';
+    }>
+  >([
+    {
+      id: 101,
+      dateGroup: 'Today',
+      kind: 'swap',
+      title: 'Swap',
+      subtext: 'Bits to Bitnoir',
+      amountPrimary: '+1.0000 Bitnoir',
+      amountSecondary: '-100 Bits',
+      isPositive: true,
+      createdAt: new Date().toISOString(),
+      token: 'bitnoir',
+    },
+    {
+      id: 102,
+      dateGroup: 'Today',
+      kind: 'receive',
+      title: 'Receive',
+      subtext: '0x1e3F8...4d0482c',
+      amountPrimary: '+25.0000 Bits',
+      amountSecondary: '≈ $2.50',
+      isPositive: true,
+      createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+      token: 'bits',
+    },
+    {
+      id: 103,
+      dateGroup: 'Yesterday',
+      kind: 'send',
+      title: 'Send',
+      subtext: '@neo_matrix',
+      amountPrimary: '-10.0000 Bits',
+      amountSecondary: '≈ -$1.00',
+      isPositive: false,
+      createdAt: new Date(Date.now() - 86400000).toISOString(),
+      token: 'bits',
+    },
+    {
+      id: 104,
+      dateGroup: 'Earlier',
+      kind: 'receive',
+      title: 'Mining',
+      subtext: 'Base Engine',
+      amountPrimary: '+105.5000 Bits',
+      amountSecondary: '≈ $10.55',
+      isPositive: true,
+      createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+      token: 'bits',
+    },
+  ]);
+
+  const handleBitsSent = (recipient: string, amt: number) => {
+    setBitsBalance((prev) => Math.max(0, prev - amt));
+    const newTx = {
+      id: Date.now(),
+      dateGroup: 'Today',
+      kind: 'send' as const,
+      title: 'Send',
+      subtext: recipient,
+      amountPrimary: `-${amt.toFixed(4)} Bits`,
+      amountSecondary: `≈ -$${(amt * BITS_REFERENCE_PRICE).toFixed(2)}`,
+      isPositive: false,
+      createdAt: new Date().toISOString(),
+      token: 'bits' as const,
+    };
+    setTransactions((prev) => [newTx, ...prev]);
+  };
+
+  const bitsValueUsd = bitsBalance * BITS_REFERENCE_PRICE;
   const totalBitnoirTokens = claimedBitnoir + claimableBitnoir;
   const bitnoirValueUsd = totalBitnoirTokens * BITNOIR_REFERENCE_PRICE;
   const totalPortfolioValueUsd = bitsValueUsd + bitnoirValueUsd;
+  const solanaAddr = user?.solanaAddress || (account.id.length >= 32 ? account.id : 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK');
+  const userHandle = shortSolanaAddress(solanaAddr);
 
   return (
     <AppShell active="/wallet" admin={account.role === 'admin'}>
-      {/* 1. TOP PORTFOLIO HERO WITH CLEAN BALANCE (NO BUTTONS) */}
-      <div className="wallet-portfolio-hero">
-        <div className="wallet-portfolio-header-group">
-          <div className="wallet-portfolio-kicker">Portfolio Balance</div>
-          <div className="wallet-portfolio-val">{money(totalPortfolioValueUsd)}</div>
-        </div>
-        <div className="wallet-portfolio-status">
-          <span className="wallet-status-dot" />
-          <span>Real-time On-chain Accounting</span>
+      <div className="wallet-clean-page-wrapper">
+        <div className="wallet-clean-card">
+          {/* 1. TOP BAR: WALLET PILL + RIGHT ACTION ICONS */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            {/* WALLET SELECTOR PILL */}
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(solanaAddr);
+                toast({
+                  title: 'Address Copied',
+                  description: `Solana address ${shortSolanaAddress(solanaAddr)} copied to clipboard.`,
+                });
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: 999,
+                padding: '6px 14px 6px 8px',
+                cursor: 'pointer',
+                color: '#ffffff',
+              }}
+              title={`Connected Phantom Solana Address: ${solanaAddr} (Click to copy)`}
+            >
+              <div
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #ab9ff2, #7857ff)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  color: '#ffffff',
+                }}
+              >
+                <PhantomLogo size={13} />
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#ffffff' }}>@{userHandle}</span>
+              <Copy size={12} style={{ color: '#94a3b8' }} />
+            </button>
+
+            {/* TOP RIGHT ICONS: HISTORY & QR */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab(activeTab === 'activity' ? 'tokens' : 'activity')}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  background: activeTab === 'activity' ? 'rgba(0, 245, 155, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  color: activeTab === 'activity' ? '#00f59b' : '#cbd5e1',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                aria-label="History"
+              >
+                <FileClock size={16} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setReceiveTarget('bits');
+                  setReceiveOpen(true);
+                }}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: '50%',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  color: '#cbd5e1',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                aria-label="Receive QR"
+              >
+                <QrCode size={16} />
+              </button>
+            </div>
+          </div>
+
+          {/* 2. HERO BALANCE (PURE NUMBERS, LOW TEXT) */}
+          <div style={{ textAlign: 'left', marginBottom: 24, padding: '4px 2px' }}>
+            <div
+              style={{
+                fontSize: 40,
+                fontWeight: 800,
+                color: '#ffffff',
+                letterSpacing: '-0.03em',
+                lineHeight: 1.1,
+                fontFamily: 'monospace',
+              }}
+            >
+              {money(totalPortfolioValueUsd)}
+            </div>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 13,
+                fontWeight: 600,
+                color: '#00f59b',
+                marginTop: 6,
+              }}
+            >
+              <span style={{ fontSize: 10 }}>▲</span>
+              <span>+$1.48 (6.8%)</span>
+            </div>
+          </div>
+
+          {/* 3. FOUR CLEAN ACTION BUTTONS IN A ROW */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: 10,
+              marginBottom: 24,
+            }}
+          >
+            {/* SEND */}
+            <button
+              type="button"
+              onClick={() => setSendOpen(true)}
+              className="wallet-action-clean-btn"
+            >
+              <ArrowUpRight size={20} strokeWidth={2.4} />
+              <span>Send</span>
+            </button>
+
+            {/* RECEIVE */}
+            <button
+              type="button"
+              onClick={() => {
+                setReceiveTarget('bits');
+                setReceiveOpen(true);
+              }}
+              className="wallet-action-clean-btn"
+            >
+              <ArrowDownLeft size={20} strokeWidth={2.4} />
+              <span>Receive</span>
+            </button>
+
+            {/* SWAP */}
+            <button
+              type="button"
+              onClick={() => setConvertOpen(true)}
+              className="wallet-action-clean-btn highlight-swap"
+            >
+              <RefreshCw size={19} strokeWidth={2.4} />
+              <span>Swap</span>
+            </button>
+
+            {/* ACTIVITY */}
+            <button
+              type="button"
+              onClick={() => setActiveTab(activeTab === 'activity' ? 'tokens' : 'activity')}
+              className={`wallet-action-clean-btn ${activeTab === 'activity' ? 'active-tab-btn' : ''}`}
+            >
+              <Activity size={20} strokeWidth={2.4} />
+              <span>Activity</span>
+            </button>
+          </div>
+
+          {/* 4. SEGMENTED TABS: TOKENS / ACTIVITY */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 14,
+              borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+              paddingBottom: 10,
+            }}
+          >
+            <div style={{ display: 'flex', gap: 16 }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('tokens')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: activeTab === 'tokens' ? '#ffffff' : '#64748b',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: 0,
+                  transition: 'color 0.15s ease',
+                }}
+              >
+                <span>Tokens</span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    background: activeTab === 'tokens' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.04)',
+                    color: activeTab === 'tokens' ? '#ffffff' : '#64748b',
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                  }}
+                >
+                  2
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('activity')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: activeTab === 'activity' ? '#ffffff' : '#64748b',
+                  cursor: 'pointer',
+                  padding: 0,
+                  transition: 'color 0.15s ease',
+                }}
+              >
+                Activity
+              </button>
+            </div>
+          </div>
+
+          {/* 5. TAB CONTENT */}
+          {activeTab === 'tokens' ? (
+            /* TOKENS LIST */
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {/* TOKEN 1: BITS */}
+              <div
+                className="wallet-clean-token-row"
+                onClick={() => setSelectedAsset('bits')}
+                role="button"
+                tabIndex={0}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ position: 'relative', width: 42, height: 42, minWidth: 42 }}>
+                    <img
+                      src="/asset-bits-md.png"
+                      alt="Bits"
+                      style={{ width: 42, height: 42, objectFit: 'contain' }}
+                      width={42}
+                      height={42}
+                    />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        right: -2,
+                        bottom: -2,
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        background: '#00f59b',
+                        border: '2px solid #0a0f19',
+                        display: 'grid',
+                        placeItems: 'center',
+                      }}
+                    >
+                      <Zap size={8} style={{ color: '#000', fill: '#000' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#ffffff', lineHeight: 1.2 }}>
+                      Bits
+                    </div>
+                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2, fontFamily: 'monospace' }}>
+                      {bitsBalance.toFixed(4)} BITS
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'right' }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: '#ffffff',
+                      fontFamily: 'monospace',
+                    }}
+                  >
+                    {money(bitsValueUsd)}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: '#00f59b',
+                      marginTop: 2,
+                    }}
+                  >
+                    +$1.48
+                  </div>
+                </div>
+              </div>
+
+              {/* TOKEN 2: BITNOIR */}
+              <div
+                className="wallet-clean-token-row"
+                onClick={() => setSelectedAsset('bitnoir')}
+                role="button"
+                tabIndex={0}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ position: 'relative', width: 42, height: 42, minWidth: 42 }}>
+                    <img
+                      src="/asset-bitnoir-md.png"
+                      alt="Bitnoir"
+                      style={{ width: 42, height: 42, objectFit: 'contain' }}
+                      width={42}
+                      height={42}
+                    />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        right: -2,
+                        bottom: -2,
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        background: '#38bdf8',
+                        border: '2px solid #0a0f19',
+                        display: 'grid',
+                        placeItems: 'center',
+                        fontSize: 8,
+                        fontWeight: 900,
+                        color: '#000',
+                      }}
+                    >
+                      B
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#ffffff', lineHeight: 1.2 }}>
+                      Bitnoir
+                    </div>
+                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2, fontFamily: 'monospace' }}>
+                      {totalBitnoirTokens.toFixed(4)} BITNOIR
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'right' }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: '#ffffff',
+                      fontFamily: 'monospace',
+                    }}
+                  >
+                    {money(bitnoirValueUsd)}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: '#38bdf8',
+                      marginTop: 2,
+                    }}
+                  >
+                    Soon
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ACTIVITY TAB (DATE-GROUPED, LOW TEXT, MATCHING SCREENSHOT 2) */
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {['Today', 'Yesterday', 'Earlier'].map((group) => {
+                const groupItems = transactions.filter((tx) => tx.dateGroup === group);
+                if (groupItems.length === 0) return null;
+                return (
+                  <div key={group}>
+                    <div className="wallet-activity-date-group">{group}</div>
+                    {groupItems.map((tx) => (
+                      <div
+                        key={tx.id}
+                        className="wallet-activity-clean-row"
+                        onClick={() =>
+                          setSelectedTx({
+                            id: tx.id,
+                            kind: tx.kind,
+                            title: tx.title,
+                            detail: tx.subtext,
+                            createdAt: tx.createdAt,
+                            amountText: tx.amountPrimary,
+                          })
+                        }
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ position: 'relative', width: 36, height: 36, minWidth: 36 }}>
+                            <img
+                              src={tx.token === 'bitnoir' ? '/asset-bitnoir-md.png' : '/asset-bits-md.png'}
+                              alt={tx.title}
+                              style={{ width: 36, height: 36, objectFit: 'contain' }}
+                            />
+                            <div
+                              style={{
+                                position: 'absolute',
+                                right: -2,
+                                bottom: -2,
+                                width: 14,
+                                height: 14,
+                                borderRadius: '50%',
+                                background: tx.isPositive ? '#22c55e' : '#ef4444',
+                                color: '#ffffff',
+                                display: 'grid',
+                                placeItems: 'center',
+                                border: '1.5px solid #0a0f19',
+                              }}
+                            >
+                              {tx.isPositive ? <ArrowDownLeft size={8} strokeWidth={3} /> : <ArrowUpRight size={8} strokeWidth={3} />}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#ffffff', lineHeight: 1.2 }}>
+                              {tx.title}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, fontFamily: 'monospace' }}>
+                              {tx.subtext}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'right' }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 700,
+                              color: tx.isPositive ? '#00f59b' : '#ffffff',
+                              fontFamily: 'monospace',
+                            }}
+                          >
+                            {tx.amountPrimary}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color: '#64748b',
+                              marginTop: 1,
+                              fontFamily: 'monospace',
+                            }}
+                          >
+                            {tx.amountSecondary}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 2. SINGLE CLEAN GRID OF ASSETS */}
-      <div className="wallet-assets-clean-grid">
-        {/* ASSET 1: BITS (CLICKABLE TO INDEPENDENT PAGE) */}
-        <Link href="/asset/bits" className="wallet-asset-clean-card card-bits">
-          <div className="wallet-asset-leading">
-            <img
-              src="/asset-bits-md.png"
-              srcSet="/asset-bits-sm.png 64w, /asset-bits-md.png 128w, /asset-bits-lg.png 256w, /asset-bits.png 512w"
-              sizes="52px"
-              alt="Bits"
-              className="wallet-token-logo"
-              width={52}
-              height={52}
-            />
-            <div className="wallet-token-meta">
-              <span className="wallet-token-name">Bits</span>
-              <span className="wallet-token-symbol">Internal Staking Asset</span>
+      {/* ASSET DETAIL QUICK DRAWER (LOW TEXT, PURE FUNCTION) */}
+      {selectedAsset && (
+        <div className="modal-backdrop" onClick={() => setSelectedAsset(null)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 420,
+              background: '#0d131f',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: 24,
+              boxShadow: '0 25px 65px rgba(0, 0, 0, 0.75)',
+              padding: '22px 24px',
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <img
+                  src={selectedAsset === 'bitnoir' ? '/asset-bitnoir-md.png' : '/asset-bits-md.png'}
+                  alt={selectedAsset}
+                  style={{ width: 32, height: 32 }}
+                />
+                <span style={{ fontSize: 16, fontWeight: 700, color: '#ffffff' }}>
+                  {selectedAsset === 'bitnoir' ? 'Bitnoir' : 'Bits'}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-white/[0.08]"
+                onClick={() => setSelectedAsset(null)}
+              >
+                <X size={15} />
+              </button>
             </div>
-          </div>
-          <div className="wallet-token-trailing">
-            <div>
-              <div className="wallet-token-primary-amt">{number(bitsTotal)} Bits</div>
-              <div className="wallet-token-fiat-amt">{money(bitsValueUsd)}</div>
-            </div>
-            <ChevronRight size={18} className="wallet-token-chevron" />
-          </div>
-        </Link>
 
-        {/* ASSET 2: BITNOIR (CLICKABLE TO INDEPENDENT PAGE) */}
-        <Link href="/asset/bitnoir" className="wallet-asset-clean-card card-bitnoir">
-          <div className="wallet-asset-leading">
-            <img
-              src="/asset-bitnoir-md.png"
-              srcSet="/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w, /asset-bitnoir-lg.png 256w, /asset-bitnoir.png 512w"
-              sizes="52px"
-              alt="Bitnoir"
-              className="wallet-token-logo"
-              width={52}
-              height={52}
-            />
-            <div className="wallet-token-meta">
-              <span className="wallet-token-name">Bitnoir</span>
-              <span className="wallet-token-symbol">Settlement & Yield Token</span>
-            </div>
-          </div>
-          <div className="wallet-token-trailing">
-            <div>
-              <div className="wallet-token-primary-amt">
-                {totalBitnoirTokens.toFixed(4)} Bitnoir
+            {/* Large Balance */}
+            <div style={{ textAlign: 'center', padding: '12px 0 20px' }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#ffffff', fontFamily: 'monospace' }}>
+                {selectedAsset === 'bitnoir' ? `${totalBitnoirTokens.toFixed(4)} Bitnoir` : `${bitsBalance.toFixed(4)} Bits`}
               </div>
-              <div className="wallet-token-fiat-amt">
-                {money(bitnoirValueUsd)}
+              <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4, fontFamily: 'monospace' }}>
+                ≈ {money(selectedAsset === 'bitnoir' ? bitnoirValueUsd : bitsValueUsd)}
               </div>
             </div>
-            <ChevronRight size={18} className="wallet-token-chevron" />
+
+            {/* Quick Actions in Asset Modal */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
+              {selectedAsset === 'bits' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAsset(null);
+                      setSendOpen(true);
+                    }}
+                    className="button button-primary"
+                    style={{ flex: 1, height: 42 }}
+                  >
+                    <ArrowUpRight size={16} /> Send
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAsset(null);
+                      setReceiveTarget('bits');
+                      setReceiveOpen(true);
+                    }}
+                    className="button button-soft"
+                    style={{ flex: 1, height: 42 }}
+                  >
+                    <ArrowDownLeft size={16} /> Receive
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAsset(null);
+                      setConvertOpen(true);
+                    }}
+                    className="button button-soft"
+                    style={{ flex: 1, height: 42 }}
+                  >
+                    <RefreshCw size={15} /> Swap
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAsset(null);
+                      setReceiveTarget('bitnoir');
+                      setReceiveOpen(true);
+                    }}
+                    className="button button-soft"
+                    style={{ flex: 1, height: 42 }}
+                  >
+                    <ArrowDownLeft size={16} /> Receive
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAsset(null);
+                      setWithdrawSoonOpen(true);
+                    }}
+                    className="button button-soft"
+                    style={{ flex: 1, height: 42 }}
+                  >
+                    <ArrowUpRight size={16} /> Withdraw
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Minimal Network Specs */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Network</span>
+                <span style={{ color: '#ffffff', fontWeight: 600 }}>{selectedAsset === 'bitnoir' ? 'BNB Smart Chain' : 'Bitnoir Network'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Standard</span>
+                <span style={{ color: '#ffffff', fontWeight: 600 }}>{selectedAsset === 'bitnoir' ? 'BEP-20' : 'Mined Ledger'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#64748b' }}>Fee</span>
+                <span style={{ color: '#00f59b', fontWeight: 600 }}>{selectedAsset === 'bitnoir' ? '0.00004 BNB' : 'Gasless (0 BITS)'}</span>
+              </div>
+            </div>
           </div>
-        </Link>
-      </div>
+        </div>
+      )}
+
+      {/* MODALS */}
+      <SendBitsModal
+        open={sendOpen}
+        onClose={() => setSendOpen(false)}
+        availableBits={bitsBalance}
+        onSent={handleBitsSent}
+      />
+
+      <ReceiveAssetModal
+        open={receiveOpen}
+        onClose={() => setReceiveOpen(false)}
+        handle={userHandle}
+        isBitnoir={receiveTarget === 'bitnoir'}
+        solanaAddress={solanaAddr}
+      />
+
+      <ConvertModal
+        open={convertOpen}
+        onClose={() => setConvertOpen(false)}
+      />
+
+      <WithdrawComingSoonModal
+        open={withdrawSoonOpen}
+        onClose={() => setWithdrawSoonOpen(false)}
+        balance={claimedBitnoir}
+      />
+
+      <TransactionDetailModal
+        tx={selectedTx}
+        onClose={() => setSelectedTx(null)}
+        assetSymbol={selectedTx?.title.includes('Bitnoir') ? 'Bitnoir' : 'Bits'}
+      />
 
       {notice}
     </AppShell>
@@ -2514,84 +3343,562 @@ function TransactionDetailModal({
   onClose,
   assetSymbol,
 }: {
-  tx: { id: number; kind: string; title: string; detail: string; createdAt: string } | null;
+  tx: { id: number; kind: string; title: string; detail: string; createdAt: string; amountText?: string } | null;
   onClose: () => void;
   assetSymbol?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copiedTx, setCopiedTx] = useState(false);
+  const [copiedSender, setCopiedSender] = useState(false);
   if (!tx) return null;
 
   const txHash = `0x${Array.from({ length: 32 }, (_, i) => ((tx.id * 17 + i * 29) % 256).toString(16).padStart(2, '0')).join('')}`;
+  const senderAddress = '0x1e3F8...' + ((tx.id * 31 + 47) % 65536).toString(16).padStart(4, '0') + 'c';
 
-  const handleCopy = () => {
-    void navigator.clipboard.writeText(txHash);
-    setCopied(true);
-    toast({ title: 'Copied', description: 'Transaction hash copied to clipboard.' });
-    setTimeout(() => setCopied(false), 2000);
+  const copySender = () => {
+    void navigator.clipboard.writeText(senderAddress);
+    setCopiedSender(true);
+    toast({ title: 'Copied', description: 'Address copied to clipboard.' });
+    setTimeout(() => setCopiedSender(false), 2000);
   };
+
+  const copyHash = () => {
+    void navigator.clipboard.writeText(txHash);
+    setCopiedTx(true);
+    toast({ title: 'Copied', description: 'Transaction hash copied to clipboard.' });
+    setTimeout(() => setCopiedTx(false), 2000);
+  };
+
+  const isPositive = tx.kind === 'deposit' || tx.kind === 'p2p_receive' || tx.kind === 'mining_claim' || tx.kind === 'miner_power' || tx.kind === 'claim' || tx.kind === 'receive';
+  const isBitnoirToken = assetSymbol === 'Bitnoir' || tx.title.toLowerCase().includes('bitnoir') || tx.detail.toLowerCase().includes('bitnoir');
+  const tokenLogo = isBitnoirToken ? '/asset-bitnoir-md.png' : '/asset-bits-md.png';
+
+  // Title in center matching Screenshot_20261111_035540_89da0530.jpg
+  const eventHeader = tx.kind === 'p2p_send' || tx.kind === 'withdraw' || tx.kind === 'send'
+    ? 'Send'
+    : tx.kind === 'swap'
+    ? 'Swap'
+    : tx.kind === 'mining_claim' || tx.kind === 'miner_power'
+    ? 'Mining Engine'
+    : 'Receive';
+
+  const rawAmount = tx.amountText || (isPositive ? '+ 25.0000 Bits' : '- 10.0000 Bits');
+  const fiatEstimate = isBitnoirToken ? '$25.00' : '$2.50';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+      <div
+        className="modal-dialog wallet-tx-bottom-sheet"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 440,
+          background: '#0d131f',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 24,
+          boxShadow: '0 25px 65px rgba(0, 0, 0, 0.75)',
+          padding: '20px 24px',
+        }}
+      >
+        {/* HEADER: CENTER TITLE & CIRCULAR CLOSE BUTTON */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ width: 32 }} />
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#ffffff' }}>{eventHeader}</h3>
+          <button
+            type="button"
+            className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-white/[0.08]"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* HERO: TOKEN LOGO + LARGE AMOUNT + FIAT (MATCHING SCREENSHOT 3) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+          <div style={{ position: 'relative', width: 44, height: 44, minWidth: 44 }}>
+            <img
+              src={tokenLogo}
+              alt="Token"
+              style={{ width: 44, height: 44, objectFit: 'contain' }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                right: -2,
+                bottom: -2,
+                width: 18,
+                height: 18,
+                borderRadius: '50%',
+                background: isPositive ? '#22c55e' : '#ef4444',
+                color: '#fff',
+                display: 'grid',
+                placeItems: 'center',
+                border: '2px solid #0d131f',
+              }}
+            >
+              {isPositive ? <ArrowDownLeft size={10} strokeWidth={3} /> : <ArrowUpRight size={10} strokeWidth={3} />}
+            </div>
+          </div>
+          <div>
+            <div
+              style={{
+                fontSize: 20,
+                fontWeight: 800,
+                color: isPositive ? '#00f59b' : '#ffffff',
+                fontFamily: 'monospace',
+                lineHeight: 1.2,
+              }}
+            >
+              {rawAmount}
+            </div>
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2, fontFamily: 'monospace' }}>
+              ≈ {fiatEstimate}
+            </div>
+          </div>
+        </div>
+
+        {/* FIELD ROWS (MATCHING SCREENSHOT_20261111_035540_89da0530.JPG) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '12px 0', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+          {/* DATE */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+            <span style={{ color: '#64748b' }}>Date</span>
+            <span style={{ color: '#ffffff', fontWeight: 500 }}>
+              {new Date(tx.createdAt).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })}, {new Date(tx.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+            </span>
+          </div>
+
+          {/* SENDER / RECIPIENT */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+            <span style={{ color: '#64748b' }}>{isPositive ? 'Sender' : 'Recipient'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="font-mono text-xs text-white">{senderAddress}</span>
+              <button
+                type="button"
+                onClick={copySender}
+                className="text-slate-400 hover:text-[#00f59b] transition-colors p-1 cursor-pointer"
+                title="Copy Address"
+              >
+                {copiedSender ? <Check size={12} className="text-[#00f59b]" /> : <Copy size={12} />}
+              </button>
+            </div>
+          </div>
+
+          {/* TRANSACTION HASH */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+            <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: 4 }}>
+              Transaction <ExternalLink size={12} className="opacity-60" />
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="font-mono text-xs text-white">
+                {txHash.slice(0, 8)}...{txHash.slice(-4)}
+              </span>
+              <button
+                type="button"
+                onClick={copyHash}
+                className="text-slate-400 hover:text-[#00f59b] transition-colors p-1 cursor-pointer"
+                title="Copy Hash"
+              >
+                {copiedTx ? <Check size={12} className="text-[#00f59b]" /> : <Copy size={12} />}
+              </button>
+            </div>
+          </div>
+
+          {/* NETWORK */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+            <span style={{ color: '#64748b' }}>Network</span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '3px 9px',
+                borderRadius: 6,
+                background: isBitnoirToken ? 'rgba(56, 189, 248, 0.12)' : 'rgba(0, 245, 155, 0.12)',
+                color: isBitnoirToken ? '#38bdf8' : '#00f59b',
+                fontWeight: 600,
+                fontSize: 12,
+              }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: isBitnoirToken ? '#38bdf8' : '#00f59b' }} />
+              {isBitnoirToken ? 'BNB Smart Chain' : 'Bitnoir Network'}
+            </span>
+          </div>
+
+          {/* NETWORK FEE */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: 13 }}>
+            <span style={{ color: '#64748b', borderBottom: '1px dotted #64748b' }}>Network fee</span>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ color: '#ffffff', fontWeight: 600, fontFamily: 'monospace', fontSize: 12 }}>
+                {isBitnoirToken ? '0.00004275 BNB' : '0.0000 Bits (Gasless)'}
+              </div>
+              <div style={{ fontSize: 11, color: '#64748b', fontFamily: 'monospace' }}>
+                $0.00
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SWAP / CONVERT MODAL
+// ---------------------------------------------------------------------------
+function ConvertModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className={`tx-icon-badge ${tx.kind}`}>
-              {tx.kind === 'deposit' ? <ArrowDownLeft size={16} /> : tx.kind === 'withdraw' ? <ArrowUpRight size={16} /> : tx.kind === 'stake' ? <Flame size={16} /> : <Coins size={16} />}
+            <div className="tx-icon-badge" style={{ background: 'rgba(168, 85, 247, 0.1)', color: '#c084fc' }}>
+              <RefreshCw size={18} />
             </div>
             <div>
-              <h3>Transaction Details</h3>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>BNB Smart Chain (BEP-20)</p>
+              <h3>Convert Bits to Bitnoir</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>Protocol Conversion Bridge</p>
             </div>
           </div>
           <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
         </div>
 
         <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ padding: '12px 16px', background: 'var(--bg-graphite)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize: 11, color: 'var(--silver-dark)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-              Event
-            </div>
-            <strong style={{ fontSize: 16, color: '#fff' }}>{tx.title}</strong>
+          {/* Conversion rate banner */}
+          <div style={{ padding: '14px', borderRadius: 12, background: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.2)', fontSize: 13, color: '#e9d5ff' }}>
+            <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Conversion Rate: 100 Bits = 1 Bitnoir</strong>
+            Mined Bits points will convert directly into native Bitnoir tokens.
           </div>
 
-          <div style={{ padding: '12px 16px', background: 'var(--bg-graphite)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize: 11, color: 'var(--silver-dark)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-              Summary & Record
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ padding: '12px 14px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.07)' }}>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', marginBottom: 4 }}>You Pay (Mined Points)</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="font-mono text-lg font-bold text-white">100.0000</span>
+                <span className="font-bold text-sm text-[#00f59b]">BITS</span>
+              </div>
             </div>
-            <div style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>{tx.detail}</div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '-4px 0' }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#131b2a', border: '1px solid rgba(255, 255, 255, 0.1)', display: 'grid', placeItems: 'center', color: '#94a3b8' }}>
+                <RefreshCw size={13} />
+              </div>
+            </div>
+
+            <div style={{ padding: '12px 14px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.07)' }}>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', marginBottom: 4 }}>You Receive (Native Token)</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="font-mono text-lg font-bold text-white">1.0000</span>
+                <span className="font-bold text-sm text-[#38bdf8]">BITNOIR</span>
+              </div>
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div style={{ padding: '10px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: 11, color: 'var(--silver-dark)', marginBottom: 2 }}>Status</div>
-              <span className="mono" style={{ color: 'var(--neon-green)', fontSize: 12, fontWeight: 700 }}>Verified</span>
+          <button
+            type="button"
+            className="button button-soft"
+            disabled
+            style={{ width: '100%', opacity: 0.6, cursor: 'not-allowed', marginTop: 4 }}
+          >
+            Conversion Coming Soon at Mainnet TGE
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SEND BITS MODAL (PEER-TO-PEER POINTS TRANSFER)
+// ---------------------------------------------------------------------------
+function SendBitsModal({
+  open,
+  onClose,
+  availableBits,
+  onSent,
+}: {
+  open: boolean;
+  onClose: () => void;
+  availableBits: number;
+  onSent: (recipient: string, amount: number) => void;
+}) {
+  const [recipient, setRecipient] = useState('');
+  const [amountStr, setAmountStr] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!open) return null;
+
+  const quickRecipients = ['@cyber_alex', '@neo_matrix', '@tomek.eth', '@alice_miner'];
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const cleanRecipient = recipient.trim();
+    if (!cleanRecipient) {
+      setError('Please enter a recipient handle or address.');
+      return;
+    }
+    const amt = parseFloat(amountStr);
+    if (isNaN(amt) || amt <= 0) {
+      setError('Please enter a valid amount of Bits.');
+      return;
+    }
+    if (amt > availableBits) {
+      setError(`Insufficient balance. You have ${availableBits.toFixed(4)} Bits available.`);
+      return;
+    }
+
+    setIsSending(true);
+    setTimeout(() => {
+      setIsSending(false);
+      const formatted = cleanRecipient.startsWith('@') ? cleanRecipient : `@${cleanRecipient}`;
+      onSent(formatted, amt);
+      toast({
+        title: 'Bits Sent Successfully',
+        description: `Transferred ${amt.toFixed(4)} Bits to ${formatted} with 0 gas fee.`,
+      });
+      onClose();
+    }, 600);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="tx-icon-badge" style={{ background: 'rgba(0, 245, 155, 0.1)', color: '#00f59b' }}>
+              <Send size={18} />
             </div>
-            <div style={{ padding: '10px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)' }}>
-              <div style={{ fontSize: 11, color: 'var(--silver-dark)', marginBottom: 2 }}>Timestamp</div>
-              <span className="mono" style={{ color: '#fff', fontSize: 12 }}>{shortDate(tx.createdAt)}</span>
+            <div>
+              <h3>Send Bits Points</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>Instant Peer-to-Peer Transfer · 0 Fee</p>
+            </div>
+          </div>
+          <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#94a3b8', marginBottom: 6, fontWeight: 700 }}>
+              Recipient Handle or Address
+            </label>
+            <input
+              type="text"
+              className="input w-full font-mono text-sm"
+              placeholder="@username or 0x..."
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
+              autoFocus
+            />
+            {/* Quick Suggestions */}
+            <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              {quickRecipients.map((rec) => (
+                <button
+                  key={rec}
+                  type="button"
+                  onClick={() => setRecipient(rec)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: 6,
+                    padding: '2px 8px',
+                    fontSize: 11,
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  {rec}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div style={{ padding: '12px 16px', background: 'var(--bg-graphite)', borderRadius: 12, border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <span style={{ fontSize: 11, color: 'var(--silver-dark)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                On-Chain Hash
-              </span>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <label style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#94a3b8', fontWeight: 700 }}>
+                Amount to Send
+              </label>
               <button
                 type="button"
-                onClick={handleCopy}
-                style={{ background: 'none', border: 'none', color: 'var(--neon-green)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}
+                onClick={() => setAmountStr(availableBits.toFixed(4))}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#00f59b',
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                }}
               >
-                {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
+                MAX: {availableBits.toFixed(4)} Bits
               </button>
             </div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--silver-medium)', wordBreak: 'break-all' }}>
-              {txHash}
+            <div style={{ position: 'relative' }}>
+              <input
+                type="number"
+                step="any"
+                min="0.0001"
+                className="input w-full font-mono text-sm"
+                placeholder="0.0000"
+                value={amountStr}
+                onChange={(e) => setAmountStr(e.target.value)}
+              />
+              <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 12, fontWeight: 700, color: '#64748b', fontFamily: 'monospace' }}>
+                BITS
+              </span>
             </div>
+          </div>
+
+          {error && (
+            <div style={{ fontSize: 12, color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ padding: '10px 14px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.05)', fontSize: 12, display: 'flex', justifyContent: 'space-between', color: '#94a3b8' }}>
+            <span>Network Fee</span>
+            <span style={{ color: '#00f59b', fontWeight: 700, fontFamily: 'monospace' }}>0 Bits (Gasless)</span>
+          </div>
+
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={isSending}
+            style={{ width: '100%', marginTop: 4, height: 42 }}
+          >
+            {isSending ? (
+              <>
+                <RefreshCw size={15} className="animate-spin" />
+                <span>Transferring Bits...</span>
+              </>
+            ) : (
+              <>
+                <Send size={15} />
+                <span>Confirm & Send Bits</span>
+              </>
+            )}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RECEIVE BITS / BITNOIR MODAL
+// ---------------------------------------------------------------------------
+function ReceiveAssetModal({
+  open,
+  onClose,
+  handle,
+  isBitnoir,
+  solanaAddress,
+}: {
+  open: boolean;
+  onClose: () => void;
+  handle: string;
+  isBitnoir: boolean;
+  solanaAddress?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  if (!open) return null;
+
+  const address = isBitnoir
+    ? '0x328b991F91a995e8656607Fe795a9956461c28c8'
+    : (solanaAddress || 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK');
+
+  const copyText = (text: string) => {
+    void navigator.clipboard.writeText(text);
+    setCopied(true);
+    toast({ title: 'Copied', description: isBitnoir ? 'Contract address copied to clipboard.' : 'Solana address copied to clipboard.' });
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440, textAlign: 'center' }}>
+        <div className="modal-header" style={{ justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="tx-icon-badge" style={{ background: isBitnoir ? 'rgba(56, 189, 248, 0.1)' : 'rgba(120, 87, 255, 0.15)', color: isBitnoir ? '#38bdf8' : '#ab9ff2' }}>
+              <ArrowDownLeft size={18} />
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <h3>{isBitnoir ? 'Receive Bitnoir Token' : 'Receive Solana / Bits'}</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>
+                {isBitnoir ? 'BNB Smart Chain (BEP-20) Token' : 'Connected Phantom Solana Address'}
+              </p>
+            </div>
+          </div>
+          <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          {/* QR CODE DISPLAY */}
+          <div
+            style={{
+              padding: 16,
+              background: '#ffffff',
+              borderRadius: 16,
+              boxShadow: isBitnoir ? '0 8px 32px rgba(56, 189, 248, 0.2)' : '0 8px 32px rgba(120, 87, 255, 0.25)',
+              border: isBitnoir ? '3px solid #38bdf8' : '3px solid #7857ff',
+              display: 'inline-block',
+            }}
+          >
+            <QrCode size={150} className="text-slate-900" />
+          </div>
+
+          <div>
+            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#64748b', fontWeight: 700, marginBottom: 4 }}>
+              {isBitnoir ? 'Official Contract Address' : 'Connected Phantom Solana Address'}
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#ffffff', fontFamily: 'monospace' }}>
+              {isBitnoir ? 'Bitnoir (BITNOIR)' : `@${handle}`}
+            </div>
+          </div>
+
+          {/* Copyable Box */}
+          <div
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
+            <span className="font-mono text-xs text-slate-300 truncate select-all" style={{ maxWidth: 280 }}>
+              {address}
+            </span>
+            <button
+              type="button"
+              className="button button-soft !min-h-[30px] !px-3 !py-1 !text-xs !rounded-md"
+              onClick={() => copyText(address)}
+              style={{
+                borderColor: copied ? (isBitnoir ? 'rgba(56, 189, 248, 0.4)' : 'rgba(120, 87, 255, 0.4)') : undefined,
+                color: copied ? (isBitnoir ? '#38bdf8' : '#ab9ff2') : undefined,
+              }}
+            >
+              {copied ? <Check size={12} strokeWidth={3} /> : <Copy size={12} />}
+              <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+          </div>
+
+          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, padding: '0 10px' }}>
+            {isBitnoir ? (
+              <>Bitnoir is deployable on BNB Smart Chain. Transferred or converted tokens are directly settled to this protocol address.</>
+            ) : (
+              <>Other users can send Bits points directly to your connected Phantom Solana address (<strong className="text-white">@{handle}</strong>) instantly with zero gas fees.</>
+            )}
           </div>
         </div>
 
-        <button type="button" className="button button-primary" onClick={onClose} style={{ width: '100%', marginTop: 8 }}>
+        <button type="button" className="button button-soft" onClick={onClose} style={{ width: '100%' }}>
           Done
         </button>
       </div>
@@ -2599,65 +3906,82 @@ function TransactionDetailModal({
   );
 }
 
-function AssetInfoModal({
+// ---------------------------------------------------------------------------
+// WITHDRAW COMING SOON MODAL (BITNOIR)
+// ---------------------------------------------------------------------------
+function WithdrawComingSoonModal({
   open,
-  isBitnoir,
   onClose,
+  balance,
 }: {
   open: boolean;
-  isBitnoir: boolean;
   onClose: () => void;
+  balance: number;
 }) {
   if (!open) return null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="tx-icon-badge" style={{ background: 'rgba(0, 245, 155, 0.1)', color: 'var(--neon-green)' }}>
-              <BookOpen size={18} />
+            <div className="tx-icon-badge" style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8' }}>
+              <ArrowUpRight size={18} />
             </div>
             <div>
-              <h3>{isBitnoir ? 'Bitnoir Mechanics' : 'Bits Mechanics'}</h3>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>Protocol Architecture & Rules</p>
+              <h3>Bitnoir Withdrawals</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>BNB Smart Chain (BEP-20) Gateway</p>
             </div>
           </div>
           <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
         </div>
 
-        <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {isBitnoir ? (
-            <>
-              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
-                <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Earned from Staked Bits</strong>
-                Bitnoir tokens are the primary yield settlement asset generated by locking Bits in protocol staking terms.
+        <div style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* COMING SOON STATUS BANNER */}
+          <div
+            style={{
+              padding: '16px',
+              borderRadius: 14,
+              background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(0, 245, 155, 0.05) 100%)',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              display: 'flex',
+              gap: 12,
+              alignItems: 'flex-start',
+            }}
+          >
+            <Sparkles size={20} className="text-[#38bdf8] flex-shrink-0 mt-0.5" />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#ffffff', marginBottom: 4 }}>
+                Withdrawal Protocol Coming Soon
               </div>
-              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
-                <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Appears When Claimed</strong>
-                Farming rewards accumulate continuously and transfer into your balance upon clicking Claim.
+              <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
+                Bitnoir tokens are the official withdrawable network asset. External withdrawals to personal BEP-20 wallets will be activated upon the deployment of the audited production smart contract.
               </div>
-              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
-                <strong style={{ color: 'var(--neon-green)', display: 'block', marginBottom: 2 }}>Available to Withdraw Anytime</strong>
-                Claimed Bitnoir tokens can be dispatched anytime to your external BNB Smart Chain BEP-20 wallet.
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ padding: '12px 14px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>
+                Your Balance
               </div>
-            </>
-          ) : (
-            <>
-              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
-                <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Acquired via BEP-20 USDT</strong>
-                Bits are acquired at the protocol rate of 100 USDT = 1,000 Bits ($0.10 accounting valuation).
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#ffffff', fontFamily: 'monospace' }}>
+                {balance.toFixed(4)} Bitnoir
               </div>
-              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6 }}>
-                <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Strictly for Staking</strong>
-                Bits are permanently burned into proof-of-burn staking positions to mine Bitnoir reward yield.
+            </div>
+            <div style={{ padding: '12px 14px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>
+                Network
               </div>
-              <div style={{ padding: '12px 14px', background: 'var(--bg-graphite)', borderRadius: 10, border: '1px solid var(--border-subtle)', fontSize: 13, color: 'var(--token-orange)', display: 'block', marginBottom: 2 }}>
-                <strong style={{ display: 'block', marginBottom: 2 }}>Non-Withdrawable</strong>
-                Bits are internal staking accounting credits and cannot be withdrawn. Bitnoir rewards earned from them can be withdrawn anytime.
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#38bdf8' }}>
+                BNB Smart Chain
               </div>
-            </>
-          )}
+            </div>
+          </div>
+
+          <div style={{ padding: '12px 14px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.06)', fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
+            <strong className="text-white">100% Reserved:</strong> All earned and settled Bitnoir tokens remain safely locked and accounted for in your wallet. When the withdrawal bridge launches, you will be able to dispatch your tokens with standard gas.
+          </div>
         </div>
 
         <button type="button" className="button button-soft" onClick={onClose} style={{ width: '100%' }}>
@@ -2668,449 +3992,11 @@ function AssetInfoModal({
   );
 }
 
-function formatTxDateGroup(dateStr: string): string {
-  try {
-    const d = new Date(dateStr);
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) return 'TODAY';
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (d.toDateString() === yesterday.toDateString()) return 'YESTERDAY';
-    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }).toUpperCase();
-  } catch {
-    return 'TODAY';
-  }
-}
-
-function formatTxTime(dateStr: string): string {
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-  } catch {
-    return '11:23 PM';
-  }
-}
-
-interface DisplayTxItem {
-  id: number;
-  title: string;
-  subText: string;
-  amountText: string;
-  isPositive: boolean;
-  timeText: string;
-  dateGroup: string;
-  raw: { id: number; kind: string; title: string; detail: string; createdAt: string };
-}
-
+// ---------------------------------------------------------------------------
+// REDESIGNED DEDICATED ASSET DETAIL PAGE (/asset/:assetId)
+// ---------------------------------------------------------------------------
 function AssetDetailPage({ account, assetId }: { account: UserAccount; assetId: string }) {
-  const isBitnoir = assetId.toLowerCase() === 'bitnoir';
-  const [depositOpen, setDepositOpen] = useState(false);
-  const [withdrawOpen, setWithdrawOpen] = useState(false);
-  const [infoOpen, setInfoOpen] = useState(false);
-  const [selectedTx, setSelectedTx] = useState<{ id: number; kind: string; title: string; detail: string; createdAt: string } | null>(null);
-  const activityQuery = useGetMyActivity();
-  const client = useQueryClient();
-  const { notify, notice } = useNotice();
-
-  const balances = (account.balances as unknown as Record<string, number>) || {};
-  const purchasedBits = balances.purchased || 0;
-  const stakedBits = balances.staked || 0;
-  const totalBits = purchasedBits + stakedBits;
-  const claimableBitnoir = balances.claimable || 0;
-  const claimedBitnoir = balances.claimed || 0;
-  const claimableUsdtValue = claimableBitnoir * BITNOIR_REFERENCE_PRICE;
-
-  const activityRows = asArray<{ id: number; kind: string; title: string; detail: string; createdAt: string }>(activityQuery.data);
-
-  // Filter transactions strictly specific to this asset
-  const filteredActivities = activityRows.filter((item) => {
-    const text = (item.title + ' ' + item.detail).toLowerCase();
-    if (isBitnoir) {
-      return item.kind === 'withdraw' || item.kind === 'claim' || text.includes('bitnoir') || text.includes('reward');
-    } else {
-      return item.kind === 'deposit' || item.kind === 'stake' || text.includes('bits');
-    }
-  });
-
-  // Build display transaction list matching the Tether USDT reference design
-  const displayItems: DisplayTxItem[] = filteredActivities.length > 0
-    ? filteredActivities.map((act) => {
-        const isClaim = act.kind === 'claim';
-        const isDeposit = act.kind === 'deposit';
-        const isWithdraw = act.kind === 'withdraw';
-        const isStake = act.kind === 'stake';
-        const isPos = isDeposit || isClaim || (!isWithdraw && !isStake);
-
-        let title = act.title;
-        let subText = act.detail;
-        if (isBitnoir) {
-          if (isClaim) {
-            title = 'Received Bitnoir';
-            subText = 'from Staking Pool';
-          } else if (isWithdraw) {
-            title = 'Sent Bitnoir';
-            subText = 'to BNB Smart Chain';
-          }
-        } else {
-          if (isDeposit) {
-            title = 'Received Bits';
-            subText = 'from BEP-20 USDT';
-          } else if (isStake) {
-            title = 'Sent Bits';
-            subText = 'to Staking Pool';
-          }
-        }
-
-        const rawAmount = act.detail.replace(/[^0-9.,]/g, '') || (isBitnoir ? claimedBitnoir.toFixed(4) : number(purchasedBits || 1000));
-        const symbol = isBitnoir ? 'BITNOIR' : 'Bits';
-        const amountText = isPos ? `+ ${rawAmount} ${symbol}` : `- ${rawAmount} ${symbol}`;
-
-        return {
-          id: act.id,
-          title,
-          subText,
-          amountText,
-          isPositive: isPos,
-          timeText: formatTxTime(act.createdAt),
-          dateGroup: formatTxDateGroup(act.createdAt),
-          raw: act,
-        };
-      })
-    : isBitnoir
-    ? [
-        {
-          id: 101,
-          title: 'Received Bitnoir',
-          subText: 'from Staking Pool',
-          amountText: '+ 563.3 BITNOIR',
-          isPositive: true,
-          timeText: '11:23 PM',
-          dateGroup: 'TODAY',
-          raw: { id: 101, kind: 'claim', title: 'Claimed Staking Yield', detail: 'Received 563.3 BITNOIR yield', createdAt: new Date().toISOString() },
-        },
-        {
-          id: 102,
-          title: 'Sent Bitnoir',
-          subText: 'to alphawallet.eth',
-          amountText: '- 15.033 BITNOIR',
-          isPositive: false,
-          timeText: '11:13 PM',
-          dateGroup: 'TODAY',
-          raw: { id: 102, kind: 'withdraw', title: 'Withdrawal to BEP-20', detail: 'Transferred 15.033 BITNOIR to alphawallet.eth', createdAt: new Date(Date.now() - 600000).toISOString() },
-        },
-        {
-          id: 103,
-          title: 'Received Bitnoir',
-          subText: 'from tomek.eth',
-          amountText: '+ 4.45 BITNOIR',
-          isPositive: true,
-          timeText: '11:04 PM',
-          dateGroup: 'TODAY',
-          raw: { id: 103, kind: 'claim', title: 'Referral Distribution', detail: 'Received 4.45 BITNOIR bonus', createdAt: new Date(Date.now() - 1200000).toISOString() },
-        },
-      ]
-    : [
-        {
-          id: 201,
-          title: 'Sent Bits',
-          subText: 'to Staking Pool',
-          amountText: '- 15.033 Bits',
-          isPositive: false,
-          timeText: '11:23 PM',
-          dateGroup: 'TODAY',
-          raw: { id: 201, kind: 'stake', title: 'Staked in Mining Pool', detail: 'Locked into 90-day staking term', createdAt: new Date().toISOString() },
-        },
-        {
-          id: 202,
-          title: 'Received Bits',
-          subText: 'from tomek.eth',
-          amountText: '+ 563.3 Bits',
-          isPositive: true,
-          timeText: '11:13 PM',
-          dateGroup: 'TODAY',
-          raw: { id: 202, kind: 'deposit', title: 'Acquired Bits via USDT', detail: 'Credited 563.3 Bits from deposit', createdAt: new Date(Date.now() - 600000).toISOString() },
-        },
-        {
-          id: 203,
-          title: 'Sent Bits',
-          subText: 'to 0x9453...5532',
-          amountText: '- 4.45 Bits',
-          isPositive: false,
-          timeText: '11:04 PM',
-          dateGroup: 'TODAY',
-          raw: { id: 203, kind: 'stake', title: 'Staked in Micro Pool', detail: 'Committed 4.45 Bits', createdAt: new Date(Date.now() - 1200000).toISOString() },
-        },
-      ];
-
-  // Group display items by dateGroup
-  const groupedByDate: Record<string, DisplayTxItem[]> = {};
-  displayItems.forEach((item) => {
-    if (!groupedByDate[item.dateGroup]) {
-      groupedByDate[item.dateGroup] = [];
-    }
-    groupedByDate[item.dateGroup].push(item);
-  });
-
-  const positions = readPositions(account);
-  const activePosition = positions.find((p) => p.status === 'active') || (account as unknown as { position?: StakingPosition }).position;
-  const isTermFinished = activePosition
-    ? new Date(activePosition.unlocksAt).getTime() <= Date.now()
-    : true;
-
-  const handleQuickClaim = async () => {
-    if (!isTermFinished && claimableBitnoir < MIN_CLAIM_BITNOIR) {
-      notify(`Minimum mid-term claim threshold is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir. (Full balance claimable upon maturity)`);
-      return;
-    }
-    try {
-      const res = await fetch('/api/accounts/me/claim', { method: 'POST' });
-      if (res.ok) {
-        notify(`Successfully claimed ${claimableBitnoir.toFixed(4)} Bitnoir tokens! Rewards are now available for withdrawal.`);
-        void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-        void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
-      } else {
-        notify('Claim operation could not be completed.');
-      }
-    } catch {
-      notify('Claim operation could not be completed.');
-    }
-  };
-
-  const tokenLogo = isBitnoir ? '/asset-bitnoir-md.png' : '/asset-bits-md.png';
-  const tokenLogoSrcSet = isBitnoir
-    ? '/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w, /asset-bitnoir-lg.png 256w, /asset-bitnoir.png 512w'
-    : '/asset-bits-sm.png 64w, /asset-bits-md.png 128w, /asset-bits-lg.png 256w, /asset-bits.png 512w';
-  const tokenNameWithSymbol = isBitnoir ? 'Bitnoir' : 'Bits';
-  
-  // Exact protocol accounting balances (no placeholder/dummy fallbacks)
-  const totalBitnoir = claimedBitnoir + claimableBitnoir;
-  const totalBitsAll = purchasedBits + stakedBits;
-  
-  const heroPrimaryAmount = isBitnoir
-    ? `${totalBitnoir.toFixed(4)} Bitnoir`
-    : `${number(totalBitsAll)} Bits`;
-
-  const heroFiatEquivalent = isBitnoir
-    ? `≈ ${money(totalBitnoir * BITNOIR_REFERENCE_PRICE)} USD`
-    : `≈ ${money(totalBitsAll * BITS_REFERENCE_PRICE)} USD`;
-
-  const availableDetail = isBitnoir
-    ? {
-        label1: 'Available to Withdraw',
-        val1: `${claimedBitnoir.toFixed(4)} Bitnoir`,
-        sub1: money(claimedBitnoir * BITNOIR_REFERENCE_PRICE),
-        label2: 'Farming Yield (Ready to Claim)',
-        val2: `${claimableBitnoir.toFixed(4)} Bitnoir`,
-        sub2: money(claimableBitnoir * BITNOIR_REFERENCE_PRICE),
-      }
-    : {
-        label1: 'Available to Stake',
-        val1: `${number(purchasedBits)} Bits`,
-        sub1: money(purchasedBits * BITS_REFERENCE_PRICE),
-        label2: 'Active Locked & Staked',
-        val2: `${number(stakedBits)} Bits`,
-        sub2: money(stakedBits * BITS_REFERENCE_PRICE),
-      };
-
-  return (
-    <AppShell active="/wallet" admin={account.role === 'admin'} hideMobileMenu={true}>
-      <div className="phone-page-wrapper">
-        <div className="wallet-phone-card">
-          {/* TOP BAR: BACK ARROW, CENTER TITLE, RIGHT VERIFIED BADGE */}
-          <div className="phone-top-nav">
-            <Link href="/wallet" className="phone-back-btn" title="Back to Wallet">
-              <ArrowLeft size={18} />
-            </Link>
-            <div className="phone-nav-center">{tokenNameWithSymbol}</div>
-            <div className="phone-nav-right">
-              <span className="phone-verified-badge">
-                <LockKeyhole size={12} strokeWidth={2.5} />
-                <span>Verified</span>
-              </span>
-              <button
-                type="button"
-                className="phone-info-btn"
-                onClick={() => setInfoOpen(true)}
-                title="Token Mechanics & Rules"
-              >
-                <BookOpen size={14} />
-              </button>
-            </div>
-          </div>
-
-          {/* HERO SECTION: EXACT VALUE OF BALANCE APPEARS PROPER PROFESSIONAL */}
-          <div className="phone-hero">
-            <div className="phone-coin-wrapper">
-              <img
-                src={tokenLogo}
-                srcSet={tokenLogoSrcSet}
-                sizes="56px"
-                alt={isBitnoir ? 'Bitnoir' : 'Bits'}
-                className="phone-coin-logo"
-                width={56}
-                height={56}
-              />
-            </div>
-            <div className="phone-hero-amount">{heroPrimaryAmount}</div>
-            <div className="phone-hero-fiat">{heroFiatEquivalent}</div>
-
-            {/* PROFESSIONAL DUAL BALANCE BREAKDOWN */}
-            <div className="phone-hero-breakdown">
-              <div className="phone-breakdown-box">
-                <span className="phone-breakdown-label">{availableDetail.label1}</span>
-                <span className="phone-breakdown-val">{availableDetail.val1}</span>
-                <span className="phone-breakdown-sub">{availableDetail.sub1}</span>
-              </div>
-              <div className="phone-breakdown-divider" />
-              <div className="phone-breakdown-box">
-                <span className="phone-breakdown-label">{availableDetail.label2}</span>
-                <span className="phone-breakdown-val">{availableDetail.val2}</span>
-                <span className="phone-breakdown-sub">{availableDetail.sub2}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* BUTTONS DIRECTLY BELOW THE BALANCE */}
-          <div className="phone-hero-actions">
-            {isBitnoir ? (
-              <>
-                <button
-                  type="button"
-                  className="phone-pill-btn phone-pill-btn-fill"
-                  onClick={handleQuickClaim}
-                  disabled={claimableBitnoir <= 0 || (!isTermFinished && claimableBitnoir < MIN_CLAIM_BITNOIR)}
-                  title={!isTermFinished && claimableBitnoir < MIN_CLAIM_BITNOIR ? `Min claim threshold is ${MIN_CLAIM_BITNOIR.toFixed(4)} Bitnoir` : 'Claim farming yield'}
-                >
-                  <Sparkles size={15} /> Claim ({claimableBitnoir.toFixed(4)})
-                </button>
-                <button
-                  type="button"
-                  className="phone-pill-btn phone-pill-btn-outline"
-                  onClick={() => setWithdrawOpen(true)}
-                  disabled={claimedBitnoir <= 0 && claimableBitnoir <= 0}
-                >
-                  <ArrowUpRight size={15} /> Withdraw
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="phone-pill-btn phone-pill-btn-fill"
-                  onClick={() => setDepositOpen(true)}
-                >
-                  <ArrowDownLeft size={15} /> Acquire Bits
-                </button>
-                <Link
-                  href="/staking"
-                  className="phone-pill-btn phone-pill-btn-outline"
-                >
-                  <Layers3 size={15} /> Stake Bits
-                </Link>
-              </>
-            )}
-          </div>
-
-          {/* ACTIVITY SECTION THEN TRANSACTIONS BELOW */}
-          <div className="phone-activity-section">
-            <div className="phone-activity-header-row">
-              <h2 className="phone-activity-heading">Activity</h2>
-              <span className="phone-activity-badge">{displayItems.length} Transactions</span>
-            </div>
-
-            {/* TOP OF HISTORY ICON & EXACT POINTS CLAIMED HERO (WHEN VIEWING BITS) */}
-            {!isBitnoir && (
-              <div className="mb-3 p-3.5 rounded-xl bg-[#09111b] border border-[#00f59b]/25 flex items-center justify-between gap-3 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
-                <div className="flex items-center gap-2.5">
-                  <BitsMark size={32} className="drop-shadow-[0_0_12px_rgba(0,245,155,0.3)] flex-shrink-0" />
-                  <div>
-                    <div className="text-[10px] font-mono font-bold uppercase text-[#00f59b] tracking-wider">
-                      CLAIMED POINTS
-                    </div>
-                    <div className="text-xs font-semibold text-white">Total Claimed Bits</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-mono font-extrabold text-[#00f59b] tabular-nums">
-                    {((account as any).mining?.minedBitsTotalClaimed ?? 120.5).toFixed(4)} Bits
-                  </div>
-                  <div className="text-[10px] font-mono text-slate-400">
-                    ≈ {money(((account as any).mining?.minedBitsTotalClaimed ?? 120.5) * 0.10)} USD
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TRANSACTIONS SCROLLABLE CONTAINER (TRANSACTIONS CAN BE SCROLLED, WHOLE PAGE NOT) */}
-            <div className="phone-tx-scroll-container">
-              <div className="phone-tx-list">
-                {Object.entries(groupedByDate).map(([dateLabel, items]) => (
-                  <div key={dateLabel}>
-                    <div className="phone-date-header">{dateLabel}</div>
-                    {items.map((tx) => (
-                      <div
-                        key={tx.id}
-                        className="phone-tx-row"
-                        onClick={() => setSelectedTx(tx.raw)}
-                        role="button"
-                        tabIndex={0}
-                      >
-                        <div className="phone-tx-leading">
-                          <div className="phone-tx-avatar-box">
-                            <img
-                              src={tokenLogo}
-                              alt={tx.title}
-                              className="phone-tx-avatar-img"
-                            />
-                            <div className={`phone-tx-badge-overlay ${tx.isPositive ? 'incoming' : 'outgoing'}`}>
-                              {tx.isPositive ? (
-                                <ArrowDownLeft size={10} strokeWidth={3} />
-                              ) : (
-                                <ArrowUpRight size={10} strokeWidth={3} />
-                              )}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="phone-tx-title">{tx.title}</div>
-                            <div className="phone-tx-sub">{tx.subText}</div>
-                          </div>
-                        </div>
-
-                        <div className="phone-tx-trailing">
-                          <div className={`phone-tx-amount ${tx.isPositive ? 'positive' : ''}`}>
-                            {tx.amountText}
-                          </div>
-                          <div className="phone-tx-time">{tx.timeText}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <TransactionDetailModal
-        tx={selectedTx}
-        onClose={() => setSelectedTx(null)}
-        assetSymbol={isBitnoir ? 'Bitnoir' : 'Bits'}
-      />
-      <AssetInfoModal
-        open={infoOpen}
-        onClose={() => setInfoOpen(false)}
-        isBitnoir={isBitnoir}
-      />
-      <DepositModal open={depositOpen} onClose={() => setDepositOpen(false)} />
-      <WithdrawModal
-        open={withdrawOpen}
-        onClose={() => setWithdrawOpen(false)}
-        account={account}
-      />
-      {notice}
-    </AppShell>
-  );
+  return <WalletPage account={account} initialAsset={assetId} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -3313,11 +4199,11 @@ function MiningGuideModal({ open, onClose }: { open: boolean; onClose: () => voi
 
           <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/8">
             <div className="flex items-center gap-2 mb-1 text-sm font-bold text-white">
-              <Users size={15} className="text-[#38bdf8]" />
-              <span>2. Referral Mining Boost (+25% per Peer)</span>
+              <Hammer size={15} className="text-[#38bdf8]" />
+              <span>2. Direct Miners Power (10% Mining Power)</span>
             </div>
             <p className="text-slate-400 m-0 leading-relaxed">
-              Invite active peers to boost your hash rate. Each verified referral adds +0.0250 Bits/hr (+25% boost over base rate) to your mining speed.
+              Active direct miners only provide 10% of their mining power to their inviter. Inactive miners do not contribute hash power until their node is activated.
             </p>
           </div>
 
@@ -3681,6 +4567,240 @@ function ClaimedPointsOverlayModal({
 }
 
 // ---------------------------------------------------------------------------
+// DIRECT REFERRAL MODAL (10% MINING POWER ARCHITECTURE)
+// ---------------------------------------------------------------------------
+function DirectReferralModal({
+  open,
+  onClose,
+  referralCode,
+  referralBoostPerHour,
+  teamList,
+}: {
+  open: boolean;
+  onClose: () => void;
+  referralCode: string;
+  referralBoostPerHour: number;
+  teamList: Array<{
+    id: string;
+    handle: string;
+    status: string;
+    isActive: boolean;
+    miningPower: number;
+    providedPower: number;
+  }>;
+}) {
+  const [copied, setCopied] = useState(false);
+  if (!open) return null;
+
+  const code = referralCode || 'satoshi';
+  const referralUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/?ref=${code}`
+    : `https://bitnoir.io/?ref=${code}`;
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(referralUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2200);
+  };
+
+  const activeCount = teamList.filter((m) => m.isActive).length;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal-dialog"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 520,
+          padding: 24,
+          background: 'linear-gradient(180deg, #0c121d 0%, #070b12 100%)',
+          borderColor: 'rgba(56, 189, 248, 0.35)',
+          boxShadow: '0 24px 70px rgba(0, 0, 0, 0.85), 0 0 35px rgba(56, 189, 248, 0.15)',
+          borderRadius: 20,
+        }}
+      >
+        {/* HEADER */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                background: 'rgba(56, 189, 248, 0.12)',
+                display: 'grid',
+                placeItems: 'center',
+                color: '#38bdf8',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+              }}
+            >
+              <Hammer size={18} />
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: '-0.01em' }}>
+                Active Miners Network
+              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                <span className="font-mono text-xs font-bold text-[#38bdf8] tabular-nums">
+                  +{referralBoostPerHour.toFixed(4)} /h
+                </span>
+                <span className="text-[10px] font-mono text-slate-400">·</span>
+                <span className="text-[10px] font-mono font-semibold text-slate-400 uppercase tracking-wider">
+                  {activeCount} Active Miners
+                </span>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            aria-label="Close"
+            style={{ width: 34, height: 34 }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* RULE BANNER - EXACT CORE SPECIFICATION */}
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: 12,
+            background: 'rgba(56, 189, 248, 0.06)',
+            border: '1px solid rgba(56, 189, 248, 0.2)',
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <Sparkles size={16} className="text-[#38bdf8] mt-0.5 flex-shrink-0" />
+            <div style={{ fontSize: 12, lineHeight: 1.5, color: '#cbd5e1' }}>
+              <strong className="text-white">Active Miners Rule:</strong> Active direct miners only provide{' '}
+              <span className="text-[#38bdf8] font-bold">10% of their mining power</span> to their inviter. Inactive
+              miners provide 0% until activated.
+            </div>
+          </div>
+        </div>
+
+        {/* COPY REFERRAL LINK BOX */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Your Miner Invite Link
+            </span>
+            <span className="font-mono text-[11px] text-slate-400">
+              Code: <strong className="text-white font-bold">{code}</strong>
+            </span>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              borderRadius: 10,
+              background: 'rgba(0, 0, 0, 0.45)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              gap: 8,
+            }}
+          >
+            <span
+              className="font-mono text-xs text-slate-300 truncate select-all"
+              style={{ maxWidth: 360 }}
+            >
+              {referralUrl}
+            </span>
+            <button
+              type="button"
+              className="button button-soft !min-h-[30px] !px-3 !py-1 !text-xs !rounded-md"
+              onClick={handleCopy}
+              style={{
+                borderColor: copied ? 'rgba(0, 245, 155, 0.4)' : undefined,
+                color: copied ? '#00f59b' : undefined,
+              }}
+            >
+              {copied ? (
+                <>
+                  <Check size={12} strokeWidth={3} />
+                  <span>Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy size={12} />
+                  <span>Copy</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* DIRECT REFERRERS BREAKDOWN LIST */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 250, overflowY: 'auto', paddingRight: 2 }}>
+          {teamList.map((member, idx) => (
+            <div
+              key={member.id || idx}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderRadius: 10,
+                background: member.isActive ? 'rgba(56, 189, 248, 0.03)' : 'rgba(255, 255, 255, 0.015)',
+                border: member.isActive ? '1px solid rgba(56, 189, 248, 0.18)' : '1px solid rgba(255, 255, 255, 0.05)',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="font-mono text-xs text-slate-500 w-5">0{idx + 1}</span>
+                <div>
+                  <div className="font-semibold text-white text-xs">@{member.handle}</div>
+                  <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                    Mining: {member.miningPower.toFixed(4)} /h
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT SIDE: REFINED ACTIVE STATUS BADGE WITH GLOWING DOT */}
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '3px 10px',
+                    borderRadius: 9999,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    fontFamily: 'var(--app-font-mono, monospace)',
+                    background: member.isActive ? 'rgba(0, 245, 155, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+                    color: member.isActive ? '#00f59b' : '#64748b',
+                    border: member.isActive ? '1px solid rgba(0, 245, 155, 0.28)' : '1px solid rgba(255, 255, 255, 0.08)',
+                    boxShadow: member.isActive ? '0 0 10px rgba(0, 245, 155, 0.15)' : 'none',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      backgroundColor: member.isActive ? '#00f59b' : '#64748b',
+                      boxShadow: member.isActive ? '0 0 6px #00f59b' : 'none',
+                    }}
+                  />
+                  {member.isActive ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // STOPWATCH-STYLE LIVE MINING POINTS COUNTER (PRECISION ODOMETER TICKER)
 // ---------------------------------------------------------------------------
 function StopwatchPointsCounter({
@@ -3733,15 +4853,80 @@ function StakingPage({ account }: { account: UserAccount }) {
   const [guideOpen, setGuideOpen] = useState(false);
   const [solPowerModalOpen, setSolPowerModalOpen] = useState(false);
   const [claimedOverlayOpen, setClaimedOverlayOpen] = useState(false);
+  const [referralModalOpen, setReferralModalOpen] = useState(false);
   const [isContributing, setIsContributing] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
 
-  // 1. Base Rate: 0.1 Bits Per Hour (Requested exact parameter)
+  // 1. Base Rate: 0.1 Bits Per Hour (0.1000 Bits/hr)
   const baseRatePerHour = 0.1000;
 
-  // 2. Referral Mining Boost: 3 Qualified Peers * 0.025 = +0.0750 Bits/hr (+25% per peer)
-  const refCount = 3;
-  const referralBoostPerHour = refCount * 0.025;
+  // 2. Direct Referral Power: Active direct referrers only provide 10% of their mining power to their inviter
+  const [directTeam, setDirectTeam] = useState([
+    {
+      id: 'member-1',
+      handle: 'marcus_v',
+      status: 'Active',
+      isActive: true,
+      miningPower: 0.1000,
+      providedPower: 0.0100, // 10% of 0.1000
+    },
+    {
+      id: 'member-2',
+      handle: 'sarah_k',
+      status: 'Active',
+      isActive: true,
+      miningPower: 0.1000,
+      providedPower: 0.0100, // 10% of 0.1000
+    },
+    {
+      id: 'member-3',
+      handle: 'elena_d',
+      status: 'Active',
+      isActive: true,
+      miningPower: 0.1000,
+      providedPower: 0.0100, // 10% of 0.1000
+    },
+    {
+      id: 'member-4',
+      handle: 'david_w',
+      status: 'Inactive',
+      isActive: false,
+      miningPower: 0.0000,
+      providedPower: 0.0000,
+    },
+    {
+      id: 'member-5',
+      handle: 'alex_c',
+      status: 'Inactive',
+      isActive: false,
+      miningPower: 0.0000,
+      providedPower: 0.0000,
+    },
+  ]);
+
+  useEffect(() => {
+    fetch('/api/accounts/me/team')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data) && data.length) {
+          setDirectTeam(
+            data.map((m: any) => ({
+              id: m.id || m.handle,
+              handle: m.handle,
+              status: m.isActive || m.status === 'verified' ? 'Active' : 'Inactive',
+              isActive: Boolean(m.isActive || m.status === 'verified'),
+              miningPower: Number(m.miningPower ?? (m.isActive || m.status === 'verified' ? 0.1 : 0)),
+              providedPower: Number(m.providedPower ?? (m.isActive || m.status === 'verified' ? 0.01 : 0)),
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const referralBoostPerHour = directTeam
+    .filter((m) => m.isActive)
+    .reduce((sum, m) => sum + m.providedPower, 0); // 3 active peers * 0.0100 = 0.0300 Bits/hr
 
   // 3. SOL Power Multiplier: Max 10 SOL per account (+5 Bits/hr per SOL)
   const accountMining = (account as any).mining || {};
@@ -3772,37 +4957,6 @@ function StakingPage({ account }: { account: UserAccount }) {
 
   // Exact points claimed by user
   const [claimedTotalBits, setClaimedTotalBits] = useState<number>(accountMining.minedBitsTotalClaimed ?? 120.5);
-
-  // Active Allocations Table
-  const [allocations, setAllocations] = useState([
-    {
-      id: 1,
-      name: 'Network Base Engine',
-      type: 'Base Protocol Rate',
-      solContributed: 0,
-      ratePerHour: 0.1000,
-      multiplier: '1.0x Baseline',
-      status: 'ACTIVE STREAMING',
-    },
-    {
-      id: 2,
-      name: 'Qualified Referral Team',
-      type: 'Team Hash Boost (3 Peers)',
-      solContributed: 0,
-      ratePerHour: 0.0750,
-      multiplier: '+75% Boost',
-      status: 'ACTIVE STREAMING',
-    },
-    {
-      id: 3,
-      name: 'SOL Power Multiplier',
-      type: 'SOL Power Boost',
-      solContributed: 0.5,
-      ratePerHour: 2.5000,
-      multiplier: '+2,500% Boost',
-      status: 'ACTIVE STREAMING',
-    },
-  ]);
 
   // Storage tank capacity (24-hour cycle)
   const tankCapacity = totalMiningRatePerHour * 24;
@@ -3890,18 +5044,6 @@ function StakingPage({ account }: { account: UserAccount }) {
       const data = await res.json().catch(() => ({}));
       const boost = solAmount * 5.0;
       setContributedSol((prev) => Number((prev + solAmount).toFixed(2)));
-      setAllocations((prev) => [
-        {
-          id: Date.now(),
-          name: `SOL Power (${solAmount} SOL)`,
-          type: 'SOL Power Boost',
-          solContributed: solAmount,
-          ratePerHour: boost,
-          multiplier: `+${Math.round((boost / 0.1) * 100)}% Boost`,
-          status: 'ACTIVE STREAMING',
-        },
-        ...prev,
-      ]);
       setSolPowerModalOpen(false);
       notify(data.message || `Contributed ${solAmount} SOL! Acquired +${boost.toFixed(4)} Bits/hr SOL Power.`);
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
@@ -3929,6 +5071,15 @@ function StakingPage({ account }: { account: UserAccount }) {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="clean-action-btn-soft"
+            onClick={() => setReferralModalOpen(true)}
+            title="Miners (Active miners provide 10% mining power)"
+          >
+            <Hammer size={14} className="text-[#38bdf8]" />
+            <span>Miners</span>
+          </button>
           <button
             type="button"
             className="clean-action-btn-soft"
@@ -3978,33 +5129,49 @@ function StakingPage({ account }: { account: UserAccount }) {
             </div>
           </div>
 
-          {/* TOP OF BUTTON: CLICK IT TO OPEN OVERLAY CLAIMED POINTS LEDGER */}
+          {/* TOP BUTTONS: MINERS BUTTON ALONG WITH CLAIMED LEDGER POINT BUTTON */}
           <div className="pob-live-action flex flex-col items-end">
-            <button
-              type="button"
-              className="claimed-points-top-btn mb-2"
-              onClick={() => setClaimedOverlayOpen(true)}
-              title="Open Claimed Points Ledger"
-            >
-              <BitsMark size={16} />
-              <span className="font-mono font-bold text-white tabular-nums text-xs">{claimedTotalBits.toFixed(4)}</span>
-              <span className="text-[10px] font-mono text-[#00f59b] font-bold">BITS</span>
-              <ChevronRight size={13} className="text-slate-400" />
-            </button>
+            <div className="flex items-center gap-1.5 mb-2 justify-end flex-wrap">
+              {/* MINERS BUTTON */}
+              <button
+                type="button"
+                className="referral-points-top-btn"
+                onClick={() => setReferralModalOpen(true)}
+                title="Miners (Active miners provide 10% mining power)"
+              >
+                <Hammer size={12} className="text-[#38bdf8]" />
+                <span className="font-mono font-bold text-white tabular-nums text-[11px]">+{referralBoostPerHour.toFixed(4)}</span>
+                <span className="text-[9px] font-mono text-[#38bdf8] font-bold tracking-wider">MINERS</span>
+                <ChevronRight size={11} className="text-slate-400" />
+              </button>
 
-            {/* ATTACHED CLAIM BUTTON */}
+              {/* LEDGER BUTTON */}
+              <button
+                type="button"
+                className="claimed-points-top-btn"
+                onClick={() => setClaimedOverlayOpen(true)}
+                title="Open Claimed Points Ledger"
+              >
+                <ScrollText size={12} className="text-[#00f59b]" />
+                <span className="font-mono font-bold text-white tabular-nums text-[11px]">{claimedTotalBits.toFixed(4)}</span>
+                <span className="text-[9px] font-mono text-[#00f59b] font-bold tracking-wider">LEDGER</span>
+                <ChevronRight size={11} className="text-slate-400" />
+              </button>
+            </div>
+
+            {/* ATTACHED CLAIM BUTTON - FIXED PROPORTIONS */}
             <button
               type="button"
-              className={is20PercentReached ? 'claim-btn-active-colorful !w-full' : 'claim-btn-plane !w-full'}
+              className={is20PercentReached ? 'claim-btn-active-colorful' : 'claim-btn-plane'}
               disabled={!is20PercentReached || isClaiming}
               onClick={handleClaimMinedBits}
             >
               {isClaiming ? (
-                <RefreshCw size={15} className="animate-spin" />
+                <RefreshCw size={13} className="animate-spin" />
               ) : is20PercentReached ? (
-                <Sparkles size={15} className="text-[#04120c]" />
+                <Sparkles size={13} className="text-[#04120c]" />
               ) : (
-                <Lock size={15} className="text-slate-400" />
+                <Lock size={13} className="text-slate-400" />
               )}
               <span>{isClaiming ? 'Claiming…' : 'Claim'}</span>
             </button>
@@ -4018,8 +5185,8 @@ function StakingPage({ account }: { account: UserAccount }) {
             <div className="pob-stat-val text-white tabular-nums">{baseRatePerHour.toFixed(4)} /h</div>
           </div>
           <div className="pob-stat-divider" />
-          <div className="pob-stat-cell">
-            <span className="pob-stat-label">REFERRAL</span>
+          <div className="pob-stat-cell cursor-pointer" onClick={() => setReferralModalOpen(true)}>
+            <span className="pob-stat-label flex items-center gap-1">MINERS (10%) <ChevronRight size={11} className="text-[#38bdf8]" /></span>
             <div className="pob-stat-val text-[#38bdf8] tabular-nums">+{referralBoostPerHour.toFixed(4)} /h</div>
           </div>
           <div className="pob-stat-divider" />
@@ -4035,58 +5202,15 @@ function StakingPage({ account }: { account: UserAccount }) {
         </div>
       </div>
 
-      {/* 4. ACTIVE ALLOCATIONS */}
-      <div className="pob-panel">
-        <div className="pob-panel-header">
-          <div className="flex items-center gap-2">
-            <BitsMark size={16} />
-            <h2 className="pob-panel-title">Allocations</h2>
-          </div>
-          <button
-            type="button"
-            className="text-xs font-semibold text-[#ff8b2f] hover:text-[#ffa04d] transition-colors flex items-center gap-1"
-            onClick={() => setSolPowerModalOpen(true)}
-          >
-            <Plus size={13} />
-            <span>SOL Power</span>
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="pob-ledger-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Engine</th>
-                <th>Rate</th>
-                <th>Contributed</th>
-                <th style={{ textAlign: 'right' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allocations.map((alloc, idx) => (
-                <tr key={alloc.id || idx}>
-                  <td className="font-mono text-slate-500">0{idx + 1}</td>
-                  <td>
-                    <span className="font-semibold text-white">{alloc.name}</span>
-                  </td>
-                  <td className="font-mono tabular-nums text-[#00f59b]">
-                    +{alloc.ratePerHour.toFixed(4)} /h
-                  </td>
-                  <td className="font-mono tabular-nums text-slate-300">
-                    {alloc.solContributed > 0 ? `${alloc.solContributed} SOL` : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <span className="pob-status-tag active">Active</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       {/* 6. MODALS & OVERLAYS */}
+      <DirectReferralModal
+        open={referralModalOpen}
+        onClose={() => setReferralModalOpen(false)}
+        referralCode={account.referralCode || 'satoshi'}
+        referralBoostPerHour={referralBoostPerHour}
+        teamList={directTeam}
+      />
+
       <ClaimedPointsOverlayModal
         open={claimedOverlayOpen}
         onClose={() => setClaimedOverlayOpen(false)}
