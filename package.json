@@ -6,8 +6,8 @@
     "dev": "npm run dev --workspace=@workspace/bitnoir-presale",
     "build": "npm run build --workspace=@workspace/bitnoir-presale",
     "typecheck:libs": "tsc --build",
-    "typecheck": "npm run typecheck:libs",
-    "lint": "tsc --build"
+    "typecheck": "npm run typecheck:libs && tsc -p artifacts/bitnoir-presale/tsconfig.json --noEmit",
+    "lint": "tsc --build && tsc -p artifacts/bitnoir-presale/tsconfig.json --noEmit"
   },
   "private": true,
   "dependencies": {

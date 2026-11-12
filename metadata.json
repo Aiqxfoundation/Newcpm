@@ -1,6 +1,6 @@
 {
   "name": "Bitnoir",
-  "description": "A multichain abstract layer for Bitcoin-aligned capital, fair launch presale, Bits mining, and member portal.",
+  "description": "Bitnoir - Proof-of-Power Bits Mining Engine, 24-Hour Storage Tank & SOL Power Multipliers.",
   "permissions": [],
   "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
