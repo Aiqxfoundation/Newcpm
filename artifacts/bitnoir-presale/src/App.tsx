@@ -4,7 +4,7 @@ import {
   Activity, ArrowDownLeft, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, BarChart3, BookOpen, Check,
   ChevronDown, ChevronRight, Coins, Copy, ExternalLink, FileClock, Flame, Globe2, Hammer, HelpCircle, Info,
   Landmark, Layers3, Link as LinkIcon, Lock, LockKeyhole, LogOut, Menu, PieChart, Plus, QrCode, Radio, RefreshCw,
-  ScrollText, Search, Send, ShieldAlert, ShieldCheck, Sliders, Sparkles, Timer, TrendingUp, Trophy, Users, Wallet, X, Zap,
+  ScrollText, Search, Send, ShieldAlert, ShieldCheck, Sliders, Sparkles, Timer, TrendingUp, Trophy, User, Users, Wallet, X, Zap,
 } from 'lucide-react';
 import {
   getGetAdminAddressesQueryKey, getGetAdminDepositsQueryKey, getGetAdminSummaryQueryKey,
@@ -31,10 +31,13 @@ import {
   saveMiningPass,
   getSavedSolPower,
   addSavedSolPower,
+  isWalletPassVerified,
   type MiningPassData,
   PROTOCOL_TREASURY_SOLANA,
 } from './lib/solana';
 import { WhitepaperView } from '@/pages/Whitepaper';
+import { MintPageView } from '@/pages/MintPage';
+import { ProfilePageView } from '@/pages/ProfilePage';
 import '@/index.css';
 
 const queryClient = new QueryClient({
@@ -300,17 +303,20 @@ function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // 1. Check existing saved Solana public address from localStorage
+    // 1. Check existing saved Solana public address and username from localStorage
     const saved = localStorage.getItem('bitnoir-solana-address');
+    const savedUser = localStorage.getItem('bitnoir-username');
     if (saved && saved.length >= 32) {
       const short = shortSolanaAddress(saved);
+      const uname = savedUser || short;
+      const isAdmin = uname === 'satoshi' || uname === 'admin';
       setUser({
         id: saved,
         solanaAddress: saved,
-        username: short,
-        name: `@${short}`,
-        email: '',
-        isAdmin: false,
+        username: uname,
+        name: `@${uname}`,
+        email: `${uname}@bitnoir.io`,
+        isAdmin,
       });
       setReady(true);
       return;
@@ -366,13 +372,15 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
     localStorage.setItem('bitnoir-solana-address', address);
     const short = shortSolanaAddress(address);
+    const savedUser = localStorage.getItem('bitnoir-username');
+    const uname = savedUser || short;
     const authUser: AuthUser = {
       id: address,
       solanaAddress: address,
-      username: short,
-      name: `@${short}`,
+      username: uname,
+      name: `@${uname}`,
       email: '',
-      isAdmin: false,
+      isAdmin: uname === 'satoshi' || uname === 'admin',
     };
     setUser(authUser);
     return address;
@@ -388,16 +396,51 @@ function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore disconnect error
     }
     localStorage.removeItem('bitnoir-solana-address');
+    localStorage.removeItem('bitnoir-username');
     sessionStorage.removeItem('bitnoir-session-token');
     setUser(null);
   };
 
-  const signIn = async (address?: string) => {
-    await connectWallet(address);
+  const signIn = async (usernameOrAddress?: string) => {
+    const val = (usernameOrAddress || '').trim();
+    if (val.length >= 32 && !val.includes(' ')) {
+      await connectWallet(val);
+      return;
+    }
+    const cleanUser = (val || 'miner').toLowerCase().replace(/^@/, '');
+    const isAdmin = cleanUser === 'satoshi' || cleanUser === 'admin';
+    const address = isAdmin
+      ? PROTOCOL_TREASURY_SOLANA
+      : 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK';
+    localStorage.setItem('bitnoir-username', cleanUser);
+    localStorage.setItem('bitnoir-solana-address', address);
+    setUser({
+      id: address,
+      solanaAddress: address,
+      username: cleanUser,
+      name: `@${cleanUser}`,
+      email: `${cleanUser}@bitnoir.io`,
+      isAdmin,
+    });
   };
 
-  const signUp = async (username?: string) => {
-    return await connectWallet(username);
+  const signUp = async (username?: string, password?: string, referral?: string) => {
+    const cleanUser = (username || 'miner_' + Math.floor(100 + Math.random() * 900)).toLowerCase().replace(/^@/, '');
+    const address = 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK';
+    localStorage.setItem('bitnoir-username', cleanUser);
+    localStorage.setItem('bitnoir-solana-address', address);
+    if (referral) {
+      localStorage.setItem('bitnoir-referred-by', referral);
+    }
+    setUser({
+      id: address,
+      solanaAddress: address,
+      username: cleanUser,
+      name: `@${cleanUser}`,
+      email: `${cleanUser}@bitnoir.io`,
+      isAdmin: cleanUser === 'satoshi' || cleanUser === 'admin',
+    });
+    return address;
   };
 
   const signOut = () => {
@@ -608,7 +651,7 @@ function TopWalletConnect({ compact = false }: { compact?: boolean }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
               <span style={{ color: '#94a3b8' }}>Mining Pass:</span>
               <strong style={{ color: passData ? '#00f59b' : '#ff8b2f' }}>
-                {passData ? 'Active (Verified)' : '0.02 SOL Required'}
+                {passData ? `${passData.passId} (Verified)` : '0.02 SOL Required'}
               </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -617,14 +660,46 @@ function TopWalletConnect({ compact = false }: { compact?: boolean }) {
             </div>
           </div>
 
+          {!passData ? (
+            <Link
+              href="/mint"
+              onClick={() => setMenuOpen(false)}
+              className="button button-primary !min-h-[34px] !text-xs !w-full !mb-2"
+              style={{ width: '100%', justifyContent: 'center' }}
+            >
+              <Sparkles size={13} />
+              <span>Mint Mining Pass (0.02 SOL)</span>
+            </Link>
+          ) : (
+            <Link
+              href="/mining"
+              onClick={() => setMenuOpen(false)}
+              className="button button-primary !min-h-[34px] !text-xs !w-full !mb-2"
+              style={{ width: '100%', justifyContent: 'center' }}
+            >
+              <Flame size={13} />
+              <span>Bits Mining Station</span>
+            </Link>
+          )}
+
           <Link
             href="/wallet"
             onClick={() => setMenuOpen(false)}
-            className="button button-soft !min-h-[34px] !text-xs !w-full !mb-2.5 !border-[#00f59b]/35 !text-[#00f59b] hover:!bg-[#00f59b]/10"
-            style={{ width: '100%', justifyContent: 'center', textDecoration: 'none' }}
+            className="button button-soft !min-h-[32px] !text-xs !w-full !mb-2"
+            style={{ width: '100%', justifyContent: 'center' }}
           >
             <Wallet size={13} />
-            <span>Open Wallet & Balances</span>
+            <span>Wallet & Activity</span>
+          </Link>
+
+          <Link
+            href="/profile"
+            onClick={() => setMenuOpen(false)}
+            className="button button-soft !min-h-[32px] !text-xs !w-full !mb-2.5"
+            style={{ width: '100%', justifyContent: 'center' }}
+          >
+            <User size={13} />
+            <span>Member Profile</span>
           </Link>
 
           <button
@@ -656,8 +731,10 @@ function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
       </Link>
       <nav className="nav-links" aria-label="Main Navigation">
         <Link href="/" className={location === '/' ? 'active' : ''}>Overview</Link>
-        <Link href="/staking" className={location === '/staking' || location === '/mining' ? 'active' : ''}>Bits Mining</Link>
-        <Link href="/docs" className={location === '/docs' || location === '/whitepaper' ? 'active' : ''}>Whitepaper</Link>
+        <Link href="/mining" className={location === '/mining' || location === '/staking' ? 'active' : ''}>Mining</Link>
+        <Link href="/mint" className={location === '/mint' ? 'active' : ''}>Mint Pass</Link>
+        <Link href="/wallet" className={location === '/wallet' ? 'active' : ''}>Wallet</Link>
+        <Link href="/whitepaper" className={location === '/whitepaper' || location === '/docs' ? 'active' : ''}>Whitepaper</Link>
       </nav>
       <div className="top-actions">
         <TopWalletConnect />
@@ -1257,7 +1334,7 @@ function HomePage() {
               Boost your hashrate with onchain SOL Power.
             </p>
             <div className="hero-actions">
-              <Link href="/staking" className="button button-primary hero-primary-action">
+              <Link href="/mint" className="button button-primary hero-primary-action">
                 <Sparkles size={16} />
                 <span>Mint Mining Pass (0.02 SOL)</span>
                 <ArrowRight size={15} />
@@ -1498,7 +1575,7 @@ function HomePage() {
             </div>
 
             <Link
-              href="/staking"
+              href="/mint"
               className="button button-primary"
               style={{ width: '100%', minHeight: 48, justifyContent: 'center', fontSize: 14, fontWeight: 700 }}
             >
@@ -1590,7 +1667,7 @@ function HomePage() {
                 Connect your Phantom wallet, mint your verified onchain Mining Pass for 0.02 SOL, and start accumulating continuous Bits rewards.
               </p>
               <div className="flex items-center justify-center gap-4 flex-wrap">
-                <Link href="/staking" className="button button-primary !px-7 !py-3 text-sm">
+                <Link href="/mint" className="button button-primary !px-7 !py-3 text-sm">
                   <Sparkles size={16} />
                   <span>Mint Mining Pass (0.02 SOL)</span>
                   <ArrowRight size={16} />
@@ -1626,11 +1703,57 @@ function DocsPage() {
 // ---------------------------------------------------------------------------
 function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   const [, setLocation] = useLocation();
-  const { user, connectWallet, disconnectWallet } = useAuth();
+  const { user, connectWallet, disconnectWallet, signIn, signUp } = useAuth();
+  const [authMethod, setAuthMethod] = useState<'username' | 'wallet'>('username');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [referral, setReferral] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState('');
   const [showManual, setShowManual] = useState(false);
   const [manualAddress, setManualAddress] = useState('');
+
+  // Auto-detect referral code from URL query string if present
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get('ref');
+      if (ref) setReferral(ref);
+    }
+  }, []);
+
+  const handleUsernameSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    const cleanUser = username.trim().toLowerCase();
+    if (!cleanUser || cleanUser.length < 3) {
+      setError('Username must be at least 3 characters.');
+      return;
+    }
+    setError('');
+    setConnecting(true);
+
+    try {
+      if (mode === 'sign-up') {
+        await signUp(cleanUser, password, referral);
+        toast({
+          title: 'Account Created!',
+          description: `Welcome @${cleanUser}! +100 Free Bits credited. Please verify your Soulbound Mining Pass.`,
+        });
+        setLocation('/mint');
+      } else {
+        await signIn(cleanUser);
+        toast({
+          title: 'Signed In',
+          description: `Welcome back, @${cleanUser}!`,
+        });
+        setLocation('/wallet');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Authentication error.');
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const handlePhantomConnect = async () => {
     setError('');
@@ -1645,7 +1768,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     } catch (err) {
       if (err instanceof Error && err.message === 'PHANTOM_NOT_INSTALLED') {
         setError(
-          'Phantom wallet extension not detected in this browser window. Connect with Demo Solana Wallet or paste your Solana public address below.'
+          'Phantom wallet extension not detected. Connect with Demo Solana Wallet or paste your Solana public address below.'
         );
         setShowManual(true);
       } else {
@@ -1680,14 +1803,6 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
       setError('Please enter your Solana public address.');
       return;
     }
-
-    // Safety check: Reject private keys, mnemonic seed phrases, or hex strings
-    if (clean.includes(' ') || clean.length > 50 || clean.startsWith('0x') && clean.length === 66) {
-      setError('Security notice: Never enter private keys or seed phrases! Enter only your public Solana address.');
-      return;
-    }
-
-    // Solana base58 check
     const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
     if (!base58Regex.test(clean)) {
       setError('Invalid Solana address format. A valid Solana public key is 32-44 base58 characters.');
@@ -1719,24 +1834,24 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
             width: 56,
             height: 56,
             borderRadius: '50%',
-            background: 'linear-gradient(135deg, rgba(171, 159, 242, 0.2), rgba(120, 87, 255, 0.3))',
-            border: '2px solid #7857ff',
+            background: 'linear-gradient(135deg, rgba(0, 245, 155, 0.2), rgba(120, 87, 255, 0.3))',
+            border: '2px solid #00f59b',
             margin: '0 auto 16px',
             display: 'grid',
             placeItems: 'center',
-            boxShadow: '0 8px 24px rgba(120, 87, 255, 0.25)',
+            boxShadow: '0 8px 24px rgba(0, 245, 155, 0.25)',
           }}
         >
-          <PhantomLogo size={28} />
+          <TokenMark size={28} />
         </div>
 
         <div className="eyebrow" style={{ margin: '0 auto 10px' }}>
           <span className="eyebrow-dot" />
-          SOLANA WALLET CONNECTED
+          SESSION ACTIVE
         </div>
 
         <h1 style={{ font: '700 24px var(--app-font-serif)', margin: '0 0 8px', color: '#fff' }}>
-          Connected to Bitnoir
+          Signed in as @{user.username || shortSolanaAddress(user.solanaAddress)}
         </h1>
 
         <div
@@ -1750,7 +1865,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           }}
         >
           <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
-            Connected Public Address
+            Connected Solana Address
           </div>
           <div style={{ fontSize: 13, fontFamily: 'monospace', color: '#00f59b', fontWeight: 700, wordBreak: 'break-all' }}>
             {user.solanaAddress}
@@ -1772,7 +1887,7 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
           onClick={() => void disconnectWallet()}
           style={{ width: '100%', minHeight: 42, color: 'var(--danger)' }}
         >
-          Disconnect Wallet
+          Sign Out / Disconnect
         </button>
       </div>
     );
@@ -1781,174 +1896,294 @@ function AuthCard({ mode }: { mode: 'sign-in' | 'sign-up' }) {
   return (
     <div className="auth-form">
       {/* HEADER */}
-      <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <div
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, rgba(171, 159, 242, 0.2), rgba(120, 87, 255, 0.35))',
-            border: '2px solid rgba(171, 159, 242, 0.4)',
-            margin: '0 auto 16px',
-            display: 'grid',
-            placeItems: 'center',
-            boxShadow: '0 8px 30px rgba(120, 87, 255, 0.3)',
-          }}
-        >
-          <PhantomLogo size={28} />
-        </div>
-
+      <div style={{ textAlign: 'center', marginBottom: 20 }}>
         <div className="eyebrow" style={{ margin: '0 auto 10px' }}>
           <span className="eyebrow-dot" />
-          SOLANA NON-CUSTODIAL AUTH
+          MEMBER PORTAL ACCESS
         </div>
-        <h1 style={{ font: '700 26px var(--app-font-serif)', margin: '0 0 6px', color: '#fff' }}>
-          {mode === 'sign-up' ? 'Connect Phantom to Join' : 'Connect Phantom Wallet'}
+        <h1 style={{ font: '800 26px var(--app-font-serif)', margin: '0 0 6px', color: '#fff' }}>
+          {mode === 'sign-up' ? 'Create Miner Account' : 'Sign In to Bitnoir'}
         </h1>
         <p style={{ color: 'var(--silver-medium)', fontSize: 13, margin: 0, lineHeight: 1.5 }}>
-          One-click login with your Solana public address. No email, passwords, or registration forms required.
+          {mode === 'sign-up'
+            ? 'Sign up with username or connect Phantom wallet to receive +100 Free Signup Bits.'
+            : 'Access your wallet, mining station, and staking positions.'}
         </p>
       </div>
 
+      {/* METHOD SWITCHER TABS */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: 6,
+          background: 'rgba(255, 255, 255, 0.04)',
+          padding: 4,
+          borderRadius: 12,
+          marginBottom: 20,
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setAuthMethod('username')}
+          style={{
+            padding: '8px 12px',
+            borderRadius: 8,
+            border: 'none',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            background: authMethod === 'username' ? '#00f59b' : 'transparent',
+            color: authMethod === 'username' ? '#03150c' : 'var(--silver-medium)',
+          }}
+        >
+          Username & Password
+        </button>
+        <button
+          type="button"
+          onClick={() => setAuthMethod('wallet')}
+          style={{
+            padding: '8px 12px',
+            borderRadius: 8,
+            border: 'none',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            background: authMethod === 'wallet' ? '#00f59b' : 'transparent',
+            color: authMethod === 'wallet' ? '#03150c' : 'var(--silver-medium)',
+          }}
+        >
+          Phantom / Solana
+        </button>
+      </div>
+
       {error && (
-        <div className="callout error" style={{ marginBottom: 18, fontSize: 12.5, lineHeight: 1.45 }}>
+        <div className="callout error" style={{ marginBottom: 16, fontSize: 12.5, lineHeight: 1.45 }}>
           {error}
         </div>
       )}
 
-      {/* PRIMARY PHANTOM CONNECT BUTTON */}
-      <button
-        type="button"
-        onClick={handlePhantomConnect}
-        disabled={connecting}
-        style={{
-          width: '100%',
-          minHeight: 52,
-          background: 'linear-gradient(135deg, #ab9ff2 0%, #7857ff 100%)',
-          color: '#ffffff',
-          fontWeight: 700,
-          fontSize: 15,
-          borderRadius: 14,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 12,
-          boxShadow: '0 8px 24px rgba(120, 87, 255, 0.35)',
-          border: 'none',
-          cursor: connecting ? 'wait' : 'pointer',
-          marginBottom: 12,
-          transition: 'all 0.15s ease',
-        }}
-      >
-        <PhantomLogo size={22} />
-        <span>{connecting ? 'Connecting Phantom…' : 'Connect Phantom Wallet'}</span>
-        <ArrowRight size={16} />
-      </button>
-
-      {/* QUICK DEMO WALLET CONNECT */}
-      <button
-        type="button"
-        onClick={() => handleDemoConnect()}
-        disabled={connecting}
-        className="button button-soft"
-        style={{
-          width: '100%',
-          minHeight: 44,
-          borderRadius: 12,
-          fontSize: 13,
-          fontWeight: 600,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-          borderColor: 'rgba(255, 255, 255, 0.1)',
-          marginBottom: 16,
-        }}
-      >
-        <SolanaLogo size={16} />
-        <span>Quick Connect Demo Solana Wallet</span>
-      </button>
-
-      {/* MANUAL SOLANA PUBLIC ADDRESS OPTION */}
-      {!showManual ? (
-        <div style={{ textAlign: 'center', marginTop: 8, marginBottom: 12 }}>
-          <button
-            type="button"
-            onClick={() => setShowManual(true)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#94a3b8',
-              fontSize: 12,
-              cursor: 'pointer',
-              textDecoration: 'underline',
-            }}
-          >
-            Or connect with Solana Public Key manually
-          </button>
-        </div>
-      ) : (
-        <form onSubmit={handleManualSubmit} style={{ marginTop: 8, marginBottom: 16 }}>
+      {authMethod === 'username' ? (
+        <form onSubmit={handleUsernameSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="field-wrap">
-            <label className="field-label" htmlFor="solana-public-address" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Solana Public Address (Base58)</span>
-              <span style={{ color: '#00f59b' }}>Public Only</span>
+            <label className="field-label" htmlFor="auth-username">
+              Username
             </label>
             <input
-              id="solana-public-address"
-              className="field mono"
+              id="auth-username"
+              className="field"
               type="text"
-              placeholder="e.g. DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK"
-              value={manualAddress}
-              onChange={(e) => setManualAddress(e.target.value.trim())}
-              autoComplete="off"
-              spellCheck={false}
+              placeholder="e.g. satoshi or novaminer"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+
+          <div className="field-wrap">
+            <label className="field-label" htmlFor="auth-password">
+              Password
+            </label>
+            <input
+              id="auth-password"
+              className="field"
+              type="password"
+              placeholder="••••••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               required
             />
           </div>
+
+          {mode === 'sign-up' && (
+            <div className="field-wrap">
+              <label className="field-label" htmlFor="auth-referral" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Referral Code (Optional)</span>
+                <span style={{ color: '#00f59b' }}>+100 Free Bits</span>
+              </label>
+              <input
+                id="auth-referral"
+                className="field mono"
+                type="text"
+                placeholder="e.g. satoshi"
+                value={referral}
+                onChange={(e) => setReferral(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Quick Demo Autofill Buttons */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setUsername('satoshi');
+                setPassword('password123');
+              }}
+              style={{
+                flex: 1,
+                padding: '6px 10px',
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: 8,
+                fontSize: 11,
+                color: '#94a3b8',
+                cursor: 'pointer',
+              }}
+            >
+              Demo: @satoshi (Admin)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUsername('novaminer');
+                setPassword('password123');
+              }}
+              style={{
+                flex: 1,
+                padding: '6px 10px',
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: 8,
+                fontSize: 11,
+                color: '#94a3b8',
+                cursor: 'pointer',
+              }}
+            >
+              Demo: @novaminer
+            </button>
+          </div>
+
           <button
             type="submit"
-            className="button button-soft"
             disabled={connecting}
-            style={{ width: '100%', minHeight: 42, borderRadius: 10, fontWeight: 600 }}
+            className="button button-primary"
+            style={{ width: '100%', minHeight: 46, marginTop: 6 }}
           >
-            Connect Public Address
+            {connecting
+              ? 'Authenticating...'
+              : mode === 'sign-up'
+              ? 'Create Miner Account (+100 Bits)'
+              : 'Sign In to Account'}
           </button>
         </form>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <button
+            type="button"
+            onClick={handlePhantomConnect}
+            disabled={connecting}
+            style={{
+              width: '100%',
+              minHeight: 50,
+              background: 'linear-gradient(135deg, #ab9ff2 0%, #7857ff 100%)',
+              color: '#ffffff',
+              fontWeight: 700,
+              fontSize: 14,
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              border: 'none',
+              cursor: connecting ? 'wait' : 'pointer',
+              boxShadow: '0 8px 24px rgba(120, 87, 255, 0.35)',
+            }}
+          >
+            <PhantomLogo size={20} />
+            <span>{connecting ? 'Connecting Phantom…' : 'Connect Phantom Wallet'}</span>
+            <ArrowRight size={15} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleDemoConnect()}
+            disabled={connecting}
+            className="button button-soft"
+            style={{ width: '100%', minHeight: 42, fontSize: 13, fontWeight: 600 }}
+          >
+            <SolanaLogo size={16} />
+            <span>Connect Demo Solana Wallet</span>
+          </button>
+
+          {!showManual ? (
+            <button
+              type="button"
+              onClick={() => setShowManual(true)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#94a3b8',
+                fontSize: 12,
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                marginTop: 4,
+              }}
+            >
+              Or paste Solana Public Address manually
+            </button>
+          ) : (
+            <form onSubmit={handleManualSubmit} style={{ marginTop: 6 }}>
+              <input
+                className="field mono text-xs mb-2"
+                type="text"
+                placeholder="Solana address (32-44 base58 chars)"
+                value={manualAddress}
+                onChange={(e) => setManualAddress(e.target.value.trim())}
+                required
+              />
+              <button
+                type="submit"
+                disabled={connecting}
+                className="button button-soft !w-full !min-h-[38px] !text-xs font-bold"
+              >
+                Connect Address
+              </button>
+            </form>
+          )}
+        </div>
       )}
 
-      {/* NON-CUSTODIAL SAFETY GUARANTEE */}
-      <div
-        style={{
-          marginTop: 8,
-          padding: '12px 14px',
-          background: 'rgba(0, 245, 155, 0.05)',
-          border: '1px solid rgba(0, 245, 155, 0.2)',
-          borderRadius: 12,
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 10,
-          textAlign: 'left',
-        }}
-      >
-        <ShieldCheck size={18} color="var(--neon-green)" style={{ flexShrink: 0, marginTop: 2 }} />
-        <div style={{ fontSize: 12, color: 'var(--silver-light)', lineHeight: 1.45 }}>
-          <strong style={{ color: '#00f59b', display: 'block', marginBottom: 2 }}>Non-Custodial & Secure</strong>
-          This app only reads your public address (<code style={{ color: '#00f59b', background: 'transparent', padding: 0 }}>publicKey</code>) to identify your account. Private keys, passwords, and seed phrases are never collected, requested, or stored.
-        </div>
+      {/* Switch Sign In / Sign Up link */}
+      <div style={{ textAlign: 'center', marginTop: 18, fontSize: 13, color: 'var(--silver-medium)' }}>
+        {mode === 'sign-up' ? (
+          <span>
+            Already have an account?{' '}
+            <Link href="/sign-in" style={{ color: '#00f59b', fontWeight: 700 }}>
+              Sign In
+            </Link>
+          </span>
+        ) : (
+          <span>
+            New miner?{' '}
+            <Link href="/sign-up" style={{ color: '#00f59b', fontWeight: 700 }}>
+              Create Account (+100 Bits)
+            </Link>
+          </span>
+        )}
       </div>
 
-      <p style={{ textAlign: 'center', marginTop: 18, fontSize: 12.5, color: 'var(--silver-dark)' }}>
-        Need a Solana wallet?{' '}
-        <a
-          href="https://phantom.app"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: '#ab9ff2', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-        >
-          Download Phantom <ExternalLink size={11} />
-        </a>
-      </p>
+      {/* Security note */}
+      <div
+        style={{
+          marginTop: 16,
+          padding: '10px 12px',
+          background: 'rgba(0, 245, 155, 0.04)',
+          border: '1px solid rgba(0, 245, 155, 0.15)',
+          borderRadius: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 11.5,
+          color: 'var(--silver-light)',
+        }}
+      >
+        <ShieldCheck size={16} color="#00f59b" style={{ flexShrink: 0 }} />
+        <span>Non-custodial architecture. Zero private keys collected or stored.</span>
+      </div>
     </div>
   );
 }
@@ -1974,9 +2209,13 @@ function SignUpPage() {
 // ---------------------------------------------------------------------------
 // 4. APP SHELL & STREAMLINED NAVIGATION
 // ---------------------------------------------------------------------------
-// Clean Coinbase-style unified tab architecture (eliminating tab clutter)
 const navMain = [
-  { href: '/staking', label: 'Bits Mining', description: 'Base 0.1/hr, team boost & SOL Power', icon: Flame },
+  { href: '/wallet', label: 'Wallet', description: 'Onchain SOL, Bits & Bitnoir assets', icon: Wallet },
+  { href: '/mining', label: 'Bits Mining', description: 'Base 0.1/hr, team boost & SOL Power', icon: Flame },
+  { href: '/mint', label: 'Mint Miner Pass', description: '0.02 SOL soulbound verification', icon: Sparkles },
+  { href: '/staking', label: 'Presale & Staking', description: '12% Annual Yield & Fair Launch', icon: Layers3 },
+  { href: '/profile', label: 'Member Profile', description: 'Ambassador referral link & pass ID', icon: User },
+  { href: '/whitepaper', label: 'Whitepaper v3.5', description: 'Proof-of-Power specifications', icon: BookOpen },
 ];
 
 function AppShell({
@@ -2528,15 +2767,14 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
   const miningData = (account as unknown as { mining?: { minedBitsTotalClaimed?: number; burnedSol?: number; contributedSol?: number } }).mining;
   const initialBits = miningData?.minedBitsTotalClaimed ?? 120.5;
   const contributedSol = miningData?.burnedSol ?? miningData?.contributedSol ?? 0.5;
-  const solPowerBoostPerHour = contributedSol * 5.0;
 
-  const [activeTab, setActiveTab] = useState<'tokens' | 'activity'>('tokens');
   const [sendOpen, setSendOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [receiveTarget, setReceiveTarget] = useState<'bits' | 'bitnoir'>('bits');
   const [convertOpen, setConvertOpen] = useState(false);
-  const [withdrawSoonOpen, setWithdrawSoonOpen] = useState(false);
   const [bitsBalance, setBitsBalance] = useState(initialBits);
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  const [activityFilter, setActivityFilter] = useState<'all' | 'send' | 'receive' | 'swap'>('all');
   const [selectedAsset, setSelectedAsset] = useState<'bits' | 'bitnoir' | null>(
     initialAsset?.toLowerCase() === 'bitnoir' ? 'bitnoir' : (initialAsset ? 'bits' : null)
   );
@@ -2549,12 +2787,20 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
     amountText?: string;
   } | null>(null);
 
-  // Clean real activity list - LOW TEXT, ZERO FAKE STUFF
+  const solanaAddr = user?.solanaAddress || (account.id.length >= 32 ? account.id : 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK');
+
+  useEffect(() => {
+    if (solanaAddr) {
+      fetchSolBalance(solanaAddr).then(setSolBalance);
+    }
+  }, [solanaAddr]);
+
+  // Clean real activity list - STRICTLY SEND, RECEIVE, SWAP ONLY
   const [transactions, setTransactions] = useState<
     Array<{
       id: number;
       dateGroup: string;
-      kind: 'swap' | 'receive' | 'send' | 'burn';
+      kind: 'swap' | 'receive' | 'send';
       title: string;
       subtext: string;
       amountPrimary: string;
@@ -2569,9 +2815,9 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
       dateGroup: 'Today',
       kind: 'swap',
       title: 'Swap',
-      subtext: 'Bits to Bitnoir',
-      amountPrimary: '+1.0000 Bitnoir',
-      amountSecondary: '-100 Bits',
+      subtext: 'Bits to Bitnoir ($1.10 rate)',
+      amountPrimary: '+10.0000 Bitnoir',
+      amountSecondary: '-110.00 Bits',
       isPositive: true,
       createdAt: new Date().toISOString(),
       token: 'bitnoir',
@@ -2580,10 +2826,10 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
       id: 102,
       dateGroup: 'Today',
       kind: 'receive',
-      title: 'Receive',
-      subtext: '0x1e3F8...4d0482c',
-      amountPrimary: '+25.0000 Bits',
-      amountSecondary: '≈ $2.50',
+      title: 'Received',
+      subtext: '0x71C8...7065 (BNB Chain)',
+      amountPrimary: '+1,000.00 USDT',
+      amountSecondary: '10,000 Bits Credited',
       isPositive: true,
       createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
       token: 'bits',
@@ -2592,10 +2838,10 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
       id: 103,
       dateGroup: 'Yesterday',
       kind: 'send',
-      title: 'Send',
+      title: 'Sent',
       subtext: '@neo_matrix',
-      amountPrimary: '-10.0000 Bits',
-      amountSecondary: '≈ -$1.00',
+      amountPrimary: '-50.0000 Bits',
+      amountSecondary: '≈ -$5.00',
       isPositive: false,
       createdAt: new Date(Date.now() - 86400000).toISOString(),
       token: 'bits',
@@ -2604,12 +2850,24 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
       id: 104,
       dateGroup: 'Earlier',
       kind: 'receive',
-      title: 'Mining',
-      subtext: 'Base Engine',
-      amountPrimary: '+105.5000 Bits',
-      amountSecondary: '≈ $10.55',
+      title: 'Received',
+      subtext: 'Proof-of-Power Mining Tank',
+      amountPrimary: '+120.5000 Bits',
+      amountSecondary: '≈ $12.05',
       isPositive: true,
-      createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+      token: 'bits',
+    },
+    {
+      id: 105,
+      dateGroup: 'Earlier',
+      kind: 'swap',
+      title: 'Swap',
+      subtext: 'Presale USDT to Bits',
+      amountPrimary: '+5,000.00 Bits',
+      amountSecondary: '-500.00 USDT',
+      isPositive: true,
+      createdAt: new Date(Date.now() - 86400000 * 7).toISOString(),
       token: 'bits',
     },
   ]);
@@ -2620,7 +2878,7 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
       id: Date.now(),
       dateGroup: 'Today',
       kind: 'send' as const,
-      title: 'Send',
+      title: 'Sent',
       subtext: recipient,
       amountPrimary: `-${amt.toFixed(4)} Bits`,
       amountSecondary: `≈ -$${(amt * BITS_REFERENCE_PRICE).toFixed(2)}`,
@@ -2631,18 +2889,40 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
     setTransactions((prev) => [newTx, ...prev]);
   };
 
+  const handleSwapExecuted = (fromAsset: string, toAsset: string, fromAmt: number, toAmt: number) => {
+    if (fromAsset === 'bits') {
+      setBitsBalance((prev) => Math.max(0, prev - fromAmt));
+    }
+    const newTx = {
+      id: Date.now(),
+      dateGroup: 'Today',
+      kind: 'swap' as const,
+      title: 'Swap',
+      subtext: `${fromAsset.toUpperCase()} → ${toAsset.toUpperCase()}`,
+      amountPrimary: `+${toAmt.toFixed(4)} ${toAsset.toUpperCase()}`,
+      amountSecondary: `-${fromAmt.toFixed(2)} ${fromAsset.toUpperCase()}`,
+      isPositive: true,
+      createdAt: new Date().toISOString(),
+      token: (toAsset === 'bitnoir' ? 'bitnoir' : 'bits') as 'bitnoir' | 'bits',
+    };
+    setTransactions((prev) => [newTx, ...prev]);
+  };
+
   const bitsValueUsd = bitsBalance * BITS_REFERENCE_PRICE;
   const totalBitnoirTokens = claimedBitnoir + claimableBitnoir;
   const bitnoirValueUsd = totalBitnoirTokens * BITNOIR_REFERENCE_PRICE;
-  const totalPortfolioValueUsd = bitsValueUsd + bitnoirValueUsd;
-  const solanaAddr = user?.solanaAddress || (account.id.length >= 32 ? account.id : 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK');
-  const userHandle = shortSolanaAddress(solanaAddr);
+  const solValueUsd = (solBalance || 0) * 180;
+  const totalPortfolioValueUsd = bitsValueUsd + bitnoirValueUsd + solValueUsd;
+
+  const visibleTransactions = transactions.filter(
+    (tx) => activityFilter === 'all' || tx.kind === activityFilter
+  );
 
   return (
     <AppShell active="/wallet" admin={account.role === 'admin'}>
-      {/* 1. CLEAN PORTFOLIO VALUATION */}
+      {/* 1. CLEAN PORTFOLIO VALUATION & QUICK ACTIONS */}
       <div className="pob-cockpit mb-6">
-        <div className="pob-cockpit-hero">
+        <div className="pob-cockpit-hero flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="pob-live-info">
             <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-1">
               Total Portfolio Valuation
@@ -2650,6 +2930,34 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
             <div className="text-3xl md:text-4xl font-extrabold text-white font-mono tracking-tight tabular-nums">
               {money(totalPortfolioValueUsd)}
             </div>
+          </div>
+
+          {/* QUICK WALLET ACTIONS (SEND, RECEIVE, SWAP ONLY) */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setSendOpen(true)}
+              className="button button-primary !py-2 !px-4 text-xs font-bold gap-1.5"
+            >
+              <Send size={14} /> Send
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setReceiveTarget('bits');
+                setReceiveOpen(true);
+              }}
+              className="button button-soft !py-2 !px-4 text-xs font-bold gap-1.5"
+            >
+              <ArrowDownLeft size={14} /> Receive
+            </button>
+            <button
+              type="button"
+              onClick={() => setConvertOpen(true)}
+              className="button button-ghost !py-2 !px-4 text-xs font-bold gap-1.5"
+            >
+              <RefreshCw size={14} /> Swap
+            </button>
           </div>
         </div>
       </div>
@@ -2663,7 +2971,40 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
               <Coins size={14} className="text-[#00f59b]" />
               <span>Asset Holdings</span>
             </h2>
-            <span className="text-xs font-mono text-slate-500">2 Assets</span>
+            <span className="text-xs font-mono text-slate-500">3 Assets</span>
+          </div>
+
+          {/* ASSET 0: SOLANA (ONCHAIN L1 ASSET) */}
+          <div
+            className="pob-cockpit !bg-[#0b101a] hover:border-white/20 transition-all cursor-pointer p-4"
+            onClick={() => {
+              setReceiveTarget('bits');
+              setReceiveOpen(true);
+            }}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center flex-shrink-0">
+                  <SolanaLogo size={22} />
+                </div>
+                <div>
+                  <strong className="text-base text-white font-bold">Solana</strong>
+                  <div className="text-xs text-slate-400 font-mono">Onchain L1 Gas & Staking</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 text-right">
+                <div>
+                  <div className="text-base font-mono font-bold text-white tabular-nums">
+                    {solBalance !== null ? solBalance.toFixed(4) : '0.0000'} <span className="text-xs text-slate-400 font-normal">SOL</span>
+                  </div>
+                  <div className="text-xs font-mono text-[#ab9ff2]">
+                    ≈ {money(solValueUsd)}
+                  </div>
+                </div>
+                <ChevronRight size={14} className="text-slate-500" />
+              </div>
+            </div>
           </div>
 
           {/* ASSET 1: BITS (CLEAN ARCHITECTURAL ROW) */}
@@ -2676,6 +3017,7 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
                 <BitsMark size={40} className="drop-shadow-[0_0_12px_rgba(0,245,155,0.3)] flex-shrink-0" />
                 <div>
                   <strong className="text-base text-white font-bold">Bits</strong>
+                  <div className="text-xs text-slate-400 font-mono">Mining Reward & Internal Unit</div>
                 </div>
               </div>
 
@@ -2703,6 +3045,7 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
                 <TokenMark size={40} className="drop-shadow-[0_0_12px_rgba(255,139,47,0.3)] flex-shrink-0" />
                 <div>
                   <strong className="text-base text-white font-bold">Bitnoir</strong>
+                  <div className="text-xs text-slate-400 font-mono">21,000,000 Hard Capped Store of Value</div>
                 </div>
               </div>
 
@@ -2721,18 +3064,33 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
           </div>
         </div>
 
-        {/* RIGHT COLUMN: WALLET ACTIVITY LEDGER (5 Cols) */}
+        {/* RIGHT COLUMN: WALLET ACTIVITY LEDGER (STRICTLY SENT, RECEIVE, SWAP ONLY) */}
         <div className="lg:col-span-5 flex flex-col gap-3">
-          <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
             <h2 className="text-sm font-bold font-mono uppercase tracking-wider text-slate-400 flex items-center gap-2 m-0">
               <Activity size={14} className="text-[#38bdf8]" />
               <span>Wallet Activity</span>
             </h2>
-            <span className="text-xs font-mono text-slate-500">Live Ledger</span>
+            <div className="flex gap-1">
+              {(['all', 'send', 'receive', 'swap'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActivityFilter(tab)}
+                  className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded transition-all cursor-pointer ${
+                    activityFilter === tab
+                      ? 'bg-[#00f59b]/20 text-[#00f59b] border border-[#00f59b]/40'
+                      : 'text-slate-400 hover:text-white bg-white/[0.03]'
+                  }`}
+                >
+                  {tab === 'all' ? 'All' : tab === 'send' ? 'Sent' : tab === 'receive' ? 'Received' : 'Swapped'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="pob-cockpit !bg-[#0b101a] p-3 flex flex-col gap-2">
-            {transactions.map((tx) => (
+            {visibleTransactions.map((tx) => (
               <div
                 key={tx.id}
                 onClick={() =>
@@ -2756,10 +3114,16 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
                     />
                     <div
                       className={`absolute -right-1 -bottom-1 w-3.5 h-3.5 rounded-full flex items-center justify-center border border-[#0a0f19] text-white ${
-                        tx.isPositive ? 'bg-[#22c55e]' : 'bg-[#ef4444]'
+                        tx.kind === 'swap' ? 'bg-[#38bdf8]' : tx.isPositive ? 'bg-[#22c55e]' : 'bg-[#ef4444]'
                       }`}
                     >
-                      {tx.isPositive ? <ArrowDownLeft size={7} strokeWidth={3} /> : <ArrowUpRight size={7} strokeWidth={3} />}
+                      {tx.kind === 'swap' ? (
+                        <RefreshCw size={7} strokeWidth={3} />
+                      ) : tx.isPositive ? (
+                        <ArrowDownLeft size={7} strokeWidth={3} />
+                      ) : (
+                        <ArrowUpRight size={7} strokeWidth={3} />
+                      )}
                     </div>
                   </div>
                   <div>
@@ -2933,6 +3297,9 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
       <ConvertModal
         open={convertOpen}
         onClose={() => setConvertOpen(false)}
+        availableBits={bitsBalance}
+        availableNoir={totalBitnoirTokens}
+        onSwapped={handleSwapExecuted}
       />
 
       <WithdrawComingSoonModal
@@ -3161,64 +3528,179 @@ function TransactionDetailModal({
 // ---------------------------------------------------------------------------
 // SWAP / CONVERT MODAL
 // ---------------------------------------------------------------------------
-function ConvertModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+function ConvertModal({
+  open,
+  onClose,
+  availableBits = 0,
+  availableNoir = 0,
+  onSwapped,
+}: {
+  open: boolean;
+  onClose: () => void;
+  availableBits?: number;
+  availableNoir?: number;
+  onSwapped?: (fromAsset: string, toAsset: string, fromAmt: number, toAmt: number) => void;
+}) {
+  const [pair, setPair] = useState<'bits_to_noir' | 'noir_to_bits'>('bits_to_noir');
+  const [amount, setAmount] = useState('110');
+  const [swapping, setSwapping] = useState(false);
+  const [error, setError] = useState('');
+
   if (!open) return null;
+
+  const numAmt = parseFloat(amount) || 0;
+  // 11 Bits = 1 Bitnoir ($0.10 * 11 = $1.10)
+  const estimatedReceive = pair === 'bits_to_noir' ? numAmt / 11 : numAmt * 11;
+  const maxAvailable = pair === 'bits_to_noir' ? availableBits : availableNoir;
+
+  const handleSwap = async (e: FormEvent) => {
+    e.preventDefault();
+    if (numAmt <= 0) {
+      setError('Please enter a valid amount.');
+      return;
+    }
+    if (numAmt > maxAvailable) {
+      setError(`Insufficient balance. You have ${maxAvailable.toFixed(4)} available.`);
+      return;
+    }
+
+    setSwapping(true);
+    setError('');
+
+    try {
+      const fromAsset = pair === 'bits_to_noir' ? 'bits' : 'bitnoir';
+      const toAsset = pair === 'bits_to_noir' ? 'bitnoir' : 'bits';
+
+      await fetch('/api/wallet/swap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromAsset,
+          toAsset,
+          amount: numAmt,
+        }),
+      }).catch(() => {});
+
+      onSwapped?.(fromAsset, toAsset, numAmt, estimatedReceive);
+      toast({
+        title: 'Swap Successful!',
+        description: `Swapped ${numAmt} ${fromAsset.toUpperCase()} for ${estimatedReceive.toFixed(4)} ${toAsset.toUpperCase()}.`,
+      });
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Swap failed.');
+    } finally {
+      setSwapping(false);
+    }
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="tx-icon-badge" style={{ background: 'rgba(168, 85, 247, 0.1)', color: '#c084fc' }}>
+            <div className="tx-icon-badge" style={{ background: 'rgba(0, 245, 155, 0.1)', color: '#00f59b' }}>
               <RefreshCw size={18} />
             </div>
             <div>
-              <h3>Convert Bits to Bitnoir</h3>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>Protocol Conversion Bridge</p>
+              <h3 style={{ margin: 0, fontSize: 18, color: '#fff' }}>Instant Swap</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--silver-dark)' }}>Protocol Decentralized Liquidity Pool</p>
             </div>
           </div>
           <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
         </div>
 
-        <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Conversion rate banner */}
-          <div style={{ padding: '14px', borderRadius: 12, background: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.2)', fontSize: 13, color: '#e9d5ff' }}>
-            <strong style={{ color: '#fff', display: 'block', marginBottom: 2 }}>Conversion Rate: 100 Bits = 1 Bitnoir</strong>
-            Mined Bits points will convert directly into native Bitnoir tokens.
+        <form onSubmit={handleSwap} style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Rate indicator */}
+          <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(0, 245, 155, 0.05)', border: '1px solid rgba(0, 245, 155, 0.2)', fontSize: 12.5, color: '#00f59b', display: 'flex', justifyContent: 'space-between' }}>
+            <span>Protocol Rate:</span>
+            <strong>1 Bitnoir = 11 Bits ($1.10 rate)</strong>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ padding: '12px 14px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.07)' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', marginBottom: 4 }}>You Pay (Mined Points)</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="font-mono text-lg font-bold text-white">100.0000</span>
-                <span className="font-bold text-sm text-[#00f59b]">BITS</span>
-              </div>
+          {error && (
+            <div className="callout error" style={{ fontSize: 12 }}>
+              {error}
             </div>
+          )}
 
-            <div style={{ display: 'flex', justifyContent: 'center', margin: '-4px 0' }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#131b2a', border: '1px solid rgba(255, 255, 255, 0.1)', display: 'grid', placeItems: 'center', color: '#94a3b8' }}>
-                <RefreshCw size={13} />
-              </div>
+          {/* Pay input */}
+          <div style={{ padding: '14px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: 12, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 6 }}>
+              <span>You Pay</span>
+              <button
+                type="button"
+                onClick={() => setAmount(maxAvailable.toFixed(2))}
+                style={{ background: 'none', border: 'none', color: '#00f59b', cursor: 'pointer', fontFamily: 'monospace', fontWeight: 700 }}
+              >
+                Max: {maxAvailable.toFixed(2)}
+              </button>
             </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <input
+                type="number"
+                step="any"
+                min="0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="input font-mono text-xl font-bold text-white !p-0 !border-none !bg-transparent flex-1"
+                placeholder="0.0"
+                autoFocus
+              />
+              <span style={{ padding: '4px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.06)', fontSize: 13, fontWeight: 800, color: '#fff' }}>
+                {pair === 'bits_to_noir' ? 'BITS' : 'BITNOIR'}
+              </span>
+            </div>
+          </div>
 
-            <div style={{ padding: '12px 14px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.07)' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', marginBottom: 4 }}>You Receive (Native Token)</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="font-mono text-lg font-bold text-white">1.0000</span>
-                <span className="font-bold text-sm text-[#38bdf8]">BITNOIR</span>
-              </div>
+          {/* Switch Direction Button */}
+          <div style={{ display: 'flex', justifyContent: 'center', margin: '-6px 0' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setPair(pair === 'bits_to_noir' ? 'noir_to_bits' : 'bits_to_noir');
+                setAmount('10');
+              }}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: '#131b2a',
+                border: '1px solid rgba(0, 245, 155, 0.3)',
+                display: 'grid',
+                placeItems: 'center',
+                color: '#00f59b',
+                cursor: 'pointer',
+              }}
+              title="Reverse direction"
+            >
+              <RefreshCw size={14} />
+            </button>
+          </div>
+
+          {/* Receive display */}
+          <div style={{ padding: '14px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: 12, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 6 }}>
+              You Receive (Estimated)
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="font-mono text-xl font-bold text-[#00f59b]">
+                {estimatedReceive.toFixed(4)}
+              </span>
+              <span style={{ padding: '4px 10px', borderRadius: 8, background: 'rgba(0,245,155,0.1)', fontSize: 13, fontWeight: 800, color: '#00f59b' }}>
+                {pair === 'bits_to_noir' ? 'BITNOIR' : 'BITS'}
+              </span>
             </div>
           </div>
 
           <button
-            type="button"
-            className="button button-soft"
-            disabled
-            style={{ width: '100%', opacity: 0.6, cursor: 'not-allowed', marginTop: 4 }}
+            type="submit"
+            disabled={swapping || numAmt <= 0}
+            className="button button-primary"
+            style={{ width: '100%', minHeight: 46, fontSize: 14, fontWeight: 700, marginTop: 4 }}
           >
-            Conversion Coming Soon at Mainnet TGE
+            {swapping ? 'Executing Protocol Swap...' : 'Execute Instant Swap'}
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );
@@ -4716,6 +5198,44 @@ function StakingPage({ account }: { account: UserAccount }) {
         </div>
       </div>
 
+      {/* WALLET VERIFICATION STATUS BANNER */}
+      {!isWalletPassVerified(account?.id || '') ? (
+        <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center flex-shrink-0 text-amber-400 mt-0.5">
+              <ShieldAlert size={18} />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Wallet Verification Required</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold uppercase">Unverified</span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                New miners must verify their Solana wallet by minting the 0.02 SOL Soulbound Mining Pass to lock onchain proof-of-power.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/mint"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#ff8b2f] to-[#f5a623] text-black font-mono font-bold text-xs uppercase tracking-wider hover:opacity-95 transition-all flex-shrink-0"
+          >
+            <Sparkles size={14} /> Mint Miner Pass
+          </Link>
+        </div>
+      ) : (
+        <div className="mb-6 px-4 py-2.5 rounded-2xl bg-[#00f59b]/10 border border-[#00f59b]/25 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-white">
+            <ShieldCheck size={16} className="text-[#00f59b] flex-shrink-0" />
+            <span>
+              <strong className="text-[#00f59b]">Verified Miner:</strong> Soulbound Mining Pass active ({getSavedMiningPass(account?.id || '')?.passNumber || '#PASS-8841'}) — 100% Hashrate velocity unlocked.
+            </span>
+          </div>
+          <Link href="/profile" className="text-[11px] font-mono text-[#00f59b] hover:underline flex items-center gap-1 flex-shrink-0">
+            View Pass <ChevronRight size={12} />
+          </Link>
+        </div>
+      )}
+
       {/* 2. MINING COCKPIT */}
       <div className="pob-cockpit mb-6">
         <div className="pob-cockpit-hero">
@@ -5105,6 +5625,36 @@ function AdminPage({ account }: { account: UserAccount }) {
   );
 }
 
+function MintPageRoute() {
+  const { user, connectWallet } = useAuth();
+  return (
+    <MintPageView
+      PublicHeader={PublicHeader}
+      Brand={Brand}
+      BitsMark={BitsMark}
+      user={user}
+      connectWallet={connectWallet}
+    />
+  );
+}
+
+function ProfilePageRoute() {
+  const { user, signOut } = useAuth();
+  return (
+    <ProtectedGate>
+      {(account) => (
+        <ProfilePageView
+          account={account}
+          user={user}
+          signOut={signOut}
+          Brand={Brand}
+          BitsMark={BitsMark}
+        />
+      )}
+    </ProtectedGate>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // 13. MAIN APPLICATION ROUTER WITH STREAMLINED TAB ARCHITECTURE
 // ---------------------------------------------------------------------------
@@ -5119,6 +5669,8 @@ function App() {
               <Route path="/" component={HomePage} />
               <Route path="/docs" component={DocsPage} />
               <Route path="/whitepaper" component={DocsPage} />
+              <Route path="/mint" component={MintPageRoute} />
+              <Route path="/profile" component={ProfilePageRoute} />
               <Route path="/sign-in" component={SignInPage} />
               <Route path="/sign-up" component={SignUpPage} />
 

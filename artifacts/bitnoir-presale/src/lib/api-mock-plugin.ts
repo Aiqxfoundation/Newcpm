@@ -159,41 +159,46 @@ export function bitnoirApiPlugin(): Plugin {
     },
   ];
 
-  const activityList: Array<{ id: number; kind: string; title: string; detail: string; createdAt: string }> = [
-    {
-      id: 105,
-      kind: 'reward',
-      title: 'Mined Bits Claimed',
-      detail: 'Claimed +120.5000 Bits into available balance.',
-      createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
-    },
+  const activityList: Array<{ id: number; kind: 'send' | 'receive' | 'swap' | string; title: string; detail: string; createdAt: string; txHash?: string }> = [
     {
       id: 104,
-      kind: 'withdraw',
-      title: 'Bitnoir Rewards Dispatched',
-      detail: '0.0400 Bitnoir ($2.00) sent to 0x71C8...7065 on BNB Smart Chain.',
-      createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+      kind: 'swap',
+      title: 'Swapped 1,100 Bits for 100.00 Bitnoir',
+      detail: 'Executed instant protocol swap: 1,100 Bits → 100.00 Bitnoir ($1.10 rate).',
+      createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
+      txHash: '0x7e8b9a12c34d56ef78a901bc23de45fa67b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2',
     },
     {
       id: 103,
-      kind: 'stake',
-      title: 'Bits Staked & Burned',
-      detail: '10,000 Bits burned into 60-day staking term at 2.0% term yield (12% APY).',
-      createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
+      kind: 'send',
+      title: 'Sent 250 Bits to @miner_omega',
+      detail: 'Transferred 250 Bits to @miner_omega (7xKp...3a9B). Zero protocol gas fee.',
+      createdAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+      txHash: '0x4f1a2b3c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a',
     },
     {
       id: 102,
-      kind: 'deposit',
-      title: 'Deposit Approved',
-      detail: '1,000 USDT on BNB Smart Chain credited as 10,000 Bits.',
-      createdAt: new Date(Date.now() - 15 * 86400000).toISOString(),
+      kind: 'receive',
+      title: 'Received 1,000 USDT (10,000 Bits Credited)',
+      detail: 'Received 1,000 USDT deposit from 0x71C8...7065 on BNB Smart Chain.',
+      createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+      txHash: '0x83e2b1c0a82b987654321fedcba0987654321fedcba0987654321fedcba09876',
     },
     {
       id: 101,
-      kind: 'deposit',
-      title: 'Deposit Approved',
-      detail: '500 USDT on BNB Smart Chain credited as 5,000 Bits.',
-      createdAt: new Date(Date.now() - 20 * 86400000).toISOString(),
+      kind: 'swap',
+      title: 'Swapped 500 USDT for 5,000 Bits',
+      detail: 'Presale allocation executed: 500 USDT converted to 5,000 Bits.',
+      createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      txHash: '0x94f1c7d2e93b123456789abcdef0123456789abcdef0123456789abcdef01234',
+    },
+    {
+      id: 100,
+      kind: 'receive',
+      title: 'Received 100 Free Signup Bits',
+      detail: 'Welcome bonus credited upon wallet verification.',
+      createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
+      txHash: '0x12a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3',
     },
   ];
 
@@ -834,6 +839,145 @@ export function bitnoirApiPlugin(): Plugin {
         withdrawal: newWithdrawal,
         balances: userAccount.balances,
         message: 'Withdrawal completed successfully.',
+      });
+    }
+
+    // Direct Wallet Send: Transfer Bits or Bitnoir
+    if (url === '/api/wallet/send' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const asset = String(body.asset || 'bits').toLowerCase();
+      const amount = Number(body.amount) || 0;
+      const recipient = String(body.recipient || '').trim();
+
+      if (!recipient) {
+        return sendJson(res, 400, { error: 'Please enter a recipient username or wallet address.' });
+      }
+      if (amount <= 0) {
+        return sendJson(res, 400, { error: 'Please enter a valid amount.' });
+      }
+
+      if (asset === 'bits') {
+        if (amount > (userAccount.balances.purchased || 0)) {
+          return sendJson(res, 400, { error: 'Insufficient Bits balance.' });
+        }
+        userAccount.balances.purchased -= amount;
+      } else {
+        const totalNoir = (userAccount.balances.claimable || 0) + (userAccount.balances.claimed || 0);
+        if (amount > totalNoir) {
+          return sendJson(res, 400, { error: 'Insufficient Bitnoir balance.' });
+        }
+        if ((userAccount.balances.claimed || 0) >= amount) {
+          userAccount.balances.claimed = Math.max(0, (userAccount.balances.claimed || 0) - amount);
+        } else {
+          const rem = amount - (userAccount.balances.claimed || 0);
+          userAccount.balances.claimed = 0;
+          userAccount.balances.claimable = Math.max(0, (userAccount.balances.claimable || 0) - rem);
+        }
+      }
+
+      const txHash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, '0')).join('');
+      const activityItem = {
+        id: Date.now(),
+        kind: 'send',
+        title: `Sent ${amount} ${asset === 'bits' ? 'Bits' : 'Bitnoir'}`,
+        detail: `Sent ${amount} ${asset === 'bits' ? 'Bits' : 'Bitnoir ($NOIR)'} to ${recipient}. Onchain settlement finalized.`,
+        txHash,
+        createdAt: new Date().toISOString(),
+      };
+      activityList.unshift(activityItem);
+
+      return sendJson(res, 200, {
+        success: true,
+        txHash,
+        balances: userAccount.balances,
+        activity: activityItem,
+      });
+    }
+
+    // Direct Wallet Swap: Instant Conversion
+    if (url === '/api/wallet/swap' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const fromAsset = String(body.fromAsset || 'bits').toLowerCase();
+      const toAsset = String(body.toAsset || 'bitnoir').toLowerCase();
+      const amount = Number(body.amount) || 0;
+
+      if (amount <= 0) {
+        return sendJson(res, 400, { error: 'Please enter a valid swap amount.' });
+      }
+
+      let receiveAmount = 0;
+      if (fromAsset === 'bits' && toAsset === 'bitnoir') {
+        if (amount > (userAccount.balances.purchased || 0)) {
+          return sendJson(res, 400, { error: 'Insufficient Bits balance.' });
+        }
+        receiveAmount = amount / 11; // 11 Bits = 1 Bitnoir ($1.10 rate)
+        userAccount.balances.purchased -= amount;
+        userAccount.balances.claimed = (userAccount.balances.claimed || 0) + receiveAmount;
+      } else if (fromAsset === 'bitnoir' && toAsset === 'bits') {
+        const available = (userAccount.balances.claimed || 0);
+        if (amount > available) {
+          return sendJson(res, 400, { error: 'Insufficient Bitnoir balance.' });
+        }
+        receiveAmount = amount * 11;
+        userAccount.balances.claimed = Math.max(0, (userAccount.balances.claimed || 0) - amount);
+        userAccount.balances.purchased += receiveAmount;
+      } else if (fromAsset === 'usdt' && toAsset === 'bits') {
+        receiveAmount = amount * 10;
+        userAccount.balances.purchased += receiveAmount;
+      } else {
+        return sendJson(res, 400, { error: 'Unsupported swap pair.' });
+      }
+
+      const txHash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32))).map((b) => b.toString(16).padStart(2, '0')).join('');
+      const activityItem = {
+        id: Date.now(),
+        kind: 'swap',
+        title: `Swapped ${amount} ${fromAsset.toUpperCase()} for ${receiveAmount.toFixed(2)} ${toAsset.toUpperCase()}`,
+        detail: `Instant swap: ${amount} ${fromAsset.toUpperCase()} → ${receiveAmount.toFixed(4)} ${toAsset.toUpperCase()} ($1.10 per Noir rate).`,
+        txHash,
+        createdAt: new Date().toISOString(),
+      };
+      activityList.unshift(activityItem);
+
+      return sendJson(res, 200, {
+        success: true,
+        fromAsset,
+        toAsset,
+        fromAmount: amount,
+        toAmount: receiveAmount,
+        balances: userAccount.balances,
+        activity: activityItem,
+      });
+    }
+
+    // Soulbound Mining Pass Verification Registration
+    if (url === '/api/accounts/me/mint-pass' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const passId = body.passId || `#BN-SOL-${Math.floor(1000 + Math.random() * 9000)}`;
+      const txHash = body.txHash || '5K4s...sol';
+
+      (userAccount as any).miningPassVerified = true;
+      (userAccount as any).miningPass = {
+        passId,
+        ownerAddress: body.ownerAddress || userAccount.id,
+        txSignature: txHash,
+        feePaidSol: 0.02,
+        mintedAt: new Date().toISOString(),
+        status: 'verified',
+      };
+
+      activityList.unshift({
+        id: Date.now(),
+        kind: 'receive',
+        title: 'Mining Pass Verified (0.02 SOL)',
+        detail: `Soulbound Mining Pass ${passId} minted onchain. Proof-of-Power mining activated.`,
+        createdAt: new Date().toISOString(),
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        miningPass: (userAccount as any).miningPass,
+        account: userAccount,
       });
     }
 

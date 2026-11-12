@@ -243,7 +243,7 @@ export function WhitepaperView({
             </ul>
 
             <div style={{ marginTop: 24, textAlign: 'center' }}>
-              <Link href="/staking" className="button button-primary" style={{ display: 'inline-flex', padding: '12px 24px', fontSize: 14 }}>
+              <Link href="/mint" className="button button-primary" style={{ display: 'inline-flex', padding: '12px 24px', fontSize: 14 }}>
                 <Sparkles size={16} />
                 <span>Mint Mining Pass (0.02 SOL) & Start Mining</span>
                 <ArrowRight size={16} />
