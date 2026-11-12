@@ -6,13 +6,11 @@ export function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <span className="brand">
       <img
-        src="/asset-bitnoir-md.png"
-        srcSet="/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w"
-        sizes="28px"
+        src="/bitnoir-hd.png"
         alt="Bitnoir"
         width={28}
         height={28}
-        style={{ imageRendering: '-webkit-optimize-contrast' }}
+        style={{ width: 28, height: 28, objectFit: 'contain' }}
       />
       {!compact && <span>Bitnoir</span>}
     </span>
@@ -30,17 +28,12 @@ export function AssetIcon({ asset, size = 36 }: { asset: AssetKind; size?: numbe
     );
   }
   const isBitnoir = asset === 'bnr';
-  const defaultSrc = isBitnoir ? '/asset-bitnoir-md.png' : '/asset-bits-md.png';
-  const srcSet = isBitnoir
-    ? '/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w'
-    : '/asset-bits-sm.png 64w, /asset-bits-md.png 128w';
+  const defaultSrc = isBitnoir ? '/bitnoir-hd.png' : '/bits-hd.png';
 
   return (
     <img
       className="asset-icon"
       src={defaultSrc}
-      srcSet={srcSet}
-      sizes={`${size}px`}
       alt={isBitnoir ? 'Bitnoir' : 'Bits'}
       width={size}
       height={size}
@@ -48,7 +41,6 @@ export function AssetIcon({ asset, size = 36 }: { asset: AssetKind; size?: numbe
         width: size,
         height: size,
         objectFit: 'contain',
-        imageRendering: '-webkit-optimize-contrast',
       }}
     />
   );

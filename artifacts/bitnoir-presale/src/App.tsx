@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   BookOpen, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Flame,
-  Hammer, Lock, RefreshCw, ScrollText, ShieldAlert, ShieldCheck, Sparkles, Wallet, X, Zap
+  Hammer, Lock, RefreshCw, ScrollText, Sparkles, Wallet, X, Zap
 } from 'lucide-react';
 import {
   getGetMyAccountQueryKey, getGetMyActivityQueryKey, useGetMyAccount,
@@ -15,11 +15,6 @@ import { toast } from '@/hooks/use-toast';
 import NotFound from '@/pages/not-found';
 import {
   fetchSolBalance,
-  getSavedMiningPass,
-  saveMiningPass,
-  isWalletPassVerified,
-  mintMiningPass,
-  type MiningPassData,
   PROTOCOL_TREASURY_SOLANA,
   getPhantomSolanaProvider,
 } from './lib/solana';
@@ -79,32 +74,24 @@ function Brand({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
   return (
     <div className="flex items-center gap-2.5 select-none" style={{ fontSize: textSize }}>
       <img
-        src="/asset-bitnoir-md.png"
-        srcSet="/asset-bitnoir-sm.png 64w, /asset-bitnoir-md.png 128w, /asset-bitnoir-lg.png 256w, /asset-bitnoir.png 512w"
-        sizes={`${logoPx}px`}
+        src="/bitnoir-hd.png"
         alt="Bitnoir logo"
         width={logoPx}
         height={logoPx}
-        className="block object-contain flex-shrink-0 drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]"
-        style={{ imageRendering: '-webkit-optimize-contrast' }}
+        className="block object-contain flex-shrink-0"
+        style={{ width: logoPx, height: logoPx }}
       />
       <div className="flex items-center gap-2">
         <span className="font-serif font-bold tracking-tight text-[#ff8b2f]">Bitnoir</span>
-        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#00f59b]/15 text-[#00f59b] border border-[#00f59b]/30 uppercase tracking-wider">
-          BITS MINING
-        </span>
       </div>
     </div>
   );
 }
 
 function BitsMark({ size = 28, className = '' }: { size?: number; className?: string }) {
-  const defaultSrc = size <= 28 ? '/asset-bits-sm.png' : size <= 54 ? '/asset-bits-md.png' : '/asset-bits.png';
   return (
     <img
-      src={defaultSrc}
-      srcSet="/asset-bits-xs.png 32w, /asset-bits-sm.png 64w, /asset-bits-md.png 128w, /asset-bits-lg.png 256w, /asset-bits.png 512w"
-      sizes={`${size}px`}
+      src="/bits-hd.png"
       alt="Bits"
       className={`inline-block object-contain flex-shrink-0 ${className}`}
       width={size}
@@ -112,7 +99,6 @@ function BitsMark({ size = 28, className = '' }: { size?: number; className?: st
       style={{
         width: size,
         height: size,
-        imageRendering: '-webkit-optimize-contrast',
       }}
     />
   );
@@ -176,6 +162,16 @@ function AuthProvider({ children }: { children: ReactNode }) {
     // 1. Check existing saved Solana public address from localStorage
     const saved = localStorage.getItem('bitnoir-solana-address');
     const savedUser = localStorage.getItem('bitnoir-username');
+
+    // Clear legacy mock satoshinode / treasury account
+    if (saved === PROTOCOL_TREASURY_SOLANA || savedUser === 'satoshinode') {
+      localStorage.removeItem('bitnoir-solana-address');
+      localStorage.removeItem('bitnoir-username');
+      setUser(null);
+      setReady(true);
+      return;
+    }
+
     if (saved && saved.length >= 32) {
       const short = shortSolanaAddress(saved);
       const uname = savedUser || short;
@@ -185,7 +181,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
         username: uname,
         name: `@${uname}`,
         email: `${uname}@bitnoir.io`,
-        isAdmin: uname === 'satoshi' || uname === 'admin',
+        isAdmin: false,
       });
       setReady(true);
       return;
@@ -210,31 +206,13 @@ function AuthProvider({ children }: { children: ReactNode }) {
           });
         })
         .catch(() => {
-          // Default to genesis miner node
-          const defaultAddress = 'member-alpha';
-          setUser({
-            id: defaultAddress,
-            solanaAddress: PROTOCOL_TREASURY_SOLANA,
-            username: 'satoshinode',
-            name: '@satoshinode',
-            email: 'satoshi@bitnoir.io',
-            isAdmin: true,
-          });
+          setUser(null);
         })
         .finally(() => {
           setReady(true);
         });
     } else {
-      // Demo ready state
-      const defaultAddress = 'member-alpha';
-      setUser({
-        id: defaultAddress,
-        solanaAddress: PROTOCOL_TREASURY_SOLANA,
-        username: 'satoshinode',
-        name: '@satoshinode',
-        email: 'satoshi@bitnoir.io',
-        isAdmin: true,
-      });
+      setUser(null);
       setReady(true);
     }
   }, []);
@@ -334,11 +312,10 @@ function TopWalletConnect() {
       });
     } catch (err: any) {
       if (err?.message === 'PHANTOM_NOT_INSTALLED') {
-        const demoAddr = 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK';
-        await connectWallet(demoAddr);
         toast({
-          title: 'Demo Wallet Connected',
-          description: `Connected as @${shortSolanaAddress(demoAddr)}`,
+          title: 'Phantom Wallet Required',
+          description: 'Please install or unlock the Phantom wallet browser extension.',
+          variant: 'destructive',
         });
       } else {
         toast({
@@ -361,7 +338,7 @@ function TopWalletConnect() {
         className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#00f59b]/15 hover:bg-[#00f59b]/25 border border-[#00f59b]/40 text-[#00f59b] text-xs font-bold transition-all cursor-pointer shadow-sm"
       >
         <Wallet size={14} />
-        <span>{connecting ? 'Connecting…' : 'Connect Phantom Wallet'}</span>
+        <span>{connecting ? 'Connecting…' : 'Connect'}</span>
       </button>
     );
   }
@@ -770,7 +747,7 @@ function ClaimedPointsOverlayModal({
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <BitsMark size={32} className="drop-shadow-[0_0_12px_rgba(0,245,155,0.4)]" />
+            <BitsMark size={32} />
             <div>
               <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: '-0.01em' }}>
                 Claimed Points Ledger
@@ -1077,115 +1054,7 @@ function DirectReferralModal({
   );
 }
 
-// ---------------------------------------------------------------------------
-// SOULBOUND MINING PASS MODAL (IN-MODAL MINTING)
-// ---------------------------------------------------------------------------
-function MintPassModal({
-  open,
-  onClose,
-  ownerAddress,
-  onMintSuccess,
-}: {
-  open: boolean;
-  onClose: () => void;
-  ownerAddress: string;
-  onMintSuccess: (pass: MiningPassData) => void;
-}) {
-  const [minting, setMinting] = useState(false);
 
-  if (!open) return null;
-
-  const handleMint = async () => {
-    setMinting(true);
-    try {
-      const pass = await mintMiningPass({ ownerAddress });
-      saveMiningPass(pass);
-      onMintSuccess(pass);
-      toast({
-        title: 'Mining Pass Minted!',
-        description: `Soulbound Pass ${pass.passId} verified on Solana. 100% mining velocity unlocked!`,
-      });
-      onClose();
-    } catch (err: any) {
-      toast({
-        title: 'Mint failed',
-        description: readableError(err, 'Could not complete pass mint.'),
-        variant: 'destructive',
-      });
-    } finally {
-      setMinting(false);
-    }
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480, textAlign: 'center' }}>
-        <div className="modal-header" style={{ justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255, 139, 47, 0.15)', display: 'grid', placeItems: 'center', color: '#ff8b2f' }}>
-              <Sparkles size={18} />
-            </div>
-            <div style={{ textAlign: 'left' }}>
-              <h3 style={{ margin: 0, color: '#fff', fontSize: 18, fontWeight: 700 }}>Soulbound Mining Pass</h3>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>Solana Non-Transferable Node Identity</p>
-            </div>
-          </div>
-          <button className="modal-close-btn" type="button" onClick={onClose}><X size={18} /></button>
-        </div>
-
-        <div className="py-4 flex flex-col items-center gap-4">
-          <div className="w-24 h-24 rounded-2xl bg-gradient-to-tr from-[#ff8b2f]/20 via-[#00f59b]/20 to-[#38bdf8]/20 border-2 border-[#00f59b]/40 flex items-center justify-center shadow-[0_0_30px_rgba(0,245,155,0.2)]">
-            <BitsMark size={64} className="drop-shadow-[0_0_15px_rgba(0,245,155,0.5)]" />
-          </div>
-
-          <div>
-            <div className="text-xs uppercase tracking-widest text-[#00f59b] font-mono font-bold mb-1">
-              Proof-of-Power Pass
-            </div>
-            <h4 className="text-xl font-bold text-white m-0">
-              0.02 SOL One-Time Verification
-            </h4>
-            <p className="text-xs text-slate-300 max-w-sm mx-auto mt-2 leading-relaxed">
-              Mint your permanent soulbound identifier on Solana. Locks onchain sybil resistance and activates full 24-hour mining tank claims.
-            </p>
-          </div>
-
-          <div className="w-full p-3 rounded-xl bg-white/[0.03] border border-white/8 text-xs font-mono text-left space-y-1.5">
-            <div className="flex justify-between text-slate-400">
-              <span>Node Address</span>
-              <span className="text-white font-bold">{shortSolanaAddress(ownerAddress)}</span>
-            </div>
-            <div className="flex justify-between text-slate-400">
-              <span>Network</span>
-              <span className="text-white font-bold">Solana Devnet / Mainnet</span>
-            </div>
-            <div className="flex justify-between text-slate-400">
-              <span>Standard Fee</span>
-              <span className="text-[#00f59b] font-bold">0.02 SOL</span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            className="clean-stake-confirm-btn !bg-gradient-to-r !from-[#00f59b] !to-[#38bdf8] !text-black !font-bold w-full"
-            disabled={minting}
-            onClick={handleMint}
-          >
-            {minting ? (
-              <span className="flex items-center justify-center gap-2">
-                <RefreshCw size={14} className="animate-spin" /> Minting on Solana…
-              </span>
-            ) : (
-              <span className="flex items-center justify-center gap-2">
-                <Sparkles size={16} /> Mint Soulbound Miner Pass (0.02 SOL)
-              </span>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // STOPWATCH-STYLE LIVE MINING POINTS COUNTER (PRECISION ODOMETER TICKER)
@@ -1204,7 +1073,7 @@ function StopwatchPointsCounter({
   return (
     <div className="stopwatch-counter-cockpit my-1">
       <div className="flex items-center gap-3.5 select-none">
-        <BitsMark size={42} className="drop-shadow-[0_0_16px_rgba(0,245,155,0.4)] flex-shrink-0" />
+        <BitsMark size={42} className="flex-shrink-0" />
         <div className="flex items-baseline font-mono select-none">
           <span className="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight tabular-nums">
             {intPart}
@@ -1237,17 +1106,11 @@ function MiningPage() {
   const [solPowerModalOpen, setSolPowerModalOpen] = useState(false);
   const [claimedOverlayOpen, setClaimedOverlayOpen] = useState(false);
   const [referralModalOpen, setReferralModalOpen] = useState(false);
-  const [mintPassModalOpen, setMintPassModalOpen] = useState(false);
   const [isContributing, setIsContributing] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
 
   const account = accountQuery.data;
   const currentOwner = user?.solanaAddress || account?.id || 'member-alpha';
-  const [isVerified, setIsVerified] = useState(() => isWalletPassVerified(currentOwner));
-
-  useEffect(() => {
-    setIsVerified(isWalletPassVerified(currentOwner));
-  }, [currentOwner]);
 
   // 1. Base Rate: 0.1 Bits Per Hour (0.1000 Bits/hr)
   const baseRatePerHour = 0.1000;
@@ -1320,6 +1183,15 @@ function MiningPage() {
   const minClaimThresholdPercent = 20; // Minimum 20% cycle required
   const tankFillPercent = Math.min(100, (unclaimedBits / (tankCapacity || 1)) * 100);
   const is20PercentReached = tankFillPercent >= minClaimThresholdPercent;
+
+  // 24-hour cycle countdown timer
+  const cycleTotalSeconds = 24 * 3600;
+  const elapsedSeconds = Math.min(cycleTotalSeconds, (unclaimedBits / (totalMiningRatePerHour || 1)) * 3600);
+  const remainingSeconds = Math.max(0, cycleTotalSeconds - elapsedSeconds);
+  const remH = Math.floor(remainingSeconds / 3600);
+  const remM = Math.floor((remainingSeconds % 3600) / 60);
+  const remS = Math.floor(remainingSeconds % 60);
+  const countdownTimer = `${remH.toString().padStart(2, '0')}:${remM.toString().padStart(2, '0')}:${remS.toString().padStart(2, '0')}`;
 
   // Claim history list
   const [claimHistoryList, setClaimHistoryList] = useState([
@@ -1406,7 +1278,6 @@ function MiningPage() {
     }
   };
 
-  const savedPass = getSavedMiningPass(currentOwner);
 
   return (
     <div className="min-h-screen bg-[#07080b] text-[#eff3f8] flex flex-col font-sans">
@@ -1424,12 +1295,9 @@ function MiningPage() {
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
         {/* 1. TOP HEADER WITH OFFICIAL BITS LOGO & CLEAN ACTION BUTTONS */}
         <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
-          <div className="flex items-center gap-3">
-            <BitsMark size={38} className="drop-shadow-[0_0_14px_rgba(0,245,155,0.35)] flex-shrink-0" />
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Bits Mining</h1>
-              <span className="w-2.5 h-2.5 rounded-full bg-[#00f59b] animate-ping" />
-            </div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Bits Mining</h1>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#00f59b] animate-ping" />
           </div>
 
           <div className="flex items-center gap-2">
@@ -1461,49 +1329,6 @@ function MiningPage() {
           </div>
         </div>
 
-        {/* WALLET VERIFICATION STATUS BANNER */}
-        {!isVerified ? (
-          <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center flex-shrink-0 text-amber-400 mt-0.5">
-                <ShieldAlert size={18} />
-              </div>
-              <div>
-                <div className="text-sm font-bold text-white flex items-center gap-2">
-                  <span>Wallet Verification Required</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold uppercase">Unverified</span>
-                </div>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  New miners must verify their Solana wallet with the 0.02 SOL Soulbound Mining Pass to lock onchain proof-of-power.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setMintPassModalOpen(true)}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#ff8b2f] to-[#f5a623] text-black font-mono font-bold text-xs uppercase tracking-wider hover:opacity-95 transition-all flex-shrink-0 cursor-pointer shadow-md"
-            >
-              <Sparkles size={14} /> Mint Miner Pass
-            </button>
-          </div>
-        ) : (
-          <div className="mb-6 px-4 py-3 rounded-2xl bg-[#00f59b]/10 border border-[#00f59b]/25 flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 text-white">
-              <ShieldCheck size={18} className="text-[#00f59b] flex-shrink-0" />
-              <span>
-                <strong className="text-[#00f59b]">Verified Miner:</strong> Soulbound Mining Pass active ({savedPass?.passId || '#BN-SOL-0001'}) — 100% Hashrate velocity unlocked.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setMintPassModalOpen(true)}
-              className="text-[11px] font-mono text-[#00f59b] hover:underline flex items-center gap-1 flex-shrink-0 cursor-pointer"
-            >
-              Pass Info <ChevronRight size={12} />
-            </button>
-          </div>
-        )}
-
         {/* 2. MINING COCKPIT */}
         <div className="pob-cockpit mb-6">
           <div className="pob-cockpit-hero">
@@ -1533,16 +1358,23 @@ function MiningPage() {
                   title="20% Minimum Claim Unlock Notch"
                 />
               </div>
-              <div className="flex justify-between max-w-md text-[10px] font-mono text-slate-400 mt-1">
-                <span>Storage Tank: {tankFillPercent.toFixed(1)}%</span>
-                <span className={is20PercentReached ? 'text-[#00f59b] font-bold' : ''}>
-                  {is20PercentReached ? 'Ready to Claim' : '20% to Unlock'}
-                </span>
-              </div>
             </div>
 
             {/* TOP BUTTONS: MINERS BUTTON ALONG WITH CLAIMED LEDGER POINT BUTTON */}
             <div className="pob-live-action flex flex-col items-end">
+              {/* Progress & Countdown Timer above Miners & Ledger */}
+              <div className="flex items-center gap-2 mb-1.5 justify-end text-[11px] font-mono select-none">
+                <span className="flex items-center gap-1">
+                  <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Progress</span>
+                  <span className="text-[#00f59b] font-bold tabular-nums">{tankFillPercent.toFixed(1)}%</span>
+                </span>
+                <span className="text-slate-600">·</span>
+                <span className="flex items-center gap-1">
+                  <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Timer</span>
+                  <span className="text-white font-bold tabular-nums">{countdownTimer}</span>
+                </span>
+              </div>
+
               <div className="flex items-center gap-1.5 mb-2 justify-end flex-wrap">
                 {/* MINERS BUTTON */}
                 <button
@@ -1580,12 +1412,10 @@ function MiningPage() {
               >
                 {isClaiming ? (
                   <RefreshCw size={13} className="animate-spin" />
-                ) : is20PercentReached ? (
-                  <Sparkles size={13} className="text-[#04120c]" />
-                ) : (
+                ) : is20PercentReached ? null : (
                   <Lock size={13} className="text-slate-400" />
                 )}
-                <span>{isClaiming ? 'Claiming…' : 'Claim Mined Bits'}</span>
+                <span>{isClaiming ? 'Claiming…' : 'Claim'}</span>
               </button>
             </div>
           </div>
@@ -1641,13 +1471,6 @@ function MiningPage() {
       />
 
       <MiningGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
-
-      <MintPassModal
-        open={mintPassModalOpen}
-        onClose={() => setMintPassModalOpen(false)}
-        ownerAddress={currentOwner}
-        onMintSuccess={() => setIsVerified(true)}
-      />
     </div>
   );
 }
