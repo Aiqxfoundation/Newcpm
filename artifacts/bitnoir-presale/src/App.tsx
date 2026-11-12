@@ -527,101 +527,32 @@ function TopWalletConnect({ compact = false }: { compact?: boolean }) {
         type="button"
         onClick={handleConnect}
         disabled={connecting}
-        style={{
-          background: 'linear-gradient(135deg, #ab9ff2 0%, #7857ff 100%)',
-          color: '#ffffff',
-          fontWeight: 700,
-          fontSize: 13,
-          padding: '8px 16px',
-          borderRadius: 999,
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 8,
-          border: 'none',
-          cursor: connecting ? 'wait' : 'pointer',
-          boxShadow: '0 4px 14px rgba(120, 87, 255, 0.35)',
-          transition: 'all 0.15s ease',
-        }}
+        className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#00f59b]/15 hover:bg-[#00f59b]/25 border border-[#00f59b]/40 text-[#00f59b] text-xs font-bold transition-all cursor-pointer shadow-sm"
       >
-        <PhantomLogo size={16} />
-        <span>{connecting ? 'Connecting…' : 'Connect Phantom'}</span>
+        <Wallet size={13} />
+        <span>{connecting ? 'Connecting…' : 'Connect Wallet'}</span>
       </button>
     );
   }
 
   const shortAddr = shortSolanaAddress(user.solanaAddress);
+  const usernameDisplay = user.username && !user.username.startsWith('DYw8') && !user.username.includes('...')
+    ? user.username.replace(/^@/, '')
+    : shortAddr;
 
   return (
     <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8 }} ref={dropdownRef}>
-      {/* MINING PASS INDICATOR PILL */}
-      <Link
-        href="/staking"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '5px 11px',
-          borderRadius: 999,
-          fontSize: 11,
-          fontFamily: 'monospace',
-          fontWeight: 700,
-          background: passData ? 'rgba(0, 245, 155, 0.1)' : 'rgba(255, 139, 47, 0.14)',
-          border: passData ? '1px solid rgba(0, 245, 155, 0.3)' : '1px solid rgba(255, 139, 47, 0.35)',
-          color: passData ? '#00f59b' : '#ff8b2f',
-          textDecoration: 'none',
-        }}
-        title={passData ? `Active Mining Pass: ${passData.passId} (Verified Onchain)` : '0.02 SOL Mining Pass Required to Mine Bits'}
-      >
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: passData ? '#00f59b' : '#ff8b2f',
-            boxShadow: passData ? '0 0 8px #00f59b' : '0 0 8px #ff8b2f',
-          }}
-        />
-        <span>{passData ? passData.passId : 'Mint Pass (0.02 SOL)'}</span>
-      </Link>
-
       {/* WALLET BUTTON */}
       <button
         type="button"
         onClick={() => setMenuOpen(!menuOpen)}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 8,
-          background: 'rgba(255, 255, 255, 0.06)',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
-          borderRadius: 999,
-          padding: '6px 12px 6px 8px',
-          cursor: 'pointer',
-          color: '#ffffff',
-          fontSize: 13,
-          fontWeight: 700,
-          transition: 'all 0.15s ease',
-        }}
+        className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.12] text-white text-xs font-mono font-medium transition-all cursor-pointer shadow-sm"
       >
-        <div
-          style={{
-            width: 22,
-            height: 22,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #ab9ff2, #7857ff)',
-            display: 'grid',
-            placeItems: 'center',
-          }}
-        >
-          <PhantomLogo size={12} />
+        <div className="w-5 h-5 rounded-full bg-[#00f59b]/15 border border-[#00f59b]/30 flex items-center justify-center text-[#00f59b]">
+          <Wallet size={11} />
         </div>
-        <span className="mono">@{shortAddr}</span>
-        {solBalance !== null && (
-          <span style={{ fontSize: 11, color: '#94a3b8', borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: 6 }}>
-            ◎ {solBalance.toFixed(2)}
-          </span>
-        )}
-        <ChevronDown size={13} style={{ color: '#94a3b8', transform: menuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+        <span>{usernameDisplay}</span>
+        <ChevronDown size={12} className={`text-slate-400 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {/* DROPDOWN POPOVER */}
@@ -686,6 +617,16 @@ function TopWalletConnect({ compact = false }: { compact?: boolean }) {
             </div>
           </div>
 
+          <Link
+            href="/wallet"
+            onClick={() => setMenuOpen(false)}
+            className="button button-soft !min-h-[34px] !text-xs !w-full !mb-2.5 !border-[#00f59b]/35 !text-[#00f59b] hover:!bg-[#00f59b]/10"
+            style={{ width: '100%', justifyContent: 'center', textDecoration: 'none' }}
+          >
+            <Wallet size={13} />
+            <span>Open Wallet & Balances</span>
+          </Link>
+
           <button
             type="button"
             className="button button-soft !min-h-[32px] !text-xs !w-full"
@@ -715,8 +656,7 @@ function PublicHeader({ hideSignIn = false }: { hideSignIn?: boolean }) {
       </Link>
       <nav className="nav-links" aria-label="Main Navigation">
         <Link href="/" className={location === '/' ? 'active' : ''}>Overview</Link>
-        <Link href="/staking" className={location === '/staking' || location === '/mining' ? 'active' : ''}>Mining</Link>
-        <Link href="/wallet" className={location.startsWith('/wallet') || location === '/deposit' ? 'active' : ''}>Wallet</Link>
+        <Link href="/staking" className={location === '/staking' || location === '/mining' ? 'active' : ''}>Bits Mining</Link>
         <Link href="/docs" className={location === '/docs' || location === '/whitepaper' ? 'active' : ''}>Whitepaper</Link>
       </nav>
       <div className="top-actions">
@@ -810,7 +750,7 @@ function LandingArchitectureSvg() {
           <text x="844" y="54" fill="#ffffff" fontSize="12" fontWeight="bold" fontFamily="sans-serif">SETTLEMENT</text>
           <text x="844" y="69" fill="#00f59b" fontSize="10" fontFamily="monospace">21M FIXED CAP</text>
           <rect x="804" y="98" width="122" height="24" rx="6" fill="rgba(0, 245, 155, 0.12)" stroke="rgba(0, 245, 155, 0.25)" strokeWidth="1" />
-          <text x="865" y="114" textAnchor="middle" fill="#00f59b" fontSize="10" fontWeight="bold" fontFamily="monospace">BITNOIR ($NOIR)</text>
+          <text x="865" y="114" textAnchor="middle" fill="#00f59b" fontSize="10" fontWeight="bold" fontFamily="monospace">BITNOIR</text>
         </g>
       </svg>
     </div>
@@ -1585,7 +1525,7 @@ function HomePage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
                 <BitsMark size={32} />
                 <div>
-                  <h3 style={{ margin: 0, fontSize: 20, color: '#ffffff', fontWeight: 800 }}>Bits Token (BIT)</h3>
+                  <h3 style={{ margin: 0, fontSize: 20, color: '#ffffff', fontWeight: 800 }}>Bits</h3>
                   <span style={{ fontSize: 12, color: '#00f59b', fontWeight: 600 }}>Utility & Mining Reward Unit</span>
                 </div>
               </div>
@@ -1613,7 +1553,7 @@ function HomePage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
                 <img src="/asset-bitnoir.png" alt="Bitnoir" style={{ width: 34, height: 34, objectFit: 'contain' }} />
                 <div>
-                  <h3 style={{ margin: 0, fontSize: 20, color: '#ffffff', fontWeight: 800 }}>Bitnoir ($NOIR)</h3>
+                  <h3 style={{ margin: 0, fontSize: 20, color: '#ffffff', fontWeight: 800 }}>Bitnoir</h3>
                   <span style={{ fontSize: 12, color: '#f5a623', fontWeight: 600 }}>21,000,000 Hard Cap Governance</span>
                 </div>
               </div>
@@ -2036,9 +1976,7 @@ function SignUpPage() {
 // ---------------------------------------------------------------------------
 // Clean Coinbase-style unified tab architecture (eliminating tab clutter)
 const navMain = [
-  { href: '/wallet', label: 'Wallet', description: 'Portfolio, balances & assets', icon: Wallet },
   { href: '/staking', label: 'Bits Mining', description: 'Base 0.1/hr, team boost & SOL Power', icon: Flame },
-  { href: '/docs', label: 'Whitepaper', description: 'Protocol specifications', icon: BookOpen },
 ];
 
 function AppShell({
@@ -2076,7 +2014,7 @@ function AppShell({
       {/* SIDEBAR */}
       <aside className={`sidebar ${menuOpen ? 'mobile-open' : ''}`}>
         <div className="sidebar-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Link href="/wallet" onClick={() => setMenuOpen(false)}>
+          <Link href="/staking" onClick={() => setMenuOpen(false)}>
             <Brand size="sm" />
           </Link>
           <button className="mobile-close-button" type="button" onClick={() => setMenuOpen(false)}>
@@ -2087,8 +2025,7 @@ function AppShell({
         <div className="side-caption">Ecosystem Navigation</div>
         <nav className="sidebar-nav">
           {navMain.map(({ href, label, description, icon: Icon }) => {
-            const isWalletActive = href === '/wallet' && (active === '/deposit' || active.startsWith('/asset') || active === '/activity' || active === '/transactions');
-            const isActive = active === href || isWalletActive;
+            const isActive = active === href || (href === '/staking' && (active === '/mining' || active === '/deposit'));
 
             return (
               <Link
@@ -2159,6 +2096,11 @@ function AppShell({
 
       {/* MAIN CONTENT AREA */}
       <main className="main-area">
+        {/* TOP OF CONNECT WALLET OPTION */}
+        <div className="flex items-center justify-end py-2.5 mb-5 border-b border-white/[0.08]">
+          <TopWalletConnect />
+        </div>
+
         <div className="page-wrap">{children}</div>
       </main>
     </div>
@@ -2583,8 +2525,10 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
   const balances = (account.balances as unknown as Record<string, number>) || {};
   const claimableBitnoir = balances.claimable || 0;
   const claimedBitnoir = balances.claimed || 0;
-  const miningData = (account as unknown as { mining?: { minedBitsTotalClaimed?: number } }).mining;
+  const miningData = (account as unknown as { mining?: { minedBitsTotalClaimed?: number; burnedSol?: number; contributedSol?: number } }).mining;
   const initialBits = miningData?.minedBitsTotalClaimed ?? 120.5;
+  const contributedSol = miningData?.burnedSol ?? miningData?.contributedSol ?? 0.5;
+  const solPowerBoostPerHour = contributedSol * 5.0;
 
   const [activeTab, setActiveTab] = useState<'tokens' | 'activity'>('tokens');
   const [sendOpen, setSendOpen] = useState(false);
@@ -2696,473 +2640,146 @@ function WalletPage({ account, initialAsset }: { account: UserAccount; initialAs
 
   return (
     <AppShell active="/wallet" admin={account.role === 'admin'}>
-      <div className="wallet-clean-page-wrapper">
-        <div className="wallet-clean-card">
-          {/* 1. TOP BAR: WALLET PILL + RIGHT ACTION ICONS */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-            {/* WALLET SELECTOR PILL */}
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard?.writeText(solanaAddr);
-                toast({
-                  title: 'Address Copied',
-                  description: `Solana address ${shortSolanaAddress(solanaAddr)} copied to clipboard.`,
-                });
-              }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: 999,
-                padding: '6px 14px 6px 8px',
-                cursor: 'pointer',
-                color: '#ffffff',
-              }}
-              title={`Connected Phantom Solana Address: ${solanaAddr} (Click to copy)`}
-            >
-              <div
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, #ab9ff2, #7857ff)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: '#ffffff',
-                }}
-              >
-                <PhantomLogo size={13} />
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#ffffff' }}>@{userHandle}</span>
-              <Copy size={12} style={{ color: '#94a3b8' }} />
-            </button>
-
-            {/* TOP RIGHT ICONS: HISTORY & QR */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setActiveTab(activeTab === 'activity' ? 'tokens' : 'activity')}
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: '50%',
-                  background: activeTab === 'activity' ? 'rgba(0, 245, 155, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: activeTab === 'activity' ? '#00f59b' : '#cbd5e1',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-                aria-label="History"
-              >
-                <FileClock size={16} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setReceiveTarget('bits');
-                  setReceiveOpen(true);
-                }}
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: '50%',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: '#cbd5e1',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-                aria-label="Receive QR"
-              >
-                <QrCode size={16} />
-              </button>
+      {/* 1. CLEAN PORTFOLIO VALUATION */}
+      <div className="pob-cockpit mb-6">
+        <div className="pob-cockpit-hero">
+          <div className="pob-live-info">
+            <div className="text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-1">
+              Total Portfolio Valuation
             </div>
-          </div>
-
-          {/* 2. HERO BALANCE (PURE NUMBERS, LOW TEXT) */}
-          <div style={{ textAlign: 'left', marginBottom: 24, padding: '4px 2px' }}>
-            <div
-              style={{
-                fontSize: 40,
-                fontWeight: 800,
-                color: '#ffffff',
-                letterSpacing: '-0.03em',
-                lineHeight: 1.1,
-                fontFamily: 'monospace',
-              }}
-            >
+            <div className="text-3xl md:text-4xl font-extrabold text-white font-mono tracking-tight tabular-nums">
               {money(totalPortfolioValueUsd)}
             </div>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                fontSize: 13,
-                fontWeight: 600,
-                color: '#00f59b',
-                marginTop: 6,
-              }}
-            >
-              <span style={{ fontSize: 10 }}>▲</span>
-              <span>+$1.48 (6.8%)</span>
-            </div>
           </div>
-
-          {/* 3. FOUR CLEAN ACTION BUTTONS IN A ROW */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 10,
-              marginBottom: 24,
-            }}
-          >
-            {/* SEND */}
-            <button
-              type="button"
-              onClick={() => setSendOpen(true)}
-              className="wallet-action-clean-btn"
-            >
-              <ArrowUpRight size={20} strokeWidth={2.4} />
-              <span>Send</span>
-            </button>
-
-            {/* RECEIVE */}
-            <button
-              type="button"
-              onClick={() => {
-                setReceiveTarget('bits');
-                setReceiveOpen(true);
-              }}
-              className="wallet-action-clean-btn"
-            >
-              <ArrowDownLeft size={20} strokeWidth={2.4} />
-              <span>Receive</span>
-            </button>
-
-            {/* SWAP */}
-            <button
-              type="button"
-              onClick={() => setConvertOpen(true)}
-              className="wallet-action-clean-btn highlight-swap"
-            >
-              <RefreshCw size={19} strokeWidth={2.4} />
-              <span>Swap</span>
-            </button>
-
-            {/* ACTIVITY */}
-            <button
-              type="button"
-              onClick={() => setActiveTab(activeTab === 'activity' ? 'tokens' : 'activity')}
-              className={`wallet-action-clean-btn ${activeTab === 'activity' ? 'active-tab-btn' : ''}`}
-            >
-              <Activity size={20} strokeWidth={2.4} />
-              <span>Activity</span>
-            </button>
-          </div>
-
-          {/* 4. SEGMENTED TABS: TOKENS / ACTIVITY */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 14,
-              borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-              paddingBottom: 10,
-            }}
-          >
-            <div style={{ display: 'flex', gap: 16 }}>
-              <button
-                type="button"
-                onClick={() => setActiveTab('tokens')}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: activeTab === 'tokens' ? '#ffffff' : '#64748b',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: 0,
-                  transition: 'color 0.15s ease',
-                }}
-              >
-                <span>Tokens</span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    background: activeTab === 'tokens' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.04)',
-                    color: activeTab === 'tokens' ? '#ffffff' : '#64748b',
-                    padding: '1px 6px',
-                    borderRadius: 999,
-                  }}
-                >
-                  2
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('activity')}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: activeTab === 'activity' ? '#ffffff' : '#64748b',
-                  cursor: 'pointer',
-                  padding: 0,
-                  transition: 'color 0.15s ease',
-                }}
-              >
-                Activity
-              </button>
-            </div>
-          </div>
-
-          {/* 5. TAB CONTENT */}
-          {activeTab === 'tokens' ? (
-            /* TOKENS LIST */
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {/* TOKEN 1: BITS */}
-              <div
-                className="wallet-clean-token-row"
-                onClick={() => setSelectedAsset('bits')}
-                role="button"
-                tabIndex={0}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ position: 'relative', width: 42, height: 42, minWidth: 42 }}>
-                    <img
-                      src="/asset-bits-md.png"
-                      alt="Bits"
-                      style={{ width: 42, height: 42, objectFit: 'contain' }}
-                      width={42}
-                      height={42}
-                    />
-                    <div
-                      style={{
-                        position: 'absolute',
-                        right: -2,
-                        bottom: -2,
-                        width: 14,
-                        height: 14,
-                        borderRadius: '50%',
-                        background: '#00f59b',
-                        border: '2px solid #0a0f19',
-                        display: 'grid',
-                        placeItems: 'center',
-                      }}
-                    >
-                      <Zap size={8} style={{ color: '#000', fill: '#000' }} />
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#ffffff', lineHeight: 1.2 }}>
-                      Bits
-                    </div>
-                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2, fontFamily: 'monospace' }}>
-                      {bitsBalance.toFixed(4)} BITS
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ textAlign: 'right' }}>
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 700,
-                      color: '#ffffff',
-                      fontFamily: 'monospace',
-                    }}
-                  >
-                    {money(bitsValueUsd)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: '#00f59b',
-                      marginTop: 2,
-                    }}
-                  >
-                    +$1.48
-                  </div>
-                </div>
-              </div>
-
-              {/* TOKEN 2: BITNOIR */}
-              <div
-                className="wallet-clean-token-row"
-                onClick={() => setSelectedAsset('bitnoir')}
-                role="button"
-                tabIndex={0}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ position: 'relative', width: 42, height: 42, minWidth: 42 }}>
-                    <img
-                      src="/asset-bitnoir-md.png"
-                      alt="Bitnoir"
-                      style={{ width: 42, height: 42, objectFit: 'contain' }}
-                      width={42}
-                      height={42}
-                    />
-                    <div
-                      style={{
-                        position: 'absolute',
-                        right: -2,
-                        bottom: -2,
-                        width: 14,
-                        height: 14,
-                        borderRadius: '50%',
-                        background: '#38bdf8',
-                        border: '2px solid #0a0f19',
-                        display: 'grid',
-                        placeItems: 'center',
-                        fontSize: 8,
-                        fontWeight: 900,
-                        color: '#000',
-                      }}
-                    >
-                      B
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#ffffff', lineHeight: 1.2 }}>
-                      Bitnoir
-                    </div>
-                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2, fontFamily: 'monospace' }}>
-                      {totalBitnoirTokens.toFixed(4)} BITNOIR
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ textAlign: 'right' }}>
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 700,
-                      color: '#ffffff',
-                      fontFamily: 'monospace',
-                    }}
-                  >
-                    {money(bitnoirValueUsd)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: '#38bdf8',
-                      marginTop: 2,
-                    }}
-                  >
-                    Soon
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* ACTIVITY TAB (DATE-GROUPED, LOW TEXT, MATCHING SCREENSHOT 2) */
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {['Today', 'Yesterday', 'Earlier'].map((group) => {
-                const groupItems = transactions.filter((tx) => tx.dateGroup === group);
-                if (groupItems.length === 0) return null;
-                return (
-                  <div key={group}>
-                    <div className="wallet-activity-date-group">{group}</div>
-                    {groupItems.map((tx) => (
-                      <div
-                        key={tx.id}
-                        className="wallet-activity-clean-row"
-                        onClick={() =>
-                          setSelectedTx({
-                            id: tx.id,
-                            kind: tx.kind,
-                            title: tx.title,
-                            detail: tx.subtext,
-                            createdAt: tx.createdAt,
-                            amountText: tx.amountPrimary,
-                          })
-                        }
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ position: 'relative', width: 36, height: 36, minWidth: 36 }}>
-                            <img
-                              src={tx.token === 'bitnoir' ? '/asset-bitnoir-md.png' : '/asset-bits-md.png'}
-                              alt={tx.title}
-                              style={{ width: 36, height: 36, objectFit: 'contain' }}
-                            />
-                            <div
-                              style={{
-                                position: 'absolute',
-                                right: -2,
-                                bottom: -2,
-                                width: 14,
-                                height: 14,
-                                borderRadius: '50%',
-                                background: tx.isPositive ? '#22c55e' : '#ef4444',
-                                color: '#ffffff',
-                                display: 'grid',
-                                placeItems: 'center',
-                                border: '1.5px solid #0a0f19',
-                              }}
-                            >
-                              {tx.isPositive ? <ArrowDownLeft size={8} strokeWidth={3} /> : <ArrowUpRight size={8} strokeWidth={3} />}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: '#ffffff', lineHeight: 1.2 }}>
-                              {tx.title}
-                            </div>
-                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, fontFamily: 'monospace' }}>
-                              {tx.subtext}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div style={{ textAlign: 'right' }}>
-                          <div
-                            style={{
-                              fontSize: 13,
-                              fontWeight: 700,
-                              color: tx.isPositive ? '#00f59b' : '#ffffff',
-                              fontFamily: 'monospace',
-                            }}
-                          >
-                            {tx.amountPrimary}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 11,
-                              color: '#64748b',
-                              marginTop: 1,
-                              fontFamily: 'monospace',
-                            }}
-                          >
-                            {tx.amountSecondary}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
+
+      {/* 2. TWO-COLUMN ARCHITECTURAL SYSTEM (ASSETS & ACTIVITY) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+        {/* LEFT COLUMN: ASSET HOLDINGS (7 Cols) */}
+        <div className="lg:col-span-7 flex flex-col gap-3">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-bold font-mono uppercase tracking-wider text-slate-400 flex items-center gap-2 m-0">
+              <Coins size={14} className="text-[#00f59b]" />
+              <span>Asset Holdings</span>
+            </h2>
+            <span className="text-xs font-mono text-slate-500">2 Assets</span>
+          </div>
+
+          {/* ASSET 1: BITS (CLEAN ARCHITECTURAL ROW) */}
+          <div
+            className="pob-cockpit !bg-[#0b101a] hover:border-white/20 transition-all cursor-pointer p-4"
+            onClick={() => setSelectedAsset('bits')}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <BitsMark size={40} className="drop-shadow-[0_0_12px_rgba(0,245,155,0.3)] flex-shrink-0" />
+                <div>
+                  <strong className="text-base text-white font-bold">Bits</strong>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 text-right">
+                <div>
+                  <div className="text-base font-mono font-bold text-white tabular-nums">
+                    {bitsBalance.toFixed(4)} <span className="text-xs text-slate-400 font-normal">BITS</span>
+                  </div>
+                  <div className="text-xs font-mono text-[#00f59b]">
+                    ≈ {money(bitsValueUsd)}
+                  </div>
+                </div>
+                <ChevronRight size={14} className="text-slate-500" />
+              </div>
+            </div>
+          </div>
+
+          {/* ASSET 2: BITNOIR (CLEAN ARCHITECTURAL ROW) */}
+          <div
+            className="pob-cockpit !bg-[#0b101a] hover:border-white/20 transition-all cursor-pointer p-4"
+            onClick={() => setSelectedAsset('bitnoir')}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <TokenMark size={40} className="drop-shadow-[0_0_12px_rgba(255,139,47,0.3)] flex-shrink-0" />
+                <div>
+                  <strong className="text-base text-white font-bold">Bitnoir</strong>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 text-right">
+                <div>
+                  <div className="text-base font-mono font-bold text-white tabular-nums">
+                    {totalBitnoirTokens.toFixed(4)} <span className="text-xs text-slate-400 font-normal">NOIR</span>
+                  </div>
+                  <div className="text-xs font-mono text-[#38bdf8]">
+                    ≈ {money(bitnoirValueUsd)}
+                  </div>
+                </div>
+                <ChevronRight size={14} className="text-slate-500" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: WALLET ACTIVITY LEDGER (5 Cols) */}
+        <div className="lg:col-span-5 flex flex-col gap-3">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-sm font-bold font-mono uppercase tracking-wider text-slate-400 flex items-center gap-2 m-0">
+              <Activity size={14} className="text-[#38bdf8]" />
+              <span>Wallet Activity</span>
+            </h2>
+            <span className="text-xs font-mono text-slate-500">Live Ledger</span>
+          </div>
+
+          <div className="pob-cockpit !bg-[#0b101a] p-3 flex flex-col gap-2">
+            {transactions.map((tx) => (
+              <div
+                key={tx.id}
+                onClick={() =>
+                  setSelectedTx({
+                    id: tx.id,
+                    kind: tx.kind,
+                    title: tx.title,
+                    detail: tx.subtext,
+                    createdAt: tx.createdAt,
+                    amountText: tx.amountPrimary,
+                  })
+                }
+                className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.04] transition-all cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="relative w-9 h-9 min-w-9">
+                    <img
+                      src={tx.token === 'bitnoir' ? '/asset-bitnoir-md.png' : '/asset-bits-md.png'}
+                      alt={tx.title}
+                      className="w-9 h-9 object-contain"
+                    />
+                    <div
+                      className={`absolute -right-1 -bottom-1 w-3.5 h-3.5 rounded-full flex items-center justify-center border border-[#0a0f19] text-white ${
+                        tx.isPositive ? 'bg-[#22c55e]' : 'bg-[#ef4444]'
+                      }`}
+                    >
+                      {tx.isPositive ? <ArrowDownLeft size={7} strokeWidth={3} /> : <ArrowUpRight size={7} strokeWidth={3} />}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white leading-tight">{tx.title}</div>
+                    <div className="text-[11px] font-mono text-slate-400">{tx.subtext}</div>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className={`text-xs font-mono font-bold ${tx.isPositive ? 'text-[#00f59b]' : 'text-white'}`}>
+                    {tx.amountPrimary}
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-500">{tx.amountSecondary}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
 
       {/* ASSET DETAIL QUICK DRAWER (LOW TEXT, PURE FUNCTION) */}
       {selectedAsset && (

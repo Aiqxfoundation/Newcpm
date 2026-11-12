@@ -159,6 +159,9 @@ export function saveMiningPass(pass: MiningPassData): void {
     localStorage.setItem(`bitnoir-mining-pass-${pass.ownerAddress}`, JSON.stringify(pass));
     // Also save active flag
     localStorage.setItem(`bitnoir-pass-active-${pass.ownerAddress}`, 'true');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('bitnoir-mining-pass-updated'));
+    }
   } catch {
     // Ignore storage error
   }
@@ -180,6 +183,9 @@ export function addSavedSolPower(ownerAddress: string, additionalSol: number): n
   const updated = Math.min(10.0, current + additionalSol);
   try {
     localStorage.setItem(`bitnoir-sol-power-${ownerAddress}`, updated.toString());
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('bitnoir-sol-power-updated'));
+    }
   } catch {
     // Ignore
   }

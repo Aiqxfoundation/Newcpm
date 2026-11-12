@@ -30,7 +30,7 @@ export function WhitepaperView({
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 12, color: 'var(--silver-dark)', fontFamily: 'var(--app-font-mono)' }}>
             <span style={{ padding: '4px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', color: '#ab9ff2' }}>Consensus: Solana Proof-of-Power (PoP)</span>
-            <span style={{ padding: '4px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', color: '#00f59b' }}>Hard Cap: 21,000,000 Fixed ($NOIR)</span>
+            <span style={{ padding: '4px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', color: '#00f59b' }}>Hard Cap: 21,000,000 Fixed Bitnoir</span>
             <span style={{ padding: '4px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', color: '#ff8b2f' }}>Mining Pass: 0.02 SOL Soulbound Proof</span>
             <span style={{ padding: '4px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', color: '#38bdf8' }}>Claim: SPL-2022 Token Extension</span>
           </div>
@@ -56,7 +56,7 @@ export function WhitepaperView({
             <div className="whitepaper-spec-grid">
               <div className="whitepaper-spec-item">
                 <div className="whitepaper-spec-key">Monetary Hard Cap</div>
-                <div className="whitepaper-spec-val" style={{ color: 'var(--neon-green)' }}>21,000,000 $NOIR</div>
+                <div className="whitepaper-spec-val" style={{ color: 'var(--neon-green)' }}>21,000,000 Bitnoir</div>
               </div>
               <div className="whitepaper-spec-item">
                 <div className="whitepaper-spec-key">Consensus Standard</div>
@@ -101,7 +101,7 @@ export function WhitepaperView({
           {/* Section 3.0 */}
           <section className="whitepaper-section" id="dual-token">
             <div className="eyebrow">Section 3.0</div>
-            <h2>Dual-Token System: Bits (BIT) vs. Bitnoir ($NOIR)</h2>
+            <h2>Dual-Token System: Bits vs. Bitnoir</h2>
             <p>
               Bitnoir resolves the classical cryptocurrency trilemma through an economic decoupling between dynamic computational utility
               and sovereign digital scarcity:
@@ -111,18 +111,18 @@ export function WhitepaperView({
               <div style={{ padding: 20, background: 'rgba(255,255,255,0.02)', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                   <BitsMark size={24} />
-                  <strong style={{ fontSize: 16, color: '#ffffff' }}>Bits (BIT) — Mining Emission Unit</strong>
+                  <strong style={{ fontSize: 16, color: '#ffffff' }}>Bits — Mining Emission Unit</strong>
                 </div>
                 <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
                   Continuous mining reward token issued block-by-block. Accumulates in real-time within the miner’s 24-hour storage tank.
-                  Transferable peer-to-peer with zero gas fees between miners, convertible into $NOIR, and claimable onchain at TGE.
+                  Transferable peer-to-peer with zero gas fees between miners, convertible into Bitnoir, and claimable onchain at TGE.
                 </p>
               </div>
 
               <div style={{ padding: 20, background: 'rgba(255,255,255,0.02)', borderRadius: 14, border: '1px solid rgba(245,166,35,0.25)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                   <img src="/asset-bitnoir.png" alt="Bitnoir" style={{ width: 24, height: 24, objectFit: 'contain' }} />
-                  <strong style={{ fontSize: 16, color: '#f5a623' }}>Bitnoir ($NOIR) — Hard Cap Asset</strong>
+                  <strong style={{ fontSize: 16, color: '#f5a623' }}>Bitnoir — Hard Cap Asset</strong>
                 </div>
                 <p style={{ fontSize: 13, color: 'var(--silver-medium)', lineHeight: 1.6, margin: 0 }}>
                   Fixed-supply governance and sovereign store of value. Strictly invariant at 21,000,000 maximum units.
@@ -137,7 +137,7 @@ export function WhitepaperView({
             <div className="eyebrow">Section 4.0</div>
             <h2>SOL Power Multiplier Mathematical Formulation</h2>
             <p>
-              A miner's net mining velocity ($H_{net}$, measured in Bits per hour) is governed by three deterministic components:
+              A miner&apos;s net mining velocity (H<sub>net</sub>, measured in Bits per hour) is governed by three deterministic components:
               the Network Base Rate, the Team Referral Bonus, and the onchain SOL Power Contribution:
             </p>
 
@@ -164,7 +164,7 @@ export function WhitepaperView({
             <div className="eyebrow">Section 5.0</div>
             <h2>Complete Tokenomics & Supply Distribution</h2>
             <p>
-              Bitnoir Coin ($NOIR) enforces a strictly non-inflationary invariant of <strong>21,000,000 maximum units</strong>.
+              Bitnoir enforces a strictly non-inflationary invariant of <strong>21,000,000 maximum units</strong>.
               No secondary mint functions exist within the smart contract.
             </p>
 
@@ -174,7 +174,7 @@ export function WhitepaperView({
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}>
                     <th style={{ padding: '10px 14px' }}>Allocation Category</th>
                     <th style={{ padding: '10px 14px' }}>Percentage</th>
-                    <th style={{ padding: '10px 14px' }}>Total Amount ($NOIR)</th>
+                    <th style={{ padding: '10px 14px' }}>Total Amount (Bitnoir)</th>
                     <th style={{ padding: '10px 14px' }}>Vesting & Release Terms</th>
                   </tr>
                 </thead>
