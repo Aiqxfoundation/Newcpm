@@ -950,6 +950,165 @@ export function bitnoirApiPlugin(): Plugin {
       });
     }
 
+    // Wallet Verification with 0.02 SOL Onchain Transaction
+    if (url === '/api/accounts/me/verify-wallet' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const signature = String(body.signature || '').trim();
+      (userAccount as any).isVerified = true;
+      (userAccount as any).verifiedTx = signature;
+
+      activityList.unshift({
+        id: Date.now(),
+        kind: 'verify',
+        title: '0.02 SOL Wallet Verification Confirmed',
+        detail: `Verified onchain via transaction ${signature ? `${signature.slice(0, 8)}...${signature.slice(-6)}` : 'confirmed'}. Node identity unlocked.`,
+        createdAt: new Date().toISOString(),
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        isVerified: true,
+        signature,
+        message: 'Wallet verified onchain successfully. You can now set your username handle.',
+      });
+    }
+
+    // Set Custom Username Handle (Only available after verification)
+    if (url === '/api/accounts/me/set-username' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const cleanUsername = String(body.username || '').trim().replace(/^@/, '').toLowerCase();
+
+      if (!cleanUsername || cleanUsername.length < 3 || cleanUsername.length > 20 || !/^[a-z0-9_]+$/.test(cleanUsername)) {
+        return sendJson(res, 400, { error: 'Username must be 3-20 characters of lowercase letters, numbers, or underscore.' });
+      }
+
+      userAccount.username = cleanUsername;
+      userAccount.name = `@${cleanUsername}`;
+      userAccount.referralCode = cleanUsername;
+
+      activityList.unshift({
+        id: Date.now(),
+        kind: 'username',
+        title: `Handle @${cleanUsername} Claimed`,
+        detail: `Unique Node Handle @${cleanUsername} registered onchain. Personal referral link generated.`,
+        createdAt: new Date().toISOString(),
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        username: cleanUsername,
+        name: `@${cleanUsername}`,
+        referralCode: cleanUsername,
+        referralUrl: `https://bitnoir.io/?ref=${cleanUsername}`,
+      });
+    }
+
+    // Onchain Send: Username to Username or Address
+    if (url === '/api/wallet/send-onchain' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const asset = String(body.asset || 'bits').toLowerCase();
+      const amount = Number(body.amount) || 0;
+      const recipient = String(body.recipient || '').trim();
+      const senderHandle = String(body.sender || userAccount.username || 'satoshi').replace(/^@/, '');
+
+      if (!recipient) {
+        return sendJson(res, 400, { error: 'Please enter a recipient @username or Solana address.' });
+      }
+      if (amount <= 0) {
+        return sendJson(res, 400, { error: 'Please enter a valid amount.' });
+      }
+
+      if (asset === 'bits') {
+        if (amount > (userAccount.balances.purchased || 0)) {
+          return sendJson(res, 400, { error: 'Insufficient Bits balance.' });
+        }
+        userAccount.balances.purchased -= amount;
+      } else {
+        const totalNoir = (userAccount.balances.claimable || 0) + (userAccount.balances.claimed || 0);
+        if (amount > totalNoir) {
+          return sendJson(res, 400, { error: 'Insufficient Bitnoir balance.' });
+        }
+        if ((userAccount.balances.claimed || 0) >= amount) {
+          userAccount.balances.claimed = Math.max(0, (userAccount.balances.claimed || 0) - amount);
+        } else {
+          const rem = amount - (userAccount.balances.claimed || 0);
+          userAccount.balances.claimed = 0;
+          userAccount.balances.claimable = Math.max(0, (userAccount.balances.claimable || 0) - rem);
+        }
+      }
+
+      const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+      const txSig = Array.from({ length: 88 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+      const cleanRecipient = recipient.startsWith('@') ? recipient : `@${recipient}`;
+
+      const activityItem = {
+        id: Date.now(),
+        kind: 'send',
+        title: `Sent ${amount} ${asset === 'bits' ? 'Bits' : 'Bitnoir'} to ${cleanRecipient}`,
+        detail: `Instant onchain transfer from @${senderHandle} to ${cleanRecipient}. Finalized on Solana High-Speed layer.`,
+        txHash: txSig,
+        createdAt: new Date().toISOString(),
+      };
+      activityList.unshift(activityItem);
+
+      return sendJson(res, 200, {
+        success: true,
+        signature: txSig,
+        txHash: txSig,
+        balances: userAccount.balances,
+        activity: activityItem,
+      });
+    }
+
+    // Onchain Withdraw to External Solana Address
+    if (url === '/api/wallet/withdraw-onchain' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const asset = String(body.asset || 'bits').toLowerCase();
+      const amount = Number(body.amount) || 0;
+      const destinationAddress = String(body.destinationAddress || '').trim();
+
+      if (!destinationAddress || destinationAddress.length < 32 || destinationAddress.length > 44) {
+        return sendJson(res, 400, { error: 'Please enter a valid Solana wallet address (32-44 characters).' });
+      }
+      if (amount <= 0) {
+        return sendJson(res, 400, { error: 'Please enter a valid amount.' });
+      }
+
+      if (asset === 'bits') {
+        if (amount > (userAccount.balances.purchased || 0)) {
+          return sendJson(res, 400, { error: 'Insufficient Bits balance.' });
+        }
+        userAccount.balances.purchased -= amount;
+      } else {
+        const totalNoir = (userAccount.balances.claimable || 0) + (userAccount.balances.claimed || 0);
+        if (amount > totalNoir) {
+          return sendJson(res, 400, { error: 'Insufficient Bitnoir balance.' });
+        }
+        userAccount.balances.claimed = Math.max(0, (userAccount.balances.claimed || 0) - amount);
+      }
+
+      const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+      const txSig = Array.from({ length: 88 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+
+      const activityItem = {
+        id: Date.now(),
+        kind: 'withdraw',
+        title: `Withdrew ${amount} ${asset === 'bits' ? 'Bits' : 'Bitnoir'} Onchain`,
+        detail: `Transferred ${amount} ${asset.toUpperCase()} to external address ${destinationAddress.slice(0, 6)}...${destinationAddress.slice(-4)}.`,
+        txHash: txSig,
+        createdAt: new Date().toISOString(),
+      };
+      activityList.unshift(activityItem);
+
+      return sendJson(res, 200, {
+        success: true,
+        signature: txSig,
+        txHash: txSig,
+        balances: userAccount.balances,
+        activity: activityItem,
+      });
+    }
+
     // Soulbound Mining Pass Verification Registration
     if (url === '/api/accounts/me/mint-pass' && req.method === 'POST') {
       const body = await parseBody(req);

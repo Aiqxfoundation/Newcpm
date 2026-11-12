@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
-  BookOpen, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Flame,
-  Hammer, Lock, RefreshCw, ScrollText, Sparkles, Wallet, X, Zap
+  ArrowDownLeft, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight,
+  Coins, Copy, ExternalLink, Flame, Hammer, History, Lock, QrCode, RefreshCw,
+  Repeat, ScrollText, Send, ShieldCheck, Sparkles, User, Wallet, X, Zap
 } from 'lucide-react';
 import {
   getGetMyAccountQueryKey, getGetMyActivityQueryKey, useGetMyAccount,
@@ -17,6 +18,7 @@ import {
   fetchSolBalance,
   PROTOCOL_TREASURY_SOLANA,
   getPhantomSolanaProvider,
+  sendSolanaTransactionOnchain,
 } from './lib/solana';
 import '@/index.css';
 
@@ -140,6 +142,8 @@ type AuthUser = {
   username: string;
   email: string;
   isAdmin?: boolean;
+  isVerified: boolean;
+  verifiedTx?: string;
 };
 
 const AuthContext = createContext<{
@@ -147,11 +151,15 @@ const AuthContext = createContext<{
   ready: boolean;
   connectWallet: (customAddress?: string) => Promise<string>;
   disconnectWallet: () => Promise<void>;
+  verifyWalletOnchain: () => Promise<string>;
+  setUsernameHandle: (handle: string) => Promise<void>;
 }>({
   user: null,
   ready: false,
   connectWallet: async () => '',
   disconnectWallet: async () => undefined,
+  verifyWalletOnchain: async () => '',
+  setUsernameHandle: async () => undefined,
 });
 
 function AuthProvider({ children }: { children: ReactNode }) {
@@ -174,14 +182,18 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
     if (saved && saved.length >= 32) {
       const short = shortSolanaAddress(saved);
-      const uname = savedUser || short;
+      const isVer = localStorage.getItem(`bitnoir-verified-${saved}`) === 'true';
+      const verTx = localStorage.getItem(`bitnoir-verified-tx-${saved}`) || undefined;
+      const uname = isVer ? (savedUser || localStorage.getItem(`bitnoir-username-${saved}`) || '') : '';
       setUser({
         id: saved,
         solanaAddress: saved,
         username: uname,
-        name: `@${uname}`,
-        email: `${uname}@bitnoir.io`,
+        name: uname ? `@${uname}` : `@${short}`,
+        email: uname ? `${uname}@bitnoir.io` : '',
         isAdmin: false,
+        isVerified: isVer,
+        verifiedTx: verTx,
       });
       setReady(true);
       return;
@@ -196,13 +208,18 @@ function AuthProvider({ children }: { children: ReactNode }) {
           const address = resp.publicKey.toString();
           localStorage.setItem('bitnoir-solana-address', address);
           const short = shortSolanaAddress(address);
+          const isVer = localStorage.getItem(`bitnoir-verified-${address}`) === 'true';
+          const verTx = localStorage.getItem(`bitnoir-verified-tx-${address}`) || undefined;
+          const uname = isVer ? (localStorage.getItem(`bitnoir-username-${address}`) || '') : '';
           setUser({
             id: address,
             solanaAddress: address,
-            username: short,
-            name: `@${short}`,
+            username: uname,
+            name: uname ? `@${uname}` : `@${short}`,
             email: '',
             isAdmin: false,
+            isVerified: isVer,
+            verifiedTx: verTx,
           });
         })
         .catch(() => {
@@ -237,16 +254,66 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
     localStorage.setItem('bitnoir-solana-address', address);
     const short = shortSolanaAddress(address);
+    const isVer = localStorage.getItem(`bitnoir-verified-${address}`) === 'true';
+    const verTx = localStorage.getItem(`bitnoir-verified-tx-${address}`) || undefined;
+    const uname = isVer ? (localStorage.getItem(`bitnoir-username-${address}`) || '') : '';
     const authUser: AuthUser = {
       id: address,
       solanaAddress: address,
-      username: short,
-      name: `@${short}`,
+      username: uname,
+      name: uname ? `@${uname}` : `@${short}`,
       email: '',
       isAdmin: false,
+      isVerified: isVer,
+      verifiedTx: verTx,
     };
     setUser(authUser);
     return address;
+  };
+
+  const verifyWalletOnchain = async (): Promise<string> => {
+    if (!user?.solanaAddress) {
+      throw new Error('Please connect your Solana wallet first.');
+    }
+
+    const result = await sendSolanaTransactionOnchain({
+      fromAddress: user.solanaAddress,
+      toAddress: PROTOCOL_TREASURY_SOLANA,
+      amountSol: 0.02,
+      memo: 'Bitnoir One-Time Node Verification (0.02 SOL)',
+    });
+
+    const sig = result.signature;
+    localStorage.setItem(`bitnoir-verified-${user.solanaAddress}`, 'true');
+    localStorage.setItem(`bitnoir-verified-tx-${user.solanaAddress}`, sig);
+
+    await fetch('/api/accounts/me/verify-wallet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signature: sig }),
+    }).catch(() => {});
+
+    setUser((prev) => (prev ? { ...prev, isVerified: true, verifiedTx: sig } : null));
+    return sig;
+  };
+
+  const setUsernameHandle = async (handle: string): Promise<void> => {
+    if (!user?.solanaAddress) throw new Error('Wallet not connected.');
+    const clean = handle.trim().replace(/^@/, '').toLowerCase();
+    if (!clean || clean.length < 3 || clean.length > 20 || !/^[a-z0-9_]+$/.test(clean)) {
+      throw new Error('Username must be 3-20 alphanumeric characters or underscore.');
+    }
+
+    localStorage.setItem(`bitnoir-username-${user.solanaAddress}`, clean);
+    localStorage.setItem('bitnoir-username', clean);
+
+    await fetch('/api/accounts/me/set-username', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: clean }),
+    }).catch(() => {});
+
+    setUser((prev) => (prev ? { ...prev, username: clean, name: `@${clean}` } : null));
   };
 
   const disconnectWallet = async () => {
@@ -264,7 +331,16 @@ function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, ready, connectWallet, disconnectWallet }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        ready,
+        connectWallet,
+        disconnectWallet,
+        verifyWalletOnchain,
+        setUsernameHandle,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -277,7 +353,7 @@ function useAuth() {
 // ---------------------------------------------------------------------------
 // TOP WALLET CONNECT (PURE PHANTOM + SOL BALANCE)
 // ---------------------------------------------------------------------------
-function TopWalletConnect() {
+function TopWalletConnect({ onOpenVerify }: { onOpenVerify?: () => void }) {
   const { user, connectWallet, disconnectWallet } = useAuth();
   const [solBalance, setSolBalance] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -347,6 +423,17 @@ function TopWalletConnect() {
 
   return (
     <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8 }} ref={dropdownRef}>
+      {!user.isVerified && onOpenVerify && (
+        <button
+          type="button"
+          onClick={onOpenVerify}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#00f59b]/15 hover:bg-[#00f59b]/25 border border-[#00f59b]/40 text-[#00f59b] text-[11px] font-bold font-mono transition-all cursor-pointer shadow-sm"
+        >
+          <Zap size={11} />
+          <span>Verify Node</span>
+        </button>
+      )}
+
       <button
         type="button"
         onClick={() => setMenuOpen(!menuOpen)}
@@ -355,7 +442,10 @@ function TopWalletConnect() {
         <div className="w-5 h-5 rounded-full bg-[#ab9ff2]/20 border border-[#ab9ff2]/40 flex items-center justify-center text-[#ab9ff2]">
           <PhantomLogo size={12} />
         </div>
-        <span>{user.name || `@${shortAddr}`}</span>
+        <span className="flex items-center gap-1">
+          {user.name || `@${shortAddr}`}
+          {user.isVerified && <Check size={11} className="text-[#00f59b]" strokeWidth={3} />}
+        </span>
         {solBalance !== null && (
           <span className="text-[11px] text-[#00f59b] font-bold">
             {solBalance.toFixed(2)} SOL
@@ -1097,7 +1187,7 @@ function StopwatchPointsCounter({
 // ---------------------------------------------------------------------------
 // THE STANDALONE BITS MINING PAGE
 // ---------------------------------------------------------------------------
-function MiningPage() {
+function MiningPage({ onOpenAssets }: { onOpenAssets?: () => void }) {
   const client = useQueryClient();
   const { user } = useAuth();
   const accountQuery = useGetMyAccount({ query: { queryKey: getGetMyAccountQueryKey() } });
@@ -1110,7 +1200,6 @@ function MiningPage() {
   const [isClaiming, setIsClaiming] = useState(false);
 
   const account = accountQuery.data;
-  const currentOwner = user?.solanaAddress || account?.id || 'member-alpha';
 
   // 1. Base Rate: 0.1 Bits Per Hour (0.1000 Bits/hr)
   const baseRatePerHour = 0.1000;
@@ -1278,10 +1367,9 @@ function MiningPage() {
     }
   };
 
-
   return (
     <div className="min-h-screen bg-[#07080b] text-[#eff3f8] flex flex-col font-sans">
-      {/* TOP CLEAN APP HEADER - NO SIDEBAR, NO UNRELATED MENU OPTIONS */}
+      {/* TOP CLEAN APP HEADER */}
       <header className="border-b border-white/[0.08] bg-[#0c121d]/80 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <Brand size="md" />
@@ -1300,7 +1388,8 @@ function MiningPage() {
             <span className="w-2.5 h-2.5 rounded-full bg-[#00f59b] animate-ping" />
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* ACTION BUTTONS: MINERS, GUIDE, ASSETS & SOL POWER */}
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
               className="clean-action-btn-soft"
@@ -1317,6 +1406,15 @@ function MiningPage() {
             >
               <BookOpen size={14} />
               <span>Guide</span>
+            </button>
+            <button
+              type="button"
+              className="clean-action-btn-soft !bg-[#f5a623]/12 !border-[#f5a623]/35 !text-[#f5a623] hover:!bg-[#f5a623]/22 hover:!border-[#f5a623]"
+              onClick={onOpenAssets}
+              title="Assets · Profile, Wallet Balance, Send, Receive & Swap"
+            >
+              <Wallet size={14} className="text-[#f5a623]" />
+              <span>Assets</span>
             </button>
             <button
               type="button"
@@ -1476,26 +1574,556 @@ function MiningPage() {
 }
 
 // ---------------------------------------------------------------------------
-// APPLICATION ROUTER (KEEP ONLY BITS MINING PAGE, REMOVE ALL OTHER ROUTES)
+// CLEAN PREMIUM ASSETS PAGE (LOW TEXT, CLEAN ARCHITECTURE, EXACT FEATURES)
+// ---------------------------------------------------------------------------
+function AssetsPage({ onBack }: { onBack: () => void }) {
+  const client = useQueryClient();
+  const { user } = useAuth();
+  const accountQuery = useGetMyAccount({ query: { queryKey: getGetMyAccountQueryKey() } });
+  const account = accountQuery.data;
+
+  const [activeTab, setActiveTab] = useState<'send' | 'receive' | 'swap'>('send');
+  const [activities, setActivities] = useState<any[]>([]);
+  const [copiedAddr, setCopiedAddr] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  // Send state
+  const [sendAsset, setSendAsset] = useState<'bits' | 'bitnoir'>('bits');
+  const [sendRecipient, setSendRecipient] = useState('');
+  const [sendAmount, setSendAmount] = useState('');
+  const [isSending, setIsSending] = useState(false);
+
+  // Swap state
+  const [swapDirection, setSwapDirection] = useState<'bits-to-noir' | 'noir-to-bits'>('bits-to-noir');
+  const [swapAmount, setSwapAmount] = useState('');
+  const [isSwapping, setIsSwapping] = useState(false);
+
+  const refreshActivity = () => {
+    fetch('/api/accounts/me/activity')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (Array.isArray(data)) setActivities(data.slice(0, 12));
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshActivity();
+  }, []);
+
+  const displayAddress = user?.solanaAddress || '0x71C8360437E55928d11B3e264259837a7F9D7065';
+
+  // Core assets: Bits and Bitnoir ($NOIR) only
+  const bitsPurchased = account?.balances?.purchased ?? 5100;
+  const noirClaimed = (account?.balances as any)?.claimed ?? 7.2727;
+
+  const totalUsd = bitsPurchased * 0.10 + noirClaimed * 1.10;
+
+  const handleSend = async () => {
+    const amt = Number(sendAmount);
+    if (!sendRecipient.trim() || isNaN(amt) || amt <= 0) {
+      toast({ title: 'Invalid transfer', description: 'Enter recipient and valid amount.', variant: 'destructive' });
+      return;
+    }
+    const maxAvailable = sendAsset === 'bits' ? bitsPurchased : noirClaimed;
+    if (amt > maxAvailable) {
+      toast({ title: 'Insufficient balance', description: 'Amount exceeds available balance.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      const res = await fetch('/api/wallet/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset: sendAsset, amount: amt, recipient: sendRecipient.trim() }),
+      });
+      if (!res.ok) throw new Error();
+      toast({ title: 'Sent', description: `Transferred ${amt} ${sendAsset.toUpperCase()} to ${sendRecipient.trim()}` });
+      setSendAmount('');
+      setSendRecipient('');
+      void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
+      refreshActivity();
+    } catch {
+      toast({ title: 'Failed', description: 'Could not complete transfer.', variant: 'destructive' });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleSwap = async () => {
+    const amt = Number(swapAmount);
+    if (isNaN(amt) || amt <= 0) {
+      toast({ title: 'Invalid amount', description: 'Enter a valid amount.', variant: 'destructive' });
+      return;
+    }
+
+    const fromAsset = swapDirection === 'bits-to-noir' ? 'bits' : 'bitnoir';
+    const toAsset = swapDirection === 'bits-to-noir' ? 'bitnoir' : 'bits';
+    const max = fromAsset === 'bits' ? bitsPurchased : noirClaimed;
+    if (amt > max) {
+      toast({ title: 'Insufficient balance', description: 'Amount exceeds available balance.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSwapping(true);
+    try {
+      const res = await fetch('/api/wallet/swap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromAsset, toAsset, amount: amt }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error();
+      toast({ title: 'Swapped', description: `Swapped ${amt} ${fromAsset.toUpperCase()} for ${Number(data.toAmount || 0).toFixed(4)} ${toAsset.toUpperCase()}` });
+      setSwapAmount('');
+      void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
+      refreshActivity();
+    } catch {
+      toast({ title: 'Failed', description: 'Could not execute swap.', variant: 'destructive' });
+    } finally {
+      setIsSwapping(false);
+    }
+  };
+
+  const swapOutput = () => {
+    const amt = Number(swapAmount) || 0;
+    if (amt <= 0) return '0.0000';
+    return swapDirection === 'bits-to-noir' ? (amt / 11).toFixed(4) : (amt * 11).toFixed(2);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#07080b] text-[#eff3f8] flex flex-col font-sans">
+      {/* HEADER */}
+      <header className="border-b border-white/[0.08] bg-[#0c121d]/80 backdrop-blur-md sticky top-0 z-40">
+        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          <Brand size="md" />
+          <div className="flex items-center gap-3">
+            <TopWalletConnect />
+          </div>
+        </div>
+      </header>
+
+      {/* MAIN CONTAINER */}
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
+        {/* TOP NAVIGATION & HEADING */}
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Assets</h1>
+            <span className="w-2 h-2 rounded-full bg-[#f5a623]" />
+            <button
+              type="button"
+              onClick={() => setHistoryOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-xs font-mono text-slate-300 hover:text-white transition-all cursor-pointer"
+              title="Transaction History"
+              aria-label="Transaction History"
+            >
+              <History size={14} className="text-[#00f59b]" />
+              <span className="text-xs font-sans">History</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-[11px] font-medium text-slate-300 hover:text-white transition-all cursor-pointer"
+          >
+            <ChevronLeft size={13} />
+            <span>Back to Mining</span>
+          </button>
+        </div>
+
+        {/* 1. TOTAL BALANCE */}
+        <div className="pob-cockpit mb-6 p-5 sm:p-6 flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold block mb-1">
+              Total Balance
+            </span>
+            <div className="text-3xl sm:text-4xl font-black font-mono text-white tabular-nums tracking-tight">
+              ${totalUsd.toFixed(2)} <span className="text-xs text-slate-400 font-normal">USD</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 2. EXACT TWO CORE ASSETS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+          {/* BITS */}
+          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/8 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-mono uppercase text-slate-400 font-bold mb-1">Bits</div>
+              <div className="text-xl sm:text-2xl font-black font-mono text-white tabular-nums">
+                {bitsPurchased.toLocaleString()}
+              </div>
+            </div>
+            <span className="text-xs font-mono text-slate-400 font-bold">
+              ${(bitsPurchased * 0.1).toFixed(2)}
+            </span>
+          </div>
+
+          {/* BITNOIR */}
+          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/8 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-mono uppercase text-slate-400 font-bold mb-1">Bitnoir</div>
+              <div className="text-xl sm:text-2xl font-black font-mono text-white tabular-nums">
+                {noirClaimed.toFixed(4)}
+              </div>
+            </div>
+            <span className="text-xs font-mono text-slate-400 font-bold">
+              ${(noirClaimed * 1.10).toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        {/* 3. CLEAN ACTION HUB (SEND · RECEIVE · SWAP) */}
+        <div className="pob-cockpit mb-6 p-5 sm:p-6">
+          {/* Clean Segmented Tabs */}
+          <div className="flex items-center gap-2 mb-5">
+            <button
+              type="button"
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'send'
+                  ? 'bg-[#00f59b]/20 text-[#00f59b] border border-[#00f59b]/40 shadow-sm'
+                  : 'bg-white/[0.03] text-slate-400 hover:text-white border border-white/5'
+              }`}
+              onClick={() => setActiveTab('send')}
+            >
+              <ArrowUpRight size={14} />
+              <span>Send</span>
+            </button>
+            <button
+              type="button"
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'receive'
+                  ? 'bg-[#00f59b]/20 text-[#00f59b] border border-[#00f59b]/40 shadow-sm'
+                  : 'bg-white/[0.03] text-slate-400 hover:text-white border border-white/5'
+              }`}
+              onClick={() => setActiveTab('receive')}
+            >
+              <ArrowDownLeft size={14} />
+              <span>Receive</span>
+            </button>
+            <button
+              type="button"
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'swap'
+                  ? 'bg-[#00f59b]/20 text-[#00f59b] border border-[#00f59b]/40 shadow-sm'
+                  : 'bg-white/[0.03] text-slate-400 hover:text-white border border-white/5'
+              }`}
+              onClick={() => setActiveTab('swap')}
+            >
+              <Repeat size={14} />
+              <span>Swap</span>
+            </button>
+          </div>
+
+          {/* TAB: SEND */}
+          {activeTab === 'send' && (
+            <div className="flex flex-col gap-4 max-w-lg">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSendAsset('bits')}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold font-mono transition-all ${
+                    sendAsset === 'bits'
+                      ? 'bg-[#00f59b]/15 border-[#00f59b] text-[#00f59b]'
+                      : 'bg-white/[0.03] border-white/10 text-slate-400'
+                  }`}
+                >
+                  Bits ({bitsPurchased.toLocaleString()})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSendAsset('bitnoir')}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold font-mono transition-all ${
+                    sendAsset === 'bitnoir'
+                      ? 'bg-[#ff8b2f]/15 border-[#ff8b2f] text-[#ff8b2f]'
+                      : 'bg-white/[0.03] border-white/10 text-slate-400'
+                  }`}
+                >
+                  Bitnoir ({noirClaimed.toFixed(2)})
+                </button>
+              </div>
+
+              <div>
+                <input
+                  type="text"
+                  placeholder="Recipient @username or address"
+                  value={sendRecipient}
+                  onChange={(e) => setSendRecipient(e.target.value)}
+                  className="assets-input-field"
+                />
+              </div>
+
+              <div className="relative">
+                <input
+                  type="number"
+                  placeholder="0.00"
+                  value={sendAmount}
+                  onChange={(e) => setSendAmount(e.target.value)}
+                  className="assets-input-field font-mono font-bold pr-16"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSendAmount(String(sendAsset === 'bits' ? bitsPurchased : noirClaimed))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-white/10 text-[10px] font-mono font-bold text-white hover:bg-white/20"
+                >
+                  MAX
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={isSending}
+                className="clean-stake-confirm-btn !w-full !min-h-[42px] !text-xs !bg-[#00f59b] !text-[#03150c] !font-bold"
+              >
+                {isSending ? (
+                  <span className="flex items-center gap-2 justify-center">
+                    <RefreshCw size={14} className="animate-spin" /> Sending…
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2 justify-center">
+                    <Send size={14} /> Send {sendAsset.toUpperCase()}
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* TAB: RECEIVE */}
+          {activeTab === 'receive' && (
+            <div className="flex flex-col sm:flex-row items-center gap-6 max-w-lg">
+              <div className="p-3 bg-white rounded-xl shadow-md flex items-center justify-center">
+                <svg width="130" height="130" viewBox="0 0 130 130" fill="none">
+                  <rect width="130" height="130" fill="white" />
+                  <rect x="10" y="10" width="35" height="35" fill="#07080b" />
+                  <rect x="16" y="16" width="23" height="23" fill="white" />
+                  <rect x="22" y="22" width="11" height="11" fill="#07080b" />
+                  <rect x="85" y="10" width="35" height="35" fill="#07080b" />
+                  <rect x="91" y="16" width="23" height="23" fill="white" />
+                  <rect x="97" y="22" width="11" height="11" fill="#07080b" />
+                  <rect x="10" y="85" width="35" height="35" fill="#07080b" />
+                  <rect x="16" y="91" width="23" height="23" fill="white" />
+                  <rect x="22" y="97" width="11" height="11" fill="#07080b" />
+                  <circle cx="65" cy="65" r="14" fill="#07080b" />
+                  <circle cx="65" cy="65" r="10" fill="#00f59b" />
+                </svg>
+              </div>
+
+              <div className="flex-1 flex flex-col gap-3 w-full">
+                <span className="text-xs font-mono text-slate-400 uppercase tracking-wider font-bold">
+                  Receiving Address
+                </span>
+                <div className="p-3 rounded-xl bg-black/40 border border-white/10 font-mono text-xs text-white break-all select-all">
+                  {displayAddress}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(displayAddress);
+                    setCopiedAddr(true);
+                    setTimeout(() => setCopiedAddr(false), 2000);
+                    toast({ title: 'Copied', description: 'Address copied to clipboard.' });
+                  }}
+                  className="clean-action-btn-soft !justify-center !w-full"
+                >
+                  {copiedAddr ? <Check size={14} className="text-[#00f59b]" /> : <Copy size={14} />}
+                  <span>{copiedAddr ? 'Copied' : 'Copy Address'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: SWAP */}
+          {activeTab === 'swap' && (
+            <div className="flex flex-col gap-3 max-w-lg">
+              <div className="p-3.5 rounded-xl bg-black/40 border border-white/8 flex items-center justify-between gap-3">
+                <input
+                  type="number"
+                  placeholder="0.00"
+                  value={swapAmount}
+                  onChange={(e) => setSwapAmount(e.target.value)}
+                  className="bg-transparent border-0 font-mono font-black text-xl text-white outline-none flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const max = swapDirection === 'bits-to-noir' ? bitsPurchased : noirClaimed;
+                    setSwapAmount(String(max));
+                  }}
+                  className="px-2 py-0.5 rounded bg-white/10 text-[10px] font-mono text-slate-300 font-bold"
+                >
+                  MAX
+                </button>
+                <span className="text-xs font-mono font-bold text-white uppercase">
+                  {swapDirection === 'bits-to-noir' ? 'BITS' : 'NOIR'}
+                </span>
+              </div>
+
+              <div className="flex justify-center -my-1">
+                <button
+                  type="button"
+                  onClick={() => setSwapDirection((d) => (d === 'bits-to-noir' ? 'noir-to-bits' : 'bits-to-noir'))}
+                  className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:border-[#00f59b] transition-all"
+                >
+                  <Repeat size={13} />
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-black/40 border border-white/8 flex items-center justify-between gap-3">
+                <div className="font-mono font-black text-xl text-[#00f59b]">
+                  {swapOutput()}
+                </div>
+                <span className="text-xs font-mono font-bold text-white uppercase">
+                  {swapDirection === 'bits-to-noir' ? 'NOIR' : 'BITS'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSwap}
+                disabled={isSwapping}
+                className="clean-stake-confirm-btn !w-full !min-h-[42px] !text-xs !bg-gradient-to-r !from-[#ff8b2f] !to-[#ff5252] !text-black !font-bold"
+              >
+                {isSwapping ? (
+                  <span className="flex items-center gap-2 justify-center">
+                    <RefreshCw size={14} className="animate-spin" /> Swapping…
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2 justify-center">
+                    <Repeat size={14} /> Swap (11:1 Rate)
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* TRANSACTION HISTORY MODAL (OPENED FROM TOP ICON) */}
+        {historyOpen && (
+          <div className="modal-backdrop" onClick={() => setHistoryOpen(false)}>
+            <div
+              className="modal-dialog"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: 460,
+                padding: 24,
+                background: 'linear-gradient(180deg, #0c121d 0%, #070b12 100%)',
+                borderColor: 'rgba(255, 255, 255, 0.12)',
+                boxShadow: '0 24px 70px rgba(0, 0, 0, 0.85), 0 0 35px rgba(0, 245, 155, 0.12)',
+                borderRadius: 20,
+              }}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-[#00f59b]/10 border border-[#00f59b]/25 flex items-center justify-center text-[#00f59b]">
+                    <History size={16} />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white m-0">Transaction History</h2>
+                    <p className="text-[11px] font-mono text-slate-400 m-0">Settled node operations</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen(false)}
+                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-2 max-h-[380px] overflow-y-auto pr-1">
+                {activities.length === 0 ? (
+                  <div className="py-8 text-center text-slate-500 text-xs font-mono">
+                    No transactions recorded yet.
+                  </div>
+                ) : (
+                  activities.map((act) => {
+                    const isSend = act.kind === 'send';
+                    const isReceive = act.kind === 'receive' || act.kind === 'deposit' || act.kind === 'reward';
+                    return (
+                      <div
+                        key={act.id}
+                        className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between text-xs font-mono"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                              isSend
+                                ? 'bg-red-500/15 text-red-400'
+                                : isReceive
+                                ? 'bg-[#00f59b]/15 text-[#00f59b]'
+                                : 'bg-[#38bdf8]/15 text-[#38bdf8]'
+                            }`}
+                          >
+                            {isSend ? (
+                              <ArrowUpRight size={13} />
+                            ) : isReceive ? (
+                              <ArrowDownLeft size={13} />
+                            ) : (
+                              <Repeat size={13} />
+                            )}
+                          </div>
+                          <div>
+                            <div className="text-white font-medium">{act.title}</div>
+                            <div className="text-[10px] text-slate-500">
+                              {new Date(act.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-[#00f59b] bg-[#00f59b]/10 px-2 py-0.5 rounded border border-[#00f59b]/25">
+                          {act.status || 'Settled'}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// APPLICATION ROUTER (EXACT CLEAN ROUTES: MINING & ASSETS)
 // ---------------------------------------------------------------------------
 function App() {
+  const [currentView, setCurrentView] = useState<'mining' | 'assets'>('mining');
+
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClient}>
         <FeedbackMonitor />
         <WouterRouter base={basePath}>
           <Switch>
-            <Route path="/" component={MiningPage} />
-            <Route path="/mining" component={MiningPage} />
-            <Route path="/staking" component={MiningPage} />
-            {/* Any legacy route automatically redirects directly to Bits Mining */}
-            <Route path="/wallet">{() => <Redirect to="/" />}</Route>
-            <Route path="/profile">{() => <Redirect to="/" />}</Route>
-            <Route path="/mint">{() => <Redirect to="/" />}</Route>
-            <Route path="/whitepaper">{() => <Redirect to="/" />}</Route>
-            <Route path="/docs">{() => <Redirect to="/" />}</Route>
-            <Route path="/admin">{() => <Redirect to="/" />}</Route>
-            <Route component={MiningPage} />
+            <Route path="/assets">
+              {() => <AssetsPage onBack={() => setCurrentView('mining')} />}
+            </Route>
+            <Route path="/mining">
+              {() => <MiningPage onOpenAssets={() => setCurrentView('assets')} />}
+            </Route>
+            <Route path="/">
+              {() =>
+                currentView === 'assets' ? (
+                  <AssetsPage onBack={() => setCurrentView('mining')} />
+                ) : (
+                  <MiningPage onOpenAssets={() => setCurrentView('assets')} />
+                )
+              }
+            </Route>
+            <Route component={() =>
+              currentView === 'assets' ? (
+                <AssetsPage onBack={() => setCurrentView('mining')} />
+              ) : (
+                <MiningPage onOpenAssets={() => setCurrentView('assets')} />
+              )
+            } />
           </Switch>
         </WouterRouter>
       </QueryClientProvider>
