@@ -20,7 +20,7 @@ export default defineConfig({
   plugins: [
     bitnoirApiPlugin(),
     react(),
-    tailwindcss({ optimize: true }),
+    tailwindcss(),
   ],
   resolve: {
     alias: {

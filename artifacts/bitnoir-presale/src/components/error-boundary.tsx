@@ -4,6 +4,7 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from 'react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 export interface ErrorFallbackProps {
   error: Error;
@@ -37,28 +38,39 @@ function toError(value: unknown): Error {
 
 function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50 p-6">
-      <div className="max-w-lg w-full text-center">
-        <h1 className="text-xl font-semibold text-gray-900">
+    <div className="min-h-screen w-full flex items-center justify-center bg-[#09090b] text-zinc-100 p-6 font-sans">
+      <div className="max-w-md w-full rounded-2xl bg-[#121318] border border-[#f7931a]/30 p-6 text-center shadow-[0_24px_70px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.06)]">
+        <div className="w-12 h-12 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center mx-auto mb-4">
+          <AlertTriangle size={22} />
+        </div>
+        <h1 className="text-lg font-extrabold text-white m-0">
           Something went wrong
         </h1>
-        <p className="mt-2 text-sm text-gray-600">
-          This part of the app hit an error. The rest of the app is still
-          running.
+        <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+          An unexpected rendering error occurred. Your wallet state is safely preserved.
         </p>
-        {/* Dev only: messages can carry API responses and other internals. */}
-        {import.meta.env.DEV ? (
-          <pre className="mt-4 overflow-x-auto rounded bg-gray-100 p-3 text-left text-xs text-gray-800">
-            {error.message || String(error)}
+        {import.meta.env.DEV && error.message ? (
+          <pre className="mt-4 overflow-x-auto rounded-xl bg-[#09090b] border border-white/10 p-3 text-left text-[11px] font-mono text-red-300 max-h-36">
+            {error.message}
           </pre>
         ) : null}
-        <button
-          type="button"
-          onClick={resetError}
-          className="mt-4 rounded bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-700"
-        >
-          Try again
-        </button>
+        <div className="mt-5 flex items-center justify-center gap-2.5">
+          <button
+            type="button"
+            onClick={resetError}
+            className="clean-stake-confirm-btn !w-auto !min-h-[38px] !px-4 !text-xs !font-bold"
+          >
+            <RefreshCw size={13} />
+            <span>Try Again</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="clean-action-btn-soft !min-h-[38px] !px-4 !text-xs"
+          >
+            Reload App
+          </button>
+        </div>
       </div>
     </div>
   );

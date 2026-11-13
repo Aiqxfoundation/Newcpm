@@ -6,11 +6,14 @@ export function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <span className="brand">
       <img
-        src="/bitnoir-hd.png"
+        src="/assets/aistudio/bitnoir-logo-96.png"
+        srcSet="/assets/aistudio/bitnoir-logo-96.png 96w, /assets/aistudio/bitnoir-logo-144.png 144w, /assets/aistudio/bitnoir-logo-256.png 256w, /assets/aistudio/file_00000000c9508208b439e1d861b81370_d5533dc6.png 1254w"
+        sizes="28px"
         alt="Bitnoir"
         width={28}
         height={28}
-        style={{ width: 28, height: 28, objectFit: 'contain' }}
+        draggable={false}
+        style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: '9999px' }}
       />
       {!compact && <span>Bitnoir</span>}
     </span>
@@ -28,19 +31,33 @@ export function AssetIcon({ asset, size = 36 }: { asset: AssetKind; size?: numbe
     );
   }
   const isBitnoir = asset === 'bnr';
-  const defaultSrc = isBitnoir ? '/bitnoir-hd.png' : '/bits-hd.png';
+  const defaultSrc = isBitnoir
+    ? size <= 32
+      ? '/assets/aistudio/bitnoir-logo-96.png'
+      : '/assets/aistudio/bitnoir-logo-144.png'
+    : size <= 32
+      ? '/assets/aistudio/bits-logo-96.png'
+      : '/assets/aistudio/bits-logo-144.png';
 
   return (
     <img
       className="asset-icon"
       src={defaultSrc}
+      srcSet={
+        isBitnoir
+          ? '/assets/aistudio/bitnoir-logo-96.png 96w, /assets/aistudio/bitnoir-logo-144.png 144w, /assets/aistudio/bitnoir-logo-256.png 256w, /assets/aistudio/file_00000000c9508208b439e1d861b81370_d5533dc6.png 1254w'
+          : '/assets/aistudio/bits-logo-96.png 96w, /assets/aistudio/bits-logo-144.png 144w, /assets/aistudio/bits-logo-256.png 256w, /assets/aistudio/file_0000000071f8820880f6865e316e2a08_5b35eeb9.png 1254w'
+      }
+      sizes={`${size}px`}
       alt={isBitnoir ? 'Bitnoir' : 'Bits'}
       width={size}
       height={size}
+      draggable={false}
       style={{
         width: size,
         height: size,
-        objectFit: 'contain',
+        objectFit: 'cover',
+        borderRadius: '9999px',
       }}
     />
   );

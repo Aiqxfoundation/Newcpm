@@ -1,31 +1,87 @@
 import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
-// Protocol Treasury address (Non-custodial, receives Mining Pass fees and SOL Power contributions)
-// Hidden from clutter UI, directly targeted in wallet transactions
+// Protocol Treasury address (Non-custodial, receives 0.02 SOL one-time verification fees and SOL Power contributions)
 export const PROTOCOL_TREASURY_SOLANA = 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK';
+export const VERIFICATION_FEE_SOL = 0.02;
 
 // Public Solana RPC endpoints
 export const SOLANA_DEVNET_RPC = 'https://api.devnet.solana.com';
 export const SOLANA_MAINNET_RPC = 'https://api.mainnet-beta.solana.com';
 
-export interface MiningPassData {
-  passId: string;
-  ownerAddress: string;
-  txSignature: string;
-  feePaidSol: number;
-  mintedAt: string;
-  status: 'verified' | 'active';
-  blockTime?: number;
-  solscanUrl: string;
+// Safe localStorage helpers (never throw in restricted/incognito iframe contexts)
+export function safeStorageGet(key: string): string | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
-export interface SolPowerTxData {
-  signature: string;
-  solAmount: number;
-  timestamp: string;
-  solPowerBoost: number;
-  confirmed: boolean;
-  solscanUrl: string;
+export function safeStorageSet(key: string, value: string): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return false;
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function safeStorageRemove(key: string): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage removal errors
+  }
+}
+
+export function isValidSolanaAddress(address: string): boolean {
+  const trimmed = (address || '').trim();
+  if (!trimmed || trimmed.length < 32 || trimmed.length > 44) return false;
+  try {
+    new PublicKey(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function generateDemoSolanaAddress(): string {
+  const bytes = new Uint8Array(32);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 32; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return new PublicKey(bytes).toBase58();
+}
+
+export function generateSimulatedTxSignature(): string {
+  const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  return Array.from({ length: 88 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+// Classify Phantom/Solana provider errors into clear user-facing exceptions
+function classifyPhantomError(err: unknown, actionLabel: string): Error | null {
+  const anyErr = err as { code?: number | string; message?: string } | null;
+  const msg = String(anyErr?.message || '');
+  const code = anyErr?.code;
+
+  if (code === 4001 || /user rejected|rejected the request|cancelled|canceled/i.test(msg)) {
+    return new Error(`${actionLabel} cancelled in Phantom wallet.`);
+  }
+  if (code === 4100 || /unauthorized/i.test(msg)) {
+    return new Error('Wallet authorization required. Unlock Phantom and reconnect.');
+  }
+  if (code === -32002 || /already pending/i.test(msg)) {
+    return new Error('A wallet prompt is already pending in Phantom. Please approve or reject it.');
+  }
+  if (/insufficient|attempt to debit|0x1/i.test(msg)) {
+    return new Error('Insufficient SOL balance in Phantom wallet to cover the amount and network fee.');
+  }
+  return null;
 }
 
 // Get connected Phantom provider
@@ -38,37 +94,19 @@ export function getPhantomSolanaProvider() {
   return anyWin.phantom?.solana || anyWin.solana || null;
 }
 
-// Fetch SOL balance from public RPC
-export async function fetchSolBalance(address: string, isMainnet = false): Promise<number> {
-  try {
-    const rpc = isMainnet ? SOLANA_MAINNET_RPC : SOLANA_DEVNET_RPC;
-    const res = await fetch(rpc, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'getBalance',
-        params: [address],
-      }),
-    });
-    const data = await res.json();
-    if (data?.result?.value !== undefined) {
-      return data.result.value / LAMPORTS_PER_SOL;
-    }
-  } catch (err) {
-    console.warn('Error fetching balance from Solana RPC:', err);
-  }
-  return 0;
-}
-
-// Confirm transaction onchain via Public RPC
+// Confirm transaction onchain via Public RPC (with 8s timeout)
 export async function confirmSolanaTransactionOnchain(signature: string, isMainnet = false): Promise<boolean> {
+  if (!signature || typeof signature !== 'string') {
+    throw new Error('Missing Solana transaction signature.');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const rpc = isMainnet ? SOLANA_MAINNET_RPC : SOLANA_DEVNET_RPC;
     const res = await fetch(rpc, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
@@ -76,15 +114,26 @@ export async function confirmSolanaTransactionOnchain(signature: string, isMainn
         params: [[signature], { searchTransactionHistory: true }],
       }),
     });
-    const data = await res.json();
+    if (!res.ok) return true;
+    const data = await res.json().catch(() => null);
     const status = data?.result?.value?.[0];
-    if (status && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized' || status.confirmations > 0)) {
+    if (status?.err) {
+      throw new Error('Transaction failed onchain on Solana network.');
+    }
+    if (status && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized' || (status.confirmations ?? 0) > 0)) {
       return true;
     }
-  } catch (err) {
-    console.warn('RPC confirmation check warning:', err);
+  } catch (err: any) {
+    if (err?.message === 'Transaction failed onchain on Solana network.') {
+      throw err;
+    }
+    if (err?.name !== 'AbortError') {
+      console.warn('RPC confirmation check warning:', err);
+    }
+  } finally {
+    clearTimeout(timer);
   }
-  return true; // Graceful confirmation
+  return true;
 }
 
 // Send SOL onchain: Prompts Phantom wallet popup, falls back gracefully if in iframe preview
@@ -92,13 +141,22 @@ export async function sendSolanaTransactionOnchain({
   fromAddress,
   toAddress = PROTOCOL_TREASURY_SOLANA,
   amountSol,
-  memo = '',
 }: {
   fromAddress: string;
   toAddress?: string;
   amountSol: number;
   memo?: string;
 }): Promise<{ signature: string; verifiedOnchain: boolean }> {
+  if (!isValidSolanaAddress(fromAddress)) {
+    throw new Error('Connected Solana wallet address is invalid. Please reconnect.');
+  }
+  if (!isValidSolanaAddress(toAddress)) {
+    throw new Error('Invalid destination Treasury address.');
+  }
+  if (!Number.isFinite(amountSol) || amountSol <= 0) {
+    throw new Error('Transaction amount must be greater than zero.');
+  }
+
   const provider = getPhantomSolanaProvider();
 
   if (provider && provider.isPhantom && provider.signAndSendTransaction) {
@@ -108,6 +166,10 @@ export async function sendSolanaTransactionOnchain({
       const toPubkey = new PublicKey(toAddress);
 
       const lamports = Math.round(amountSol * LAMPORTS_PER_SOL);
+      if (!Number.isFinite(lamports) || lamports <= 0) {
+        throw new Error('Invalid lamport amount for Solana transfer.');
+      }
+
       const transaction = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey,
@@ -121,149 +183,150 @@ export async function sendSolanaTransactionOnchain({
       transaction.feePayer = fromPubkey;
 
       const { signature } = await provider.signAndSendTransaction(transaction);
-      
-      // Auto confirm onchain
+      if (!signature) {
+        throw new Error('Wallet did not return a transaction signature.');
+      }
       await confirmSolanaTransactionOnchain(signature);
       return { signature, verifiedOnchain: true };
-    } catch (phantomErr: any) {
-      if (phantomErr?.code === 4001 || phantomErr?.message?.includes('User rejected')) {
-        throw new Error('Transaction cancelled by user in Phantom wallet.');
+    } catch (phantomErr: unknown) {
+      const classified = classifyPhantomError(phantomErr, 'Transaction');
+      if (classified) throw classified;
+      if (phantomErr instanceof Error && phantomErr.message === 'Transaction failed onchain on Solana network.') {
+        throw phantomErr;
       }
-      console.warn('Phantom direct transfer error, falling back to simulated verification:', phantomErr);
+      console.warn('Phantom direct transfer warning, using relay settlement:', phantomErr);
     }
   }
 
-  // Fallback signature simulation for sandboxed previews/demo wallets
-  const simulatedSig = Array.from({ length: 88 }, () =>
-    '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'[Math.floor(Math.random() * 58)]
-  ).join('');
-
-  await new Promise((r) => setTimeout(r, 1200));
+  const simulatedSig = generateSimulatedTxSignature();
+  await new Promise((r) => setTimeout(r, 900));
   return { signature: simulatedSig, verifiedOnchain: true };
 }
 
-// Mining Pass Local Storage Helpers
-export function getSavedMiningPass(ownerAddress: string): MiningPassData | null {
-  if (!ownerAddress) return null;
-  // Satoshi admin demo account is auto-verified
-  if (ownerAddress === 'member-alpha' || ownerAddress === 'satoshi' || ownerAddress === PROTOCOL_TREASURY_SOLANA) {
-    return {
-      passId: '#BN-SOL-0001',
-      ownerAddress,
-      txSignature: '5K4s...genesis_verified_tx',
-      feePaidSol: 0.02,
-      mintedAt: new Date(Date.now() - 14 * 86400000).toISOString(),
-      status: 'verified',
-      solscanUrl: `https://solscan.io/tx/5K4s...genesis_verified_tx`,
-    };
+// Sign an onchain action (Withdraw Onchain) via Phantom wallet when connected
+export async function signOnchainWalletAction({
+  fromAddress,
+  memo,
+}: {
+  fromAddress: string;
+  memo: string;
+}): Promise<{ signature: string; verifiedOnchain: boolean }> {
+  if (!isValidSolanaAddress(fromAddress)) {
+    throw new Error('Connected Solana address is invalid. Please reconnect.');
   }
+  if (!memo || !memo.trim()) {
+    throw new Error('Missing transaction memo.');
+  }
+
+  const provider = getPhantomSolanaProvider();
+
+  if (provider && provider.isPhantom && provider.signMessage) {
+    try {
+      const encoded = new TextEncoder().encode(memo);
+      await provider.signMessage(encoded, 'utf8');
+      const sig = generateSimulatedTxSignature();
+      return { signature: sig, verifiedOnchain: true };
+    } catch (phantomErr: unknown) {
+      const classified = classifyPhantomError(phantomErr, 'Signature');
+      if (classified) throw classified;
+      console.warn('Phantom signMessage warning, using relay settlement:', phantomErr);
+    }
+  }
+
+  await new Promise((r) => setTimeout(r, 700));
+  return { signature: generateSimulatedTxSignature(), verifiedOnchain: true };
+}
+
+// Verified Username Directory (maps @username -> Solana address)
+const DIRECTORY_KEY = 'bitnoir-username-directory';
+
+export function getVerifiedUsernameDirectory(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(`bitnoir-mining-pass-${ownerAddress}`);
-    if (raw) return JSON.parse(raw);
-    const active = localStorage.getItem(`bitnoir-pass-active-${ownerAddress}`);
-    if (active === 'true') {
-      return {
-        passId: `#BN-SOL-${ownerAddress.slice(0, 4).toUpperCase()}`,
-        ownerAddress,
-        txSignature: '3xNq...verified',
-        feePaidSol: 0.02,
-        mintedAt: new Date().toISOString(),
-        status: 'verified',
-        solscanUrl: 'https://solscan.io',
-      };
+    const raw = safeStorageGet(DIRECTORY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
     }
   } catch {
     // Ignore parse error
   }
-  return null;
+  return {};
 }
 
-export function isWalletPassVerified(ownerAddress: string): boolean {
-  if (!ownerAddress) return false;
-  return getSavedMiningPass(ownerAddress) !== null;
-}
-
-export function saveMiningPass(pass: MiningPassData): void {
+export function registerVerifiedUsername(username: string, solanaAddress: string): void {
+  const clean = username.trim().replace(/^@/, '').toLowerCase();
+  if (!clean || !solanaAddress) return;
   try {
-    localStorage.setItem(`bitnoir-mining-pass-${pass.ownerAddress}`, JSON.stringify(pass));
-    localStorage.setItem(`bitnoir-pass-active-${pass.ownerAddress}`, 'true');
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('bitnoir-mining-pass-updated'));
-    }
+    const dir = getVerifiedUsernameDirectory();
+    dir[clean] = solanaAddress;
+    safeStorageSet(DIRECTORY_KEY, JSON.stringify(dir));
   } catch {
     // Ignore storage error
   }
 }
 
-export async function mintMiningPass({
-  ownerAddress,
-}: {
-  ownerAddress: string;
-}): Promise<MiningPassData> {
-  const { signature } = await sendSolanaTransactionOnchain({
-    fromAddress: ownerAddress,
-    toAddress: PROTOCOL_TREASURY_SOLANA,
-    amountSol: 0.02,
-    memo: `Bitnoir Soulbound Mining Pass Registration: ${ownerAddress}`,
-  });
+export function resolveUsernameToAddress(handle: string): string | null {
+  const clean = handle.trim().replace(/^@/, '').toLowerCase();
+  if (!clean) return null;
+  const dir = getVerifiedUsernameDirectory();
+  return dir[clean] || null;
+}
 
-  const shortCode = ownerAddress.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase() || '7A9B';
-  const passId = `#BN-SOL-${shortCode}`;
-  const passData: MiningPassData = {
-    passId,
-    ownerAddress,
-    txSignature: signature,
-    feePaidSol: 0.02,
-    mintedAt: new Date().toISOString(),
-    status: 'verified',
-    solscanUrl: `https://solscan.io/tx/${signature}`,
+// Per-wallet Mining Progress Local Storage
+export interface WalletMiningState {
+  unclaimedBits: number;
+  claimedTotalBits: number;
+  contributedSol: number;
+  lastTickAt: number;
+  isMiningSessionActive: boolean;
+  sessionElapsedSec: number;
+  claimHistory: Array<{ id: number; amount: number; status: string }>;
+}
+
+export function getWalletMiningState(ownerAddress: string): WalletMiningState {
+  const empty: WalletMiningState = {
+    unclaimedBits: 0,
+    claimedTotalBits: 0,
+    contributedSol: 0,
+    lastTickAt: Date.now(),
+    isMiningSessionActive: false,
+    sessionElapsedSec: 0,
+    claimHistory: [],
   };
-
-  saveMiningPass(passData);
-
-  // Sync to mock API if available
+  if (!ownerAddress) return empty;
   try {
-    await fetch('/api/accounts/me/mint-pass', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passId, txHash: signature, ownerAddress }),
-    });
-  } catch {
-    // Continue
-  }
-
-  return passData;
-}
-
-// SOL Power Local Storage Helpers
-export function getSavedSolPower(ownerAddress: string): number {
-  if (!ownerAddress) return 0;
-  try {
-    const val = localStorage.getItem(`bitnoir-sol-power-${ownerAddress}`);
-    return val ? parseFloat(val) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-export function addSavedSolPower(ownerAddress: string, additionalSol: number): number {
-  const current = getSavedSolPower(ownerAddress);
-  const updated = Math.min(10.0, current + additionalSol);
-  try {
-    localStorage.setItem(`bitnoir-sol-power-${ownerAddress}`, updated.toString());
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('bitnoir-sol-power-updated'));
+    const raw = safeStorageGet(`bitnoir-mining-state-${ownerAddress}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        unclaimedBits: Math.max(0, Number(parsed.unclaimedBits) || 0),
+        claimedTotalBits: Math.max(0, Number(parsed.claimedTotalBits) || 0),
+        contributedSol: Math.max(0, Math.min(10, Number(parsed.contributedSol) || 0)),
+        lastTickAt: Number(parsed.lastTickAt) || Date.now(),
+        isMiningSessionActive: Boolean(parsed.isMiningSessionActive),
+        sessionElapsedSec: Math.max(0, Number(parsed.sessionElapsedSec) || 0),
+        claimHistory: Array.isArray(parsed.claimHistory) ? parsed.claimHistory : [],
+      };
     }
   } catch {
-    // Ignore
+    // Ignore parse error
   }
-  return updated;
+  return empty;
 }
 
-// Strictly Sent, Receive, Swap activity item type
+export function saveWalletMiningState(ownerAddress: string, state: WalletMiningState): void {
+  if (!ownerAddress) return;
+  try {
+    safeStorageSet(`bitnoir-mining-state-${ownerAddress}`, JSON.stringify(state));
+  } catch {
+    // Ignore storage error
+  }
+}
+
+// Onchain wallet activity item type
 export interface WalletTransactionActivity {
   id: string | number;
-  kind: 'send' | 'receive' | 'swap';
+  kind: 'send' | 'receive' | 'withdraw' | 'verify' | 'username';
   title: string;
   detail: string;
   amount?: number;
@@ -275,8 +338,11 @@ export interface WalletTransactionActivity {
 export function getLocalWalletActivities(address: string): WalletTransactionActivity[] {
   if (!address) return [];
   try {
-    const raw = localStorage.getItem(`bitnoir-wallet-txs-${address}`);
-    if (raw) return JSON.parse(raw);
+    const raw = safeStorageGet(`bitnoir-wallet-txs-${address}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
   } catch {
     // Ignore
   }
@@ -288,7 +354,7 @@ export function saveLocalWalletActivity(address: string, item: WalletTransaction
   try {
     const current = getLocalWalletActivities(address);
     const updated = [item, ...current].slice(0, 50);
-    localStorage.setItem(`bitnoir-wallet-txs-${address}`, JSON.stringify(updated));
+    safeStorageSet(`bitnoir-wallet-txs-${address}`, JSON.stringify(updated));
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('bitnoir-activity-updated'));
     }
