@@ -237,12 +237,36 @@ export async function signOnchainWalletAction({
   return { signature: generateSimulatedTxSignature(), verifiedOnchain: true };
 }
 
-// Verified Username Directory (maps @username -> Solana address)
-const DIRECTORY_KEY = 'bitnoir-username-directory';
+// Unique 8-digit UID generator & Verified UID Directory (maps UID -> Solana address)
+const UID_DIRECTORY_KEY = 'bitnoir-uid-directory';
 
-export function getVerifiedUsernameDirectory(): Record<string, string> {
+export function deriveCandidateUid(solanaAddress: string, nonce = 0): string {
+  const input = nonce > 0 ? `${solanaAddress}#${nonce}` : solanaAddress;
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ (ch + i), 0x85ebca6b) >>> 0;
+  }
+  const mixed = ((h1 ^ (h2 >>> 5)) >>> 0) % 90000000;
+  return String(10000000 + mixed);
+}
+
+export function normalizeUidInput(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .replace(/^uid[\s:#-]*/i, '')
+    .replace(/\s+/g, '');
+}
+
+export function isValidUidFormat(uid: string): boolean {
+  return /^\d{8}$/.test(normalizeUidInput(uid));
+}
+
+export function getVerifiedUidDirectory(): Record<string, string> {
   try {
-    const raw = safeStorageGet(DIRECTORY_KEY);
+    const raw = safeStorageGet(UID_DIRECTORY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === 'object' ? parsed : {};
@@ -253,23 +277,59 @@ export function getVerifiedUsernameDirectory(): Record<string, string> {
   return {};
 }
 
-export function registerVerifiedUsername(username: string, solanaAddress: string): void {
-  const clean = username.trim().replace(/^@/, '').toLowerCase();
+export function registerVerifiedUid(uid: string, solanaAddress: string): void {
+  const clean = normalizeUidInput(uid);
   if (!clean || !solanaAddress) return;
   try {
-    const dir = getVerifiedUsernameDirectory();
+    const dir = getVerifiedUidDirectory();
     dir[clean] = solanaAddress;
-    safeStorageSet(DIRECTORY_KEY, JSON.stringify(dir));
+    safeStorageSet(UID_DIRECTORY_KEY, JSON.stringify(dir));
   } catch {
     // Ignore storage error
   }
 }
 
-export function resolveUsernameToAddress(handle: string): string | null {
-  const clean = handle.trim().replace(/^@/, '').toLowerCase();
+export function claimLocalUniqueUid(solanaAddress: string, preferredUid?: string): string {
+  const dir = getVerifiedUidDirectory();
+  if (preferredUid && isValidUidFormat(preferredUid)) {
+    const clean = normalizeUidInput(preferredUid);
+    if (!dir[clean] || dir[clean] === solanaAddress) {
+      registerVerifiedUid(clean, solanaAddress);
+      return clean;
+    }
+  }
+  for (const [existingUid, owner] of Object.entries(dir)) {
+    if (owner === solanaAddress && isValidUidFormat(existingUid)) {
+      return existingUid;
+    }
+  }
+  let nonce = 0;
+  while (nonce < 10000) {
+    const candidate = deriveCandidateUid(solanaAddress, nonce);
+    if ((!dir[candidate] || dir[candidate] === solanaAddress) && candidate !== '88001001') {
+      registerVerifiedUid(candidate, solanaAddress);
+      return candidate;
+    }
+    nonce++;
+  }
+  const fallback = deriveCandidateUid(`${solanaAddress}:${Date.now()}`);
+  registerVerifiedUid(fallback, solanaAddress);
+  return fallback;
+}
+
+export function resolveUidToAddress(uid: string): string | null {
+  const clean = normalizeUidInput(uid);
   if (!clean) return null;
-  const dir = getVerifiedUsernameDirectory();
+  const dir = getVerifiedUidDirectory();
   return dir[clean] || null;
+}
+
+export const SOL_POWER_MAX_SOL = 3.0;
+export const SOL_POWER_MAX_RATE_PER_HOUR = 10.0;
+
+export function calculateSolPowerBoost(contributedSol: number): number {
+  const clamped = Math.max(0, Math.min(SOL_POWER_MAX_SOL, Number(contributedSol) || 0));
+  return Number(((clamped / SOL_POWER_MAX_SOL) * SOL_POWER_MAX_RATE_PER_HOUR).toFixed(4));
 }
 
 // Per-wallet Mining Progress Local Storage
@@ -281,6 +341,7 @@ export interface WalletMiningState {
   isMiningSessionActive: boolean;
   sessionElapsedSec: number;
   claimHistory: Array<{ id: number; amount: number; status: string }>;
+  hasStartedMiningOnce?: boolean;
 }
 
 export function getWalletMiningState(ownerAddress: string): WalletMiningState {
@@ -292,20 +353,33 @@ export function getWalletMiningState(ownerAddress: string): WalletMiningState {
     isMiningSessionActive: false,
     sessionElapsedSec: 0,
     claimHistory: [],
+    hasStartedMiningOnce: false,
   };
   if (!ownerAddress) return empty;
   try {
     const raw = safeStorageGet(`bitnoir-mining-state-${ownerAddress}`);
     if (raw) {
       const parsed = JSON.parse(raw);
+      const unclaimedBits = Math.max(0, Number(parsed.unclaimedBits) || 0);
+      const claimedTotalBits = Math.max(0, Number(parsed.claimedTotalBits) || 0);
+      const isMiningSessionActive = Boolean(parsed.isMiningSessionActive);
+      const sessionElapsedSec = Math.max(0, Number(parsed.sessionElapsedSec) || 0);
+      const claimHistory = Array.isArray(parsed.claimHistory) ? parsed.claimHistory : [];
       return {
-        unclaimedBits: Math.max(0, Number(parsed.unclaimedBits) || 0),
-        claimedTotalBits: Math.max(0, Number(parsed.claimedTotalBits) || 0),
-        contributedSol: Math.max(0, Math.min(10, Number(parsed.contributedSol) || 0)),
+        unclaimedBits,
+        claimedTotalBits,
+        contributedSol: Math.max(0, Math.min(SOL_POWER_MAX_SOL, Number(parsed.contributedSol) || 0)),
         lastTickAt: Number(parsed.lastTickAt) || Date.now(),
-        isMiningSessionActive: Boolean(parsed.isMiningSessionActive),
-        sessionElapsedSec: Math.max(0, Number(parsed.sessionElapsedSec) || 0),
-        claimHistory: Array.isArray(parsed.claimHistory) ? parsed.claimHistory : [],
+        isMiningSessionActive,
+        sessionElapsedSec,
+        claimHistory,
+        hasStartedMiningOnce: Boolean(
+          parsed.hasStartedMiningOnce ||
+            isMiningSessionActive ||
+            sessionElapsedSec > 0 ||
+            claimedTotalBits > 0 ||
+            claimHistory.length > 0,
+        ),
       };
     }
   } catch {
@@ -317,7 +391,27 @@ export function getWalletMiningState(ownerAddress: string): WalletMiningState {
 export function saveWalletMiningState(ownerAddress: string, state: WalletMiningState): void {
   if (!ownerAddress) return;
   try {
-    safeStorageSet(`bitnoir-mining-state-${ownerAddress}`, JSON.stringify(state));
+    const prevRaw = safeStorageGet(`bitnoir-mining-state-${ownerAddress}`);
+    let prevStarted = false;
+    if (prevRaw) {
+      try {
+        prevStarted = Boolean(JSON.parse(prevRaw)?.hasStartedMiningOnce);
+      } catch {
+        prevStarted = false;
+      }
+    }
+    const persisted: WalletMiningState = {
+      ...state,
+      hasStartedMiningOnce: Boolean(
+        state.hasStartedMiningOnce ||
+          prevStarted ||
+          state.isMiningSessionActive ||
+          state.sessionElapsedSec > 0 ||
+          state.claimedTotalBits > 0 ||
+          state.claimHistory.length > 0,
+      ),
+    };
+    safeStorageSet(`bitnoir-mining-state-${ownerAddress}`, JSON.stringify(persisted));
   } catch {
     // Ignore storage error
   }
@@ -326,7 +420,7 @@ export function saveWalletMiningState(ownerAddress: string, state: WalletMiningS
 // Onchain wallet activity item type
 export interface WalletTransactionActivity {
   id: string | number;
-  kind: 'send' | 'receive' | 'withdraw' | 'verify' | 'username';
+  kind: 'send' | 'receive' | 'withdraw' | 'verify' | 'uid';
   title: string;
   detail: string;
   amount?: number;

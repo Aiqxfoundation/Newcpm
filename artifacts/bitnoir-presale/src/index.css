@@ -19,16 +19,16 @@
 }
 
 :root {
-  --bg-deep: #09090b;
-  --bg-graphite: #0e1015;
-  --bg-card: #121318;
-  --bg-card-elevated: #171920;
+  --bg-deep: #070707;
+  --bg-graphite: #0d0d0d;
+  --bg-card: #121212;
+  --bg-card-elevated: #181818;
   --border-subtle: rgba(255, 255, 255, 0.065);
-  --border-metallic: rgba(255, 255, 255, 0.11);
+  --border-metallic: rgba(255, 255, 255, 0.09);
   --border-neon: rgba(247, 147, 26, 0.35);
   --btc-gold: #f7931a;
-  --btc-gold-bright: #ffb020;
-  --btc-gold-glow: rgba(247, 147, 26, 0.22);
+  --btc-gold-bright: #ff9f2e;
+  --btc-gold-glow: rgba(247, 147, 26, 0.2);
   --neon-green: #10b981;
   --neon-green-glow: rgba(16, 185, 129, 0.16);
   --neon-green-dim: #059669;
@@ -63,11 +63,6 @@ body {
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-image:
-    radial-gradient(ellipse 80% 45% at 50% -10%, rgba(247, 147, 26, 0.09) 0%, transparent 65%),
-    radial-gradient(circle at 85% 15%, rgba(251, 191, 36, 0.04) 0%, transparent 45%),
-    radial-gradient(circle at 12% 80%, rgba(255, 255, 255, 0.025) 0%, transparent 45%);
-  background-attachment: fixed;
   line-height: 1.6;
 }
 
@@ -2875,8 +2870,8 @@ a {
   position: fixed;
   inset: 0;
   z-index: 999;
-  background: rgba(5, 5, 7, 0.8);
-  backdrop-filter: blur(14px) saturate(150%);
+  background: rgba(3, 3, 3, 0.84);
+  backdrop-filter: blur(10px);
   display: grid;
   place-items: center;
   padding: 16px;
@@ -2884,17 +2879,15 @@ a {
 }
 
 .modal-dialog {
-  background: linear-gradient(180deg, #15171e 0%, #0d0e13 100%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 20px;
+  background: #121212;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
   width: 100%;
   max-width: 520px;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow:
-    0 28px 80px rgba(0, 0, 0, 0.78),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  padding: 28px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.88);
+  padding: 24px;
   position: relative;
   animation: scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -2903,19 +2896,19 @@ a {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  margin-bottom: 18px;
 }
 
 .modal-header h3 {
   margin: 0;
-  font: 700 20px var(--app-font-serif);
+  font: 700 18px var(--app-font-serif);
   color: #fff;
 }
 
 .modal-close-btn {
-  background: rgba(255, 255, 255, 0.04);
+  background: #181818;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #a1a1aa;
   cursor: pointer;
@@ -2924,13 +2917,13 @@ a {
   display: grid;
   place-items: center;
   border-radius: 10px;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modal-close-btn:hover {
   color: #fff;
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.16);
+  background: #222222;
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .quick-amount-row {
@@ -4370,22 +4363,19 @@ a {
   align-items: center;
   gap: 7px;
   padding: 8px 14px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   color: #e4e4e7;
-  font: 600 12px var(--app-font-sans);
+  font: 500 12px var(--app-font-sans);
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .clean-action-btn-soft:hover {
-  background: rgba(255, 255, 255, 0.085);
-  border-color: rgba(247, 147, 26, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.28);
   color: #ffffff;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .clean-claim-btn {
@@ -4936,38 +4926,32 @@ a {
 
 .clean-stake-confirm-btn {
   width: 100%;
-  min-height: 44px;
-  border-radius: 11px;
-  background: linear-gradient(180deg, #ffaa2b 0%, #f7931a 100%);
-  border: 1px solid rgba(255, 200, 110, 0.45);
-  color: #09090b;
-  font: 700 13px var(--app-font-sans);
+  min-height: 40px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid rgba(245, 158, 11, 0.82);
+  color: #f59e0b;
+  font: 600 13px var(--app-font-sans);
   letter-spacing: -0.01em;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow:
-    0 6px 20px rgba(247, 147, 26, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .clean-stake-confirm-btn:hover:not(:disabled) {
-  background: linear-gradient(180deg, #ffb648 0%, #f99d2b 100%);
-  transform: translateY(-1px);
-  box-shadow:
-    0 10px 26px rgba(247, 147, 26, 0.36),
-    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  background: rgba(245, 158, 11, 0.1);
+  border-color: #fbbf24;
+  color: #fbbf24;
 }
 
 .clean-stake-confirm-btn:disabled {
-  background: rgba(255, 255, 255, 0.06);
+  background: transparent;
   color: #71717a;
   cursor: not-allowed;
-  box-shadow: none;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 @media (max-width: 900px) {
@@ -5845,19 +5829,17 @@ a {
 
 /* KPI STRIP & UNIFIED COCKPIT */
 .pob-cockpit {
-  background: linear-gradient(180deg, #13151b 0%, #0e1015 100%);
-  border: 1px solid rgba(255, 255, 255, 0.085);
+  background: #121212;
+  border: 1px solid rgba(255, 255, 255, 0.075);
   border-radius: 18px;
   overflow: hidden;
-  box-shadow:
-    0 20px 50px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .pob-cockpit-hero {
-  background: linear-gradient(180deg, rgba(247, 147, 26, 0.045) 0%, rgba(18, 20, 26, 0.65) 100%);
-  padding: 26px 28px;
+  background: #121212;
+  padding: 24px 26px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -5870,7 +5852,7 @@ a {
 .pob-cockpit-stats {
   display: flex;
   align-items: stretch;
-  background: #0b0c10;
+  background: #0d0d0d;
   flex-wrap: wrap;
 }
 
@@ -5881,11 +5863,11 @@ a {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: background 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .pob-stat-cell:hover {
-  background: rgba(255, 255, 255, 0.025);
+  background: #161616;
 }
 
 .pob-stat-divider {
@@ -5897,7 +5879,7 @@ a {
   font: 600 10px var(--app-font-mono);
   color: #71717a;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
 }
 
 .pob-stat-label.highlight {
@@ -6637,13 +6619,10 @@ a {
   position: relative;
   display: inline-flex;
   align-items: center;
-  background: linear-gradient(180deg, #171920 0%, #0d0e13 100%);
-  border: 1px solid rgba(247, 147, 26, 0.24);
-  border-radius: 16px;
+  background: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
   padding: 14px 20px;
-  box-shadow:
-    0 12px 32px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 /* Plain claim button state under 20% */
@@ -6652,46 +6631,46 @@ a {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 34px;
-  min-height: 34px;
-  min-width: 112px;
-  padding: 0 14px;
-  border-radius: 9px;
-  font: 700 12px var(--app-font-sans);
-  background: rgba(255, 255, 255, 0.04) !important;
+  height: 38px;
+  min-height: 38px;
+  min-width: 116px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font: 600 12px var(--app-font-sans);
+  background: transparent !important;
   color: #71717a !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
   cursor: not-allowed !important;
   box-shadow: none !important;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   white-space: nowrap;
 }
 
-/* Active Bitcoin Gold claim button state when 20% is reached */
+/* Active Bitcoin Gold outline button state (Start Mining & unlocked Claim) */
 .claim-btn-active-colorful {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 34px;
-  min-height: 34px;
-  min-width: 112px;
+  height: 38px;
+  min-height: 38px;
+  min-width: 116px;
   padding: 0 16px;
-  border-radius: 9px;
-  font: 700 12px var(--app-font-sans);
-  background: linear-gradient(180deg, #ffaa2b 0%, #f7931a 100%) !important;
-  color: #09090b !important;
-  border: 1px solid rgba(255, 210, 130, 0.5) !important;
+  border-radius: 8px;
+  font: 600 12px var(--app-font-sans);
+  background: transparent !important;
+  color: #f59e0b !important;
+  border: 1px solid rgba(245, 158, 11, 0.82) !important;
   cursor: pointer !important;
-  box-shadow: 0 4px 18px rgba(247, 147, 26, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: none !important;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   white-space: nowrap;
 }
 
 .claim-btn-active-colorful:hover {
-  transform: translateY(-1px);
-  background: linear-gradient(180deg, #ffb648 0%, #f99d2b 100%) !important;
-  box-shadow: 0 8px 24px rgba(247, 147, 26, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+  background: rgba(245, 158, 11, 0.1) !important;
+  border-color: #fbbf24 !important;
+  color: #fbbf24 !important;
 }
 
 .claim-btn-active-colorful:active {
@@ -6704,21 +6683,19 @@ a {
   align-items: center;
   gap: 6px;
   height: 30px;
-  padding: 0 11px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  padding: 0 10px;
+  border-radius: 10px;
+  background: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.085);
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
 }
 
 .claimed-points-top-btn:hover,
 .claimed-points-top-btn.active {
-  background: rgba(16, 185, 129, 0.1);
+  background: #1f1f1f;
   border-color: rgba(16, 185, 129, 0.45);
-  transform: translateY(-1px);
 }
 
 .claimed-points-top-btn:active {
@@ -6731,21 +6708,19 @@ a {
   align-items: center;
   gap: 6px;
   height: 30px;
-  padding: 0 11px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  padding: 0 10px;
+  border-radius: 10px;
+  background: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.085);
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
 }
 
 .referral-points-top-btn:hover,
 .referral-points-top-btn.active {
-  background: rgba(247, 147, 26, 0.1);
+  background: #1f1f1f;
   border-color: rgba(247, 147, 26, 0.45);
-  transform: translateY(-1px);
 }
 
 .referral-points-top-btn:active {
@@ -6927,51 +6902,35 @@ a {
    CLEAN PREMIUM ASSETS PAGE STYLES
    --------------------------------------------------------------------------- */
 .assets-profile-banner {
-  background: linear-gradient(135deg, rgba(23, 25, 32, 0.92) 0%, rgba(14, 16, 21, 0.98) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 20px;
+  background: #121212;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 18px;
   padding: 24px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   position: relative;
   overflow: hidden;
 }
 
-.assets-profile-banner::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 280px;
-  height: 100%;
-  background: radial-gradient(circle at 100% 0%, rgba(247, 147, 26, 0.09) 0%, transparent 70%);
-  pointer-events: none;
-}
-
 .assets-balance-card {
-  background: rgba(18, 19, 24, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #121212;
+  border: 1px solid rgba(255, 255, 255, 0.075);
   border-radius: 16px;
   padding: 18px 20px;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: border-color 0.16s ease, background-color 0.16s ease;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  backdrop-filter: blur(10px);
 }
 
 .assets-balance-card:hover {
-  background: rgba(23, 25, 32, 0.95);
-  border-color: rgba(247, 147, 26, 0.28);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  background: #161616;
+  border-color: rgba(255, 255, 255, 0.13);
 }
 
 .assets-action-hub {
-  background: linear-gradient(180deg, rgba(18, 19, 24, 0.95) 0%, rgba(12, 13, 18, 0.98) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 20px;
+  background: #121212;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 18px;
   padding: 24px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
 }
 
 .assets-tab-btn {
@@ -6980,19 +6939,19 @@ a {
   justify-content: center;
   gap: 8px;
   padding: 10px 20px;
-  border-radius: 12px;
+  border-radius: 10px;
   font-size: 13px;
   font-weight: 700;
   color: #a1a1aa;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.075);
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .assets-tab-btn:hover {
   color: #fff;
-  background: rgba(255, 255, 255, 0.07);
+  background: #202020;
   border-color: rgba(255, 255, 255, 0.14);
 }
 
@@ -7000,25 +6959,24 @@ a {
   color: #fbbf24;
   background: rgba(247, 147, 26, 0.12);
   border-color: rgba(247, 147, 26, 0.38);
-  box-shadow: 0 4px 16px rgba(247, 147, 26, 0.14);
 }
 
 .assets-input-field {
   width: 100%;
-  background: #0b0c10;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 12px;
-  padding: 12px 14px;
+  background: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  padding: 11px 14px;
   color: #fff;
   font-size: 14px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .assets-input-field:focus {
   border-color: #f7931a;
-  box-shadow: 0 0 0 3px rgba(247, 147, 26, 0.16);
+  box-shadow: 0 0 0 2px rgba(247, 147, 26, 0.16);
 }
 
 .assets-pill-preset {
@@ -7075,4 +7033,163 @@ a {
   .toast-progress-bar {
     animation: none;
   }
+}
+
+/* ==========================================================================
+   ANT CARD ONE-TIME BRANDED REVEAL OVERLAY
+   ========================================================================== */
+@keyframes ant-reveal-overlay-fade {
+  0% {
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes ant-reveal-sweep {
+  0% {
+    transform: translateX(-140%) skewX(-18deg);
+    opacity: 0;
+  }
+  28% {
+    opacity: 0.9;
+  }
+  68% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateX(220%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+@keyframes ant-reveal-ring {
+  0% {
+    transform: scale(0.42);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes ant-reveal-crest {
+  0% {
+    transform: scale(0.75);
+    opacity: 0;
+  }
+  22% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+  42% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  78% {
+    transform: scale(1.01);
+    opacity: 0.96;
+  }
+  100% {
+    transform: scale(1.08);
+    opacity: 0;
+  }
+}
+
+@keyframes ant-reveal-card-appear {
+  0% {
+    filter: brightness(1.65) saturate(1.18);
+    transform: scale(0.97);
+  }
+  50% {
+    filter: brightness(1.12) saturate(1.05);
+    transform: scale(1.01);
+  }
+  100% {
+    filter: brightness(1) saturate(1);
+    transform: scale(1);
+  }
+}
+
+.ant-reveal-card-enter {
+  animation: ant-reveal-card-appear 2.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ant-reveal-overlay {
+  animation: ant-reveal-overlay-fade 4.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ant-reveal-sweep {
+  animation: ant-reveal-sweep 3s cubic-bezier(0.22, 1, 0.36, 1) 0.35s forwards;
+}
+
+.ant-reveal-ring {
+  animation: ant-reveal-ring 3.2s cubic-bezier(0.16, 1, 0.3, 1) 0.25s forwards;
+}
+
+.ant-reveal-crest {
+  animation: ant-reveal-crest 4.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ==========================================================================
+   ANT CARD ACTIVE DASHBOARD THEME (PRECISION MACHINED OBSIDIAN GOLD)
+   ========================================================================== */
+.ant-theme-page {
+  background-color: #070707;
+}
+
+.pob-cockpit.ant-cockpit {
+  position: relative;
+  background: #13110e;
+  border: 1px solid rgba(247, 147, 26, 0.24);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+.pob-cockpit.ant-cockpit::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 32%;
+  right: 32%;
+  height: 1px;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(251, 191, 36, 0.45) 50%,
+    transparent 100%
+  );
+}
+
+.pob-cockpit.ant-cockpit .pob-cockpit-hero {
+  background: #13110e;
+  border-bottom: 1px solid rgba(247, 147, 26, 0.14);
+}
+
+.pob-cockpit.ant-cockpit .pob-cockpit-stats {
+  background: #0d0c0a;
+}
+
+.pob-cockpit.ant-cockpit .pob-stat-divider {
+  background: rgba(247, 147, 26, 0.1);
+}
+
+.stopwatch-counter-cockpit.ant-counter {
+  background: #181511;
+  border-color: rgba(247, 147, 26, 0.25);
+}
+
+/* Hardened Power Card asset protection (blocks tap-hold download, selection & drag) */
+.card-asset-protected,
+.card-asset-protected * {
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-user-drag: none !important;
 }

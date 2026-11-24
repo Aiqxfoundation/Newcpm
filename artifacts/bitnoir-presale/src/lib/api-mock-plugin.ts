@@ -3,7 +3,7 @@ import type { Plugin } from 'vite';
 interface AccountState {
   id: string;
   name: string;
-  username: string;
+  uid: string;
   email: string;
   role: string;
   referralCode: string;
@@ -27,9 +27,10 @@ interface AccountState {
   };
   activities: Array<{
     id: number;
-    kind: 'send' | 'receive' | 'withdraw' | 'verify' | 'username' | 'reward' | 'stake';
+    kind: 'send' | 'receive' | 'withdraw' | 'verify' | 'uid' | 'reward' | 'stake';
     title: string;
     detail: string;
+    amount?: number;
     txHash?: string;
     createdAt: string;
   }>;
@@ -44,11 +45,35 @@ class HttpRequestError extends Error {
   }
 }
 
+function deriveCandidateUid(solanaAddress: string, nonce = 0): string {
+  const input = nonce > 0 ? `${solanaAddress}#${nonce}` : solanaAddress;
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ (ch + i), 0x85ebca6b) >>> 0;
+  }
+  const mixed = ((h1 ^ (h2 >>> 5)) >>> 0) % 90000000;
+  return String(10000000 + mixed);
+}
+
+function normalizeUid(raw: unknown): string {
+  return String(raw || '')
+    .trim()
+    .replace(/^uid[\s:#-]*/i, '')
+    .replace(/\s+/g, '');
+}
+
+function isValidUid(uid: string): boolean {
+  return /^\d{8}$/.test(uid);
+}
+
 function createZeroAccount(address = ''): AccountState {
   return {
     id: address,
     name: '',
-    username: '',
+    uid: '',
     email: '',
     role: 'member',
     referralCode: '',
@@ -77,7 +102,130 @@ function createZeroAccount(address = ''): AccountState {
 
 export function bitnoirApiPlugin(): Plugin {
   const accounts = new Map<string, AccountState>();
+  const uidRegistry = new Map<string, string>(); // uid -> wallet address
+  const seededLegacyDemo = new Set<string>();
   let activeAddress = '';
+
+  const TEST_USER_ADDRESS = 'TestMiner1111111111111111111111111111111111';
+  const TEST_USER_UID = '88001001';
+
+  const assignUniqueUidForAccount = (acc: AccountState, preferredUid?: string): string => {
+    if (!acc.id) return '';
+    if (acc.uid && isValidUid(acc.uid) && uidRegistry.get(acc.uid) === acc.id) {
+      acc.name = `UID ${acc.uid}`;
+      acc.referralCode = acc.uid;
+      return acc.uid;
+    }
+
+    const cleanPreferred = normalizeUid(preferredUid);
+    if (
+      cleanPreferred &&
+      isValidUid(cleanPreferred) &&
+      (!uidRegistry.has(cleanPreferred) || uidRegistry.get(cleanPreferred) === acc.id)
+    ) {
+      uidRegistry.set(cleanPreferred, acc.id);
+      acc.uid = cleanPreferred;
+      acc.name = `UID ${cleanPreferred}`;
+      acc.referralCode = cleanPreferred;
+      return cleanPreferred;
+    }
+
+    let nonce = 0;
+    while (nonce < 10000) {
+      const candidate = deriveCandidateUid(acc.id, nonce);
+      const owner = uidRegistry.get(candidate);
+      if (!owner || owner === acc.id) {
+        uidRegistry.set(candidate, acc.id);
+        acc.uid = candidate;
+        acc.name = `UID ${candidate}`;
+        acc.referralCode = candidate;
+        return candidate;
+      }
+      nonce++;
+    }
+
+    // Ultra-rare sequential fallback guaranteeing uniqueness
+    let seq = 10000001;
+    while (uidRegistry.has(String(seq))) {
+      seq++;
+    }
+    const assigned = String(seq);
+    uidRegistry.set(assigned, acc.id);
+    acc.uid = assigned;
+    acc.name = `UID ${assigned}`;
+    acc.referralCode = assigned;
+    return assigned;
+  };
+
+  const ensureTestUserAccount = (): AccountState => {
+    let testAcc = accounts.get(TEST_USER_ADDRESS);
+    if (!testAcc) {
+      testAcc = createZeroAccount(TEST_USER_ADDRESS);
+      testAcc.isVerified = true;
+      testAcc.verifiedTx = 'test_verified_tx_testminer';
+      testAcc.balances.purchased = 500;
+      accounts.set(TEST_USER_ADDRESS, testAcc);
+      assignUniqueUidForAccount(testAcc, TEST_USER_UID);
+    }
+    return testAcc;
+  };
+  ensureTestUserAccount();
+
+  const seedLegacyBtcsTestDemo = (acc: AccountState, legacyHandle?: string) => {
+    if (!acc.id || !acc.uid || legacyHandle !== 'btcs' || seededLegacyDemo.has(acc.id)) return;
+    seededLegacyDemo.add(acc.id);
+
+    const testAcc = ensureTestUserAccount();
+
+    // 1. Grant 100 test Bits
+    acc.balances.purchased = Number((acc.balances.purchased + 100).toFixed(4));
+
+    // 2. Transfer 25 Bits to test UID 88001001
+    const sendAmount = 25;
+    acc.balances.purchased = Number((acc.balances.purchased - sendAmount).toFixed(4));
+    testAcc.balances.purchased = Number((testAcc.balances.purchased + sendAmount).toFixed(4));
+    const sentAt = new Date(Date.now() - 1000 * 60 * 12).toISOString();
+    const sentId = Date.now() - 120000;
+    testAcc.activities.unshift({
+      id: sentId + 1,
+      kind: 'receive',
+      title: `Received ${sendAmount} Bits from UID ${acc.uid}`,
+      detail: `In-app transfer from UID ${acc.uid}.`,
+      amount: sendAmount,
+      createdAt: sentAt,
+    });
+    acc.activities.unshift({
+      id: sentId,
+      kind: 'send',
+      title: `Sent ${sendAmount} Bits to UID ${testAcc.uid}`,
+      detail: `In-app transfer UID ${acc.uid} → UID ${testAcc.uid}.`,
+      amount: sendAmount,
+      createdAt: sentAt,
+    });
+
+    // 3. Receive 50 Bits from test UID 88001001
+    const receiveAmount = 50;
+    testAcc.balances.purchased = Number((testAcc.balances.purchased - receiveAmount).toFixed(4));
+    acc.balances.purchased = Number((acc.balances.purchased + receiveAmount).toFixed(4));
+    const receivedAt = new Date(Date.now() - 1000 * 60 * 3).toISOString();
+    const receivedId = Date.now() - 30000;
+    testAcc.activities.unshift({
+      id: receivedId + 1,
+      kind: 'send',
+      title: `Sent ${receiveAmount} Bits to UID ${acc.uid}`,
+      detail: `In-app transfer UID ${testAcc.uid} → UID ${acc.uid}.`,
+      amount: receiveAmount,
+      createdAt: receivedAt,
+    });
+    acc.activities.unshift({
+      id: receivedId,
+      kind: 'receive',
+      title: `Received ${receiveAmount} Bits from UID ${testAcc.uid}`,
+      detail: `In-app transfer from UID ${testAcc.uid}.`,
+      amount: receiveAmount,
+      createdAt: receivedAt,
+    });
+  };
 
   const getActiveAccount = (): AccountState => {
     if (!activeAddress) return createZeroAccount('');
@@ -87,6 +235,89 @@ export function bitnoirApiPlugin(): Plugin {
       accounts.set(activeAddress, acc);
     }
     return acc;
+  };
+
+  const findVerifiedAccountByUid = (rawUid: string): AccountState | null => {
+    const clean = normalizeUid(rawUid);
+    if (!isValidUid(clean)) return null;
+    const ownerAddress = uidRegistry.get(clean);
+    if (!ownerAddress) return null;
+    const candidate = accounts.get(ownerAddress);
+    if (candidate && candidate.isVerified && candidate.uid === clean) {
+      return candidate;
+    }
+    return null;
+  };
+
+  const isMinerVerified = (acc: AccountState): boolean =>
+    Boolean(acc.isVerified && acc.uid);
+
+  const isMinerActive = (acc: AccountState): boolean => {
+    if (!acc.mining.sessionStartedAt || !acc.mining.sessionEndsAt) return false;
+    const endsAt = new Date(acc.mining.sessionEndsAt).getTime();
+    return Number.isFinite(endsAt) && endsAt > Date.now();
+  };
+
+  // Rule: Unverified wallets (treated as bots/unverified) and inactive miners share 0% power.
+  // Only verified AND actively mining direct referrals contribute 10% to their inviter.
+  const isMinerEligibleToSharePower = (acc: AccountState): boolean =>
+    isMinerVerified(acc) && isMinerActive(acc);
+
+  const getDirectMinersFor = (inviter: AccountState): AccountState[] => {
+    if (!inviter.id) return [];
+    const inviterKeys = new Set(
+      [inviter.uid, inviter.referralCode, inviter.id]
+        .map((val) => normalizeUid(val).toLowerCase())
+        .filter(Boolean)
+    );
+    const list: AccountState[] = [];
+    for (const candidate of accounts.values()) {
+      if (candidate.id === inviter.id) continue;
+      const ref = normalizeUid(candidate.referredBy).toLowerCase();
+      if (!ref) continue;
+      if (inviterKeys.has(ref)) {
+        list.push(candidate);
+      }
+    }
+    return list;
+  };
+
+  const computeReferralBoostFor = (inviter: AccountState, visited = new Set<string>()): number => {
+    if (!isMinerVerified(inviter)) return 0;
+    if (visited.has(inviter.id)) return 0;
+    visited.add(inviter.id);
+
+    let boost = 0;
+    for (const miner of getDirectMinersFor(inviter)) {
+      if (!isMinerEligibleToSharePower(miner)) continue;
+      const minerRate = Number(
+        (
+          miner.mining.baseRatePerHour +
+          miner.mining.solBurnBoostPerHour +
+          computeReferralBoostFor(miner, new Set(visited))
+        ).toFixed(4)
+      );
+      boost += Number((minerRate * 0.1).toFixed(4));
+    }
+    return Number(boost.toFixed(4));
+  };
+
+  const recomputeAllReferralBoosts = () => {
+    for (const acc of accounts.values()) {
+      const verified = isMinerVerified(acc);
+      const active = isMinerActive(acc);
+      acc.mining.baseRatePerHour = verified ? 0.1 : 0.01;
+      acc.mining.referralBoostPerHour = verified ? computeReferralBoostFor(acc) : 0;
+      if (!active) {
+        acc.mining.totalMiningRatePerHour = 0;
+      } else if (verified) {
+        acc.mining.totalMiningRatePerHour = Number(
+          (acc.mining.baseRatePerHour + acc.mining.referralBoostPerHour + acc.mining.solBurnBoostPerHour).toFixed(4)
+        );
+      } else {
+        acc.mining.totalMiningRatePerHour = 0.01;
+      }
+    }
   };
 
   function parseBody(req: any): Promise<Record<string, any>> {
@@ -145,15 +376,56 @@ export function bitnoirApiPlugin(): Plugin {
       }
 
       if (url === '/api/accounts/me' && req.method === 'GET') {
-        return sendJson(res, 200, getActiveAccount());
+        const acc = getActiveAccount();
+        recomputeAllReferralBoosts();
+        return sendJson(res, 200, acc);
       }
 
       if (url === '/api/accounts/me/activity' && req.method === 'GET') {
         return sendJson(res, 200, getActiveAccount().activities);
       }
 
+      if (url === '/api/accounts/check-uid' && req.method === 'GET') {
+        const parsedUrl = new URL(req.url || '', 'http://localhost');
+        const raw = parsedUrl.searchParams.get('uid') || '';
+        const clean = normalizeUid(raw);
+        if (!isValidUid(clean)) {
+          return sendJson(res, 200, { exists: false, uid: clean });
+        }
+        const match = findVerifiedAccountByUid(clean);
+        return sendJson(res, 200, {
+          exists: Boolean(match),
+          uid: clean,
+        });
+      }
+
       if (url === '/api/accounts/me/team' && req.method === 'GET') {
-        return sendJson(res, 200, []);
+        recomputeAllReferralBoosts();
+        const inviter = getActiveAccount();
+        if (!activeAddress || !isMinerVerified(inviter)) {
+          return sendJson(res, 200, []);
+        }
+        const team = getDirectMinersFor(inviter).map((m) => {
+          const verified = isMinerVerified(m);
+          const active = isMinerActive(m);
+          const eligible = verified && active;
+          const miningPower = active
+            ? Number((m.mining.baseRatePerHour + m.mining.solBurnBoostPerHour + m.mining.referralBoostPerHour).toFixed(4))
+            : 0;
+          const providedPower = eligible ? Number((miningPower * 0.1).toFixed(4)) : 0;
+          return {
+            id: m.id,
+            uid: m.uid || '',
+            handle: m.uid ? `UID ${m.uid}` : `${m.id.slice(0, 4)}…${m.id.slice(-4)}`,
+            isVerified: verified,
+            isActive: active,
+            isEligible: eligible,
+            status: !verified ? 'unverified' : active ? 'active' : 'inactive',
+            miningPower,
+            providedPower,
+          };
+        });
+        return sendJson(res, 200, team);
       }
 
       // Sync client wallet session (every wallet starts at zero until verified + active)
@@ -174,20 +446,26 @@ export function bitnoirApiPlugin(): Plugin {
 
         acc.isVerified = Boolean(body.isVerified);
         acc.verifiedTx = body.verifiedTx ? String(body.verifiedTx) : undefined;
-        const uname = acc.isVerified ? String(body.username || '').trim().replace(/^@/, '').toLowerCase() : '';
-        acc.username = uname;
-        acc.name = uname ? `@${uname}` : '';
-        acc.referralCode = uname;
-
-        if (acc.isVerified && uname) {
-          acc.mining.baseRatePerHour = 0.1;
-          acc.mining.totalMiningRatePerHour = acc.mining.sessionStartedAt
-            ? Number((0.1 + acc.mining.referralBoostPerHour + acc.mining.solBurnBoostPerHour).toFixed(4))
-            : 0;
+        if (acc.isVerified) {
+          assignUniqueUidForAccount(acc, body.uid ? String(body.uid) : undefined);
+          seedLegacyBtcsTestDemo(acc, body.legacyUsername ? String(body.legacyUsername).toLowerCase() : undefined);
         } else {
-          acc.mining.baseRatePerHour = 0.01;
-          acc.mining.totalMiningRatePerHour = acc.mining.sessionStartedAt ? 0.01 : 0;
+          acc.uid = '';
+          acc.name = '';
+          acc.referralCode = '';
         }
+
+        const rawRef = normalizeUid(body.referredBy);
+        if (
+          rawRef &&
+          !acc.referredBy &&
+          rawRef !== acc.uid &&
+          rawRef.toLowerCase() !== addr.toLowerCase()
+        ) {
+          acc.referredBy = rawRef;
+        }
+
+        recomputeAllReferralBoosts();
 
         return sendJson(res, 200, { success: true, account: acc });
       }
@@ -198,14 +476,11 @@ export function bitnoirApiPlugin(): Plugin {
           return sendJson(res, 401, { error: 'Connect a Solana wallet first.' });
         }
         const acc = getActiveAccount();
-        const isVerifiedNode = Boolean(acc.isVerified && acc.username);
+        const isVerifiedNode = isMinerVerified(acc);
         const cycleHours = isVerifiedNode ? 24 : 3;
-        acc.mining.baseRatePerHour = isVerifiedNode ? 0.1 : 0.01;
-        acc.mining.totalMiningRatePerHour = isVerifiedNode
-          ? Number((0.1 + acc.mining.referralBoostPerHour + acc.mining.solBurnBoostPerHour).toFixed(4))
-          : 0.01;
         acc.mining.sessionStartedAt = new Date().toISOString();
         acc.mining.sessionEndsAt = new Date(Date.now() + cycleHours * 3600000).toISOString();
+        recomputeAllReferralBoosts();
 
         return sendJson(res, 200, {
           success: true,
@@ -214,7 +489,7 @@ export function bitnoirApiPlugin(): Plugin {
         });
       }
 
-      // Wallet Verification with 0.02 SOL Onchain Transaction to Treasury Wallet
+      // Wallet Verification with 0.02 SOL Onchain Transaction -> Immediately assigns unique UID & 24h node
       if (url === '/api/accounts/me/verify-wallet' && req.method === 'POST') {
         if (!activeAddress) {
           return sendJson(res, 401, { error: 'Connect a Solana wallet first.' });
@@ -222,18 +497,23 @@ export function bitnoirApiPlugin(): Plugin {
         const body = await parseBody(req);
         const signature = String(body.signature || '').trim();
         if (!signature || signature.length < 32) {
-          return sendJson(res, 400, { error: 'A valid onchain 0.02 SOL transaction signature is required.' });
+          return sendJson(res, 400, { error: 'A valid onchain verification transaction signature is required.' });
         }
 
         const acc = getActiveAccount();
         acc.isVerified = true;
         acc.verifiedTx = signature;
+        const assignedUid = assignUniqueUidForAccount(acc, acc.uid || undefined);
+
+        acc.mining.sessionStartedAt = new Date().toISOString();
+        acc.mining.sessionEndsAt = new Date(Date.now() + 24 * 3600000).toISOString();
+        recomputeAllReferralBoosts();
 
         acc.activities.unshift({
           id: Date.now(),
-          kind: 'verify',
-          title: 'Wallet Verified Onchain',
-          detail: '0.02 SOL one-time verification confirmed onchain.',
+          kind: 'uid',
+          title: `Verified · UID ${assignedUid} Assigned`,
+          detail: `One-time wallet verification confirmed, UID ${assignedUid} issued, and referral link activated.`,
           txHash: signature,
           createdAt: new Date().toISOString(),
         });
@@ -241,64 +521,22 @@ export function bitnoirApiPlugin(): Plugin {
         return sendJson(res, 200, {
           success: true,
           isVerified: true,
+          uid: assignedUid,
+          name: acc.name,
+          referralCode: assignedUid,
+          referralUrl: `https://bitnoir.io/?ref=${assignedUid}`,
           signature,
-          message: 'Wallet verified onchain successfully. You are now eligible to set your @username.',
-        });
-      }
-
-      // Set Custom Username Handle (Only available after 0.02 SOL onchain verification)
-      if (url === '/api/accounts/me/set-username' && req.method === 'POST') {
-        if (!activeAddress) {
-          return sendJson(res, 401, { error: 'Connect a Solana wallet first.' });
-        }
-        const acc = getActiveAccount();
-        if (!acc.isVerified) {
-          return sendJson(res, 403, {
-            error: 'Verify your Solana wallet with a one-time 0.02 SOL onchain transaction before setting a username.',
-          });
-        }
-        const body = await parseBody(req);
-        const cleanUsername = String(body.username || '').trim().replace(/^@/, '').toLowerCase();
-
-        if (!cleanUsername || cleanUsername.length < 3 || cleanUsername.length > 20 || !/^[a-z0-9_]+$/.test(cleanUsername)) {
-          return sendJson(res, 400, { error: 'Username must be 3-20 characters of lowercase letters, numbers, or underscore.' });
-        }
-
-        acc.username = cleanUsername;
-        acc.name = `@${cleanUsername}`;
-        acc.referralCode = cleanUsername;
-        acc.mining.baseRatePerHour = 0.1;
-        acc.mining.totalMiningRatePerHour = Number(
-          (acc.mining.baseRatePerHour + acc.mining.referralBoostPerHour + acc.mining.solBurnBoostPerHour).toFixed(4)
-        );
-        acc.mining.sessionStartedAt = new Date().toISOString();
-        acc.mining.sessionEndsAt = new Date(Date.now() + 24 * 3600000).toISOString();
-
-        acc.activities.unshift({
-          id: Date.now(),
-          kind: 'username',
-          title: `Handle @${cleanUsername} Activated`,
-          detail: `Username @${cleanUsername} registered, referral link generated, and Bits mining started.`,
-          txHash: acc.verifiedTx,
-          createdAt: new Date().toISOString(),
-        });
-
-        return sendJson(res, 200, {
-          success: true,
-          username: cleanUsername,
-          name: `@${cleanUsername}`,
-          referralCode: cleanUsername,
-          referralUrl: `https://bitnoir.io/?ref=${cleanUsername}`,
           mining: acc.mining,
+          message: `Wallet verified onchain. Your UID is ${assignedUid}.`,
         });
       }
 
-      // Contribute SOL to Acquire SOL Power (Max 10 SOL per account)
+      // Contribute SOL to Acquire SOL Power (Max 3 SOL / +10 Bits/hr per account)
       if (url === '/api/accounts/me/contribute-sol' && req.method === 'POST') {
         const acc = getActiveAccount();
-        if (!activeAddress || !acc.isVerified || !acc.username) {
+        if (!activeAddress || !acc.isVerified || !acc.uid) {
           return sendJson(res, 403, {
-            error: 'Verify your wallet and set your @username before acquiring SOL Power.',
+            error: 'Verify your wallet to receive your UID before acquiring SOL Power.',
           });
         }
         const body = await parseBody(req);
@@ -307,29 +545,32 @@ export function bitnoirApiPlugin(): Plugin {
           return sendJson(res, 400, { error: 'Enter a valid SOL contribution amount.' });
         }
 
-        const currentContributed = acc.mining.burnedSol || 0;
-        const remainingQuota = Math.max(0, 10.0 - currentContributed);
+        const maxSol = 3.0;
+        const maxRatePerHour = 10.0;
+        const currentContributed = Math.min(maxSol, acc.mining.burnedSol || 0);
+        const remainingQuota = Math.max(0, Number((maxSol - currentContributed).toFixed(3)));
 
         if (remainingQuota <= 0) {
           return sendJson(res, 400, {
-            error: 'Maximum contribution limit of 10 SOL per account reached.',
+            error: 'Maximum contribution limit of 3 SOL per account reached.',
           });
         }
 
-        const solAmount = Number(Math.max(0.1, Math.min(remainingQuota, rawSol)).toFixed(2));
-        const rateBoost = Number((solAmount * 5.0).toFixed(4));
+        const solAmount = Number(Math.max(Math.min(0.1, remainingQuota), Math.min(remainingQuota, rawSol)).toFixed(2));
+        const nextContributed = Number(Math.min(maxSol, currentContributed + solAmount).toFixed(3));
+        const prevBoost = Number(((currentContributed / maxSol) * maxRatePerHour).toFixed(4));
+        const nextBoost = Number(((nextContributed / maxSol) * maxRatePerHour).toFixed(4));
+        const rateBoost = Number((nextBoost - prevBoost).toFixed(4));
 
-        acc.mining.burnedSol = Number((currentContributed + solAmount).toFixed(3));
-        acc.mining.solBurnBoostPerHour = Number((acc.mining.solBurnBoostPerHour + rateBoost).toFixed(4));
-        acc.mining.totalMiningRatePerHour = Number(
-          (acc.mining.baseRatePerHour + acc.mining.referralBoostPerHour + acc.mining.solBurnBoostPerHour).toFixed(4)
-        );
+        acc.mining.burnedSol = nextContributed;
+        acc.mining.solBurnBoostPerHour = nextBoost;
+        recomputeAllReferralBoosts();
 
         acc.activities.unshift({
           id: Date.now(),
           kind: 'stake',
-          title: `Contributed ${solAmount} SOL for SOL Power`,
-          detail: `Acquired +${rateBoost} Bits/hr SOL Power (${acc.mining.burnedSol}/10 SOL).`,
+          title: `Acquired SOL Power (${solAmount} SOL)`,
+          detail: `Acquired +${rateBoost} Bits/hr SOL Power (${acc.mining.burnedSol}/3 SOL).`,
           txHash: body.txSignature ? String(body.txSignature) : undefined,
           createdAt: new Date().toISOString(),
         });
@@ -339,7 +580,7 @@ export function bitnoirApiPlugin(): Plugin {
           solContributed: solAmount,
           rateBoost,
           mining: acc.mining,
-          message: `Contributed ${solAmount} SOL! Acquired +${rateBoost} Bits/hr SOL Power.`,
+          message: `Acquired +${rateBoost} Bits/hr SOL Power with ${solAmount} SOL.`,
         });
       }
 
@@ -359,7 +600,7 @@ export function bitnoirApiPlugin(): Plugin {
           });
         }
 
-        const isVerifiedNode = Boolean(acc.isVerified && acc.username);
+        const isVerifiedNode = Boolean(acc.isVerified && acc.uid);
         const cycleHours = isVerifiedNode ? 24 : 3;
         const rate = isVerifiedNode
           ? Math.max(0.1, acc.mining.totalMiningRatePerHour || 0.1)
@@ -374,10 +615,10 @@ export function bitnoirApiPlugin(): Plugin {
 
         acc.mining.minedBitsTotalClaimed = Number((acc.mining.minedBitsTotalClaimed + unclaimed).toFixed(4));
         acc.mining.minedBitsUnclaimed = 0;
-        acc.mining.sessionStartedAt = '';
-        acc.mining.sessionEndsAt = '';
-        acc.mining.totalMiningRatePerHour = 0;
+        acc.mining.sessionStartedAt = new Date().toISOString();
+        acc.mining.sessionEndsAt = new Date(Date.now() + cycleHours * 3600000).toISOString();
         acc.balances.purchased = Number((acc.balances.purchased + unclaimed).toFixed(4));
+        recomputeAllReferralBoosts();
 
         acc.activities.unshift({
           id: Date.now(),
@@ -392,39 +633,46 @@ export function bitnoirApiPlugin(): Plugin {
           claimedBits: unclaimed,
           mining: acc.mining,
           balances: acc.balances,
-          message: `Claimed +${unclaimed.toFixed(4)} Bits to your available balance!`,
+          message: `Claimed ${unclaimed.toFixed(4)} Bits to your balance.`,
         });
       }
 
-      // In-App Send: Username to Username only (no Solana address, no onchain tx)
+      // In-App Send: UID to UID only (no Solana address, no onchain tx)
       if ((url === '/api/wallet/send-inapp' || url === '/api/wallet/send-onchain') && req.method === 'POST') {
         const acc = getActiveAccount();
         const body = await parseBody(req);
         const asset = String(body.asset || 'bits').toLowerCase();
         const amount = Number(body.amount);
         const rawRecipient = String(body.recipient || '').trim();
-        const senderHandle = String(body.sender || acc.username || '').replace(/^@/, '').toLowerCase();
+        const senderUid = normalizeUid(body.sender || acc.uid || '');
 
-        if (!activeAddress || !acc.isVerified || !senderHandle) {
+        if (!activeAddress || !acc.isVerified || !isValidUid(senderUid)) {
           return sendJson(res, 403, {
-            error: 'Verify your wallet and set your @username to send in-app transfers.',
+            error: 'Verify your wallet to receive your UID and send in-app transfers.',
           });
         }
         if (asset !== 'bits' && asset !== 'bitnoir') {
           return sendJson(res, 400, { error: 'Unsupported asset selected.' });
         }
         if (!rawRecipient) {
-          return sendJson(res, 400, { error: 'Please enter a recipient @username.' });
+          return sendJson(res, 400, { error: 'Please enter a recipient UID.' });
         }
-        const cleanRecipientHandle = rawRecipient.replace(/^@/, '').toLowerCase();
-        if (!/^[a-z0-9_]{3,20}$/.test(cleanRecipientHandle)) {
-          return sendJson(res, 400, { error: 'Enter a valid recipient @username (3-20 lowercase letters, numbers, or underscore).' });
+        const cleanRecipientUid = normalizeUid(rawRecipient);
+        if (!isValidUid(cleanRecipientUid)) {
+          return sendJson(res, 400, { error: 'Enter a valid 8-digit recipient UID.' });
         }
-        if (cleanRecipientHandle === senderHandle) {
-          return sendJson(res, 400, { error: 'Cannot transfer to your own @username.' });
+        if (cleanRecipientUid === senderUid) {
+          return sendJson(res, 400, { error: 'Cannot transfer to your own UID.' });
         }
         if (!Number.isFinite(amount) || amount <= 0) {
           return sendJson(res, 400, { error: 'Please enter a valid positive amount.' });
+        }
+
+        const targetAcc = findVerifiedAccountByUid(cleanRecipientUid);
+        if (!targetAcc) {
+          return sendJson(res, 404, {
+            error: `UID ${cleanRecipientUid} does not exist.`,
+          });
         }
 
         if (asset === 'bits') {
@@ -439,31 +687,29 @@ export function bitnoirApiPlugin(): Plugin {
           acc.balances.claimed = Number((acc.balances.claimed - amount).toFixed(4));
         }
 
-        const formattedRecipient = `@${cleanRecipientHandle}`;
+        const formattedRecipient = `UID ${cleanRecipientUid}`;
 
-        // Credit recipient account in-app if registered in this node
-        for (const target of accounts.values()) {
-          if (target.username === cleanRecipientHandle) {
-            if (asset === 'bits') {
-              target.balances.purchased = Number((target.balances.purchased + amount).toFixed(4));
-            } else {
-              target.balances.claimed = Number((target.balances.claimed + amount).toFixed(4));
-            }
-            target.activities.unshift({
-              id: Date.now() + 1,
-              kind: 'receive',
-              title: `Received ${amount} ${asset === 'bits' ? 'Bits' : 'Bitnoir'} from @${senderHandle}`,
-              detail: `In-app transfer from @${senderHandle}.`,
-              createdAt: new Date().toISOString(),
-            });
-          }
+        // Credit verified recipient account in-app
+        if (asset === 'bits') {
+          targetAcc.balances.purchased = Number((targetAcc.balances.purchased + amount).toFixed(4));
+        } else {
+          targetAcc.balances.claimed = Number((targetAcc.balances.claimed + amount).toFixed(4));
         }
+        targetAcc.activities.unshift({
+          id: Date.now() + 1,
+          kind: 'receive',
+          title: `Received ${amount} ${asset === 'bits' ? 'Bits' : 'Bitnoir'} from UID ${senderUid}`,
+          detail: `In-app transfer from UID ${senderUid}.`,
+          amount,
+          createdAt: new Date().toISOString(),
+        });
 
         const activityItem = {
           id: Date.now(),
           kind: 'send' as const,
           title: `Sent ${amount} ${asset === 'bits' ? 'Bits' : 'Bitnoir'} to ${formattedRecipient}`,
-          detail: `In-app transfer @${senderHandle} → ${formattedRecipient}.`,
+          detail: `In-app transfer UID ${senderUid} → ${formattedRecipient}.`,
+          amount,
           createdAt: new Date().toISOString(),
         };
         acc.activities.unshift(activityItem);

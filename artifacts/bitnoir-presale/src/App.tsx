@@ -1,9 +1,9 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, memo, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertTriangle, ArrowDownLeft, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight,
-  Copy, ExternalLink, Flame, Hammer, History, Lock, QrCode, RefreshCw,
-  ScrollText, Send, ShieldCheck, Sparkles, User, Wallet, X, Zap
+  AlertTriangle, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight,
+  Copy, ExternalLink, Lock, RefreshCw,
+  ScrollText, Send, ShieldCheck, Sparkles, Wallet, X, Zap
 } from 'lucide-react';
 import {
   getGetMyAccountQueryKey, getGetMyActivityQueryKey, useGetMyAccount,
@@ -13,22 +13,58 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { toast } from '@/hooks/use-toast';
 import {
+  calculateSolPowerBoost,
+  claimLocalUniqueUid,
   generateDemoSolanaAddress,
   getLocalWalletActivities,
   getPhantomSolanaProvider,
   getWalletMiningState,
   isValidSolanaAddress,
+  isValidUidFormat,
+  normalizeUidInput,
   PROTOCOL_TREASURY_SOLANA,
-  registerVerifiedUsername,
+  registerVerifiedUid,
   safeStorageGet,
   safeStorageRemove,
   safeStorageSet,
   saveLocalWalletActivity,
   saveWalletMiningState,
   sendSolanaTransactionOnchain,
-  signOnchainWalletAction,
+  SOL_POWER_MAX_RATE_PER_HOUR,
+  SOL_POWER_MAX_SOL,
   VERIFICATION_FEE_SOL,
 } from './lib/solana';
+import {
+  activatePowerCard,
+  ANT_CARD_ID,
+  AURA_CARD_ID,
+  DRAGON_CARD_ID,
+  formatPowerCardDurationShort,
+  getActivePowerCardDef,
+  getCardPowerBoostPerHour,
+  getPowerCardRemainingMs,
+  getWalletPowerCards,
+  hasActiveAntCard,
+  hasAnyActivePowerCard,
+  hasUnlockedAuraCardBefore,
+  hasUnlockedDragonCardBefore,
+  hasUnlockedGenesisAntCardBefore,
+  hasUnlockedPhoenixCardBefore,
+  hasUnlockedSirenCardBefore,
+  hasUnlockedSpiderCardBefore,
+  isPowerCardActive,
+  PHOENIX_CARD_ID,
+  POWER_CARD_CATALOG,
+  SIREN_CARD_ID,
+  SPIDER_CARD_ID,
+  unlockAuraCardOnTenVerifiedActiveMiners,
+  unlockDragonCardOnSolPower,
+  unlockGenesisAntCardOnStartMining,
+  unlockPhoenixCardOnThreeVerifiedMiners,
+  unlockSirenCardOnMinersPower,
+  unlockSpiderCardOnVerifiedUid,
+  type ReceivedPowerCard,
+} from './lib/powerCards';
 import '@/index.css';
 
 const queryClient = new QueryClient({
@@ -63,19 +99,19 @@ function readableError(error: unknown, fallback: string): string {
 
   const anyErr = typeof error === 'object' ? (error as { name?: string; code?: number | string }) : null;
   if (anyErr?.name === 'AbortError' || /timed?\s*out|aborted/i.test(trimmed)) {
-    return 'Request timed out. Please check your connection and try again.';
+    return 'Request timed out. Please try again.';
   }
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(trimmed)) {
-    return 'Network connection interrupted. Please check your internet connection and retry.';
+    return 'Network connection lost. Please check your internet and try again.';
   }
   if (anyErr?.code === 4001 || /user rejected|rejected the request|cancelled in phantom/i.test(trimmed)) {
     return 'Wallet request was cancelled.';
   }
   if (anyErr?.code === -32002 || /already pending/i.test(trimmed)) {
-    return 'A wallet prompt is already open in Phantom. Please respond to it first.';
+    return 'A wallet request is already pending in Phantom.';
   }
   if (anyErr?.code === 4100) {
-    return 'Wallet authorization required. Please unlock Phantom and try again.';
+    return 'Please unlock Phantom and try again.';
   }
   // Never expose raw HTML error pages or stack traces in user-facing alerts
   if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.length > 220) {
@@ -164,7 +200,7 @@ function InlineErrorBanner({
   return (
     <div
       role="alert"
-      className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-2.5 text-xs text-red-300"
+      className="px-4 py-3 rounded-lg bg-[#1c1c1c] border border-red-500/30 flex items-center justify-between gap-3 text-xs text-zinc-200"
     >
       <div className="flex items-start gap-2 min-w-0">
         <AlertTriangle size={14} className="text-red-400 mt-0.5 flex-shrink-0" />
@@ -174,7 +210,7 @@ function InlineErrorBanner({
         <button
           type="button"
           onClick={onRetry}
-          className="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/35 text-red-200 text-[11px] font-mono font-bold flex-shrink-0 cursor-pointer transition-colors"
+          className="text-xs font-semibold text-[#f59e0b] hover:text-[#fbbf24] bg-transparent border-0 px-1 py-0.5 flex-shrink-0 cursor-pointer transition-colors"
         >
           Retry
         </button>
@@ -196,25 +232,24 @@ function FeedbackMonitor() {
       const lastShown = recentErrorsRef.current.get(description) ?? 0;
       if (now - lastShown < 3500) return;
       recentErrorsRef.current.set(description, now);
-      toast({ title: 'Action failed', description, variant: 'destructive' });
+      toast({ description, variant: 'destructive' });
     };
     const unsubscribeQueries = client.getQueryCache().subscribe((event) => {
       if (event.type === 'updated' && event.action.type === 'error') {
-        showError(event.query.state.error, 'Unable to load this information. Please try again.');
+        showError(event.query.state.error, 'Unable to load data. Please try again.');
       }
     });
     const unsubscribeMutations = client.getMutationCache().subscribe((event) => {
       if (event.type !== 'updated') return;
       if (event.action.type === 'error') {
-        showError(event.mutation.state.error, 'Unable to complete that action. Please try again.');
+        showError(event.mutation.state.error, 'Unable to complete this action. Please try again.');
       }
     });
-    const onError = (event: ErrorEvent) => showError(event.error || event.message, 'An unexpected application error occurred.');
-    const onRejection = (event: PromiseRejectionEvent) => showError(event.reason, 'An unexpected request error occurred.');
+    const onError = (event: ErrorEvent) => showError(event.error || event.message, 'An unexpected error occurred. Please try again.');
+    const onRejection = (event: PromiseRejectionEvent) => showError(event.reason, 'An unexpected error occurred. Please try again.');
     const onOffline = () => {
       toast({
-        title: 'Offline',
-        description: 'Internet connection lost. Reconnect to sync mining and wallet actions.',
+        description: 'Connection lost. Check your internet and try again.',
         variant: 'destructive',
       });
     };
@@ -236,50 +271,24 @@ function FeedbackMonitor() {
 // ---------------------------------------------------------------------------
 // BRAND & ICONS
 // ---------------------------------------------------------------------------
-const BITNOIR_LOGO_96 = '/assets/aistudio/bitnoir-logo-96.png';
-const BITNOIR_LOGO_144 = '/assets/aistudio/bitnoir-logo-144.png';
-const BITNOIR_LOGO_256 = '/assets/aistudio/bitnoir-logo-256.png';
-const BITNOIR_LOGO_FULL = '/assets/aistudio/file_00000000c9508208b439e1d861b81370_d5533dc6.png';
-
-function BitnoirMark({ size = 32, className = '' }: { size?: number; className?: string }) {
-  const defaultSrc = size <= 32 ? BITNOIR_LOGO_96 : BITNOIR_LOGO_144;
-  return (
-    <img
-      src={defaultSrc}
-      srcSet={`${BITNOIR_LOGO_96} 96w, ${BITNOIR_LOGO_144} 144w, ${BITNOIR_LOGO_256} 256w, ${BITNOIR_LOGO_FULL} 1254w`}
-      sizes={`${size}px`}
-      alt="Bitnoir"
-      width={size}
-      height={size}
-      draggable={false}
-      style={{ width: size, height: size }}
-      className={`inline-block flex-shrink-0 rounded-full object-cover select-none pointer-events-none ${className}`}
-    />
-  );
-}
-
-function Brand({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
+const Brand = memo(function Brand({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
   const textSize = size === 'sm' ? 18 : size === 'lg' ? 26 : 22;
-  const logoPx = size === 'sm' ? 26 : size === 'lg' ? 38 : 32;
 
   return (
-    <div className="flex items-center gap-2.5 select-none" style={{ fontSize: textSize }}>
-      <BitnoirMark size={logoPx} />
-      <div className="flex items-center gap-2">
-        <span className="font-sans font-extrabold tracking-tight text-white">
-          Bit<span className="text-[#f7931a]">noir</span>
-        </span>
-      </div>
+    <div className="flex items-center select-none" style={{ fontSize: textSize }}>
+      <span className="font-sans font-extrabold tracking-tight text-white">
+        Bit<span className="text-[#f7931a]">noir</span>
+      </span>
     </div>
   );
-}
+});
 
 const BITS_LOGO_96 = '/assets/aistudio/bits-logo-96.png';
 const BITS_LOGO_144 = '/assets/aistudio/bits-logo-144.png';
 const BITS_LOGO_256 = '/assets/aistudio/bits-logo-256.png';
 const BITS_LOGO_FULL = '/assets/aistudio/file_0000000071f8820880f6865e316e2a08_5b35eeb9.png';
 
-function BitsMark({ size = 28, className = '' }: { size?: number; className?: string }) {
+const BitsMark = memo(function BitsMark({ size = 28, className = '' }: { size?: number; className?: string }) {
   const defaultSrc = size <= 32 ? BITS_LOGO_96 : BITS_LOGO_144;
   return (
     <img
@@ -294,7 +303,7 @@ function BitsMark({ size = 28, className = '' }: { size?: number; className?: st
       className={`inline-block flex-shrink-0 rounded-full object-cover select-none pointer-events-none ${className}`}
     />
   );
-}
+});
 
 function PhantomLogo({ size = 15, className = '' }: { size?: number; className?: string }) {
   return (
@@ -316,6 +325,130 @@ function PhantomLogo({ size = 15, className = '' }: { size?: number; className?:
   );
 }
 
+const MiningPickaxeIcon = memo(function MiningPickaxeIcon({ size = 14, className = '' }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+      className={`flex-shrink-0 ${className}`}
+      aria-hidden="true"
+    >
+      <g transform="rotate(45 12 12)">
+        {/* Curved double-pointed pickaxe blade */}
+        <path d="M -0.6 9.6 Q 12 -0.6 24.6 9.6 Q 12 4.4 -0.6 9.6 Z" />
+        {/* Pickaxe socket collar */}
+        <rect x="9.5" y="2.9" width="5" height="5.2" rx="0.85" />
+        {/* Pickaxe handle separated by crisp gap */}
+        <path d="M 10.5 9.1 H 13.5 V 24.3 A 1.5 1.5 0 0 1 10.5 24.3 Z" />
+      </g>
+    </svg>
+  );
+});
+
+const BitcoinMark = memo(function BitcoinMark({
+  size = 32,
+  active = false,
+  className = '',
+}: {
+  size?: number;
+  active?: boolean;
+  className?: string;
+}) {
+  const uid = useId().replace(/:/g, '');
+  const coinGradId = `btc-coin-${uid}`;
+  const rimGradId = `btc-rim-${uid}`;
+  const glyphGradId = `btc-glyph-${uid}`;
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={`inline-block flex-shrink-0 select-none transition-all duration-300 ${
+        active
+          ? 'drop-shadow-[0_2px_8px_rgba(247,147,26,0.18)]'
+          : 'drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]'
+      } ${className}`}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={coinGradId} x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+          {active ? (
+            <>
+              <stop offset="0%" stopColor="#2b1e0e" />
+              <stop offset="55%" stopColor="#23180b" />
+              <stop offset="100%" stopColor="#1b1309" />
+            </>
+          ) : (
+            <>
+              <stop offset="0%" stopColor="#262626" />
+              <stop offset="55%" stopColor="#1a1a1a" />
+              <stop offset="100%" stopColor="#121212" />
+            </>
+          )}
+        </linearGradient>
+        <linearGradient id={rimGradId} x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+          {active ? (
+            <>
+              <stop offset="0%" stopColor="#f7931a" stopOpacity="0.52" />
+              <stop offset="100%" stopColor="#f7931a" stopOpacity="0.28" />
+            </>
+          ) : (
+            <>
+              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="#ffffff" stopOpacity="0.06" />
+            </>
+          )}
+        </linearGradient>
+        <linearGradient id={glyphGradId} x1="20" y1="14" x2="44" y2="50" gradientUnits="userSpaceOnUse">
+          {active ? (
+            <>
+              <stop offset="0%" stopColor="#fbbf24" />
+              <stop offset="100%" stopColor="#f7931a" />
+            </>
+          ) : (
+            <>
+              <stop offset="0%" stopColor="#a1a1aa" />
+              <stop offset="100%" stopColor="#71717a" />
+            </>
+          )}
+        </linearGradient>
+      </defs>
+
+      {/* Outer precision coin body */}
+      <circle
+        cx="32"
+        cy="32"
+        r="30"
+        fill={`url(#${coinGradId})`}
+        stroke={`url(#${rimGradId})`}
+        strokeWidth="1.6"
+      />
+
+      {/* Subtle inner milled coin ring */}
+      <circle
+        cx="32"
+        cy="32"
+        r="26.2"
+        fill="none"
+        stroke={active ? 'rgba(247, 147, 26, 0.18)' : 'rgba(255, 255, 255, 0.06)'}
+        strokeWidth="0.9"
+      />
+
+      {/* Official Bitcoin emblem geometry */}
+      <path
+        d="M46.103 27.444c.637-4.258-2.605-6.547-7.038-8.074l1.438-5.768-3.511-.875-1.4 5.616c-.923-.23-1.87-.447-2.813-.662l1.41-5.653-3.509-.875-1.439 5.766c-.764-.174-1.514-.346-2.242-.527l.004-.018-4.842-1.209-.934 3.75s2.605.597 2.55.634c1.422.355 1.679 1.296 1.636 2.042l-1.638 6.571c.098.025.225.061.365.117-.117-.029-.242-.061-.371-.092l-2.296 9.205c-.174.432-.615 1.08-1.609.834.035.051-2.552-.637-2.552-.637l-1.743 4.019 4.569 1.139c.85.213 1.683.436 2.503.646l-1.453 5.834 3.507.875 1.439-5.772c.958.26 1.888.5 2.798.726l-1.434 5.745 3.511.875 1.453-5.823c5.987 1.133 10.489.676 12.384-4.739 1.527-4.36-.076-6.875-3.226-8.515 2.294-.529 4.022-2.038 4.483-5.155zm-8.022 11.249c-1.085 4.36-8.426 2.003-10.806 1.412l1.928-7.729c2.38.594 10.012 1.77 8.878 6.317zm1.086-11.312c-.99 3.966-7.1 1.951-9.082 1.457l1.748-7.01c1.982.494 8.365 1.416 7.334 5.553z"
+        fill={`url(#${glyphGradId})`}
+      />
+    </svg>
+  );
+});
+
 function shortSolanaAddress(addr: string): string {
   if (!addr) return '';
   if (addr.length <= 10) return addr;
@@ -329,7 +462,7 @@ type AuthUser = {
   id: string;
   solanaAddress: string;
   name: string;
-  username: string;
+  uid: string;
   email: string;
   isAdmin?: boolean;
   isVerified: boolean;
@@ -341,34 +474,78 @@ const AuthContext = createContext<{
   ready: boolean;
   connectWallet: (customAddress?: string) => Promise<string>;
   disconnectWallet: () => Promise<void>;
-  verifyWalletOnchain: () => Promise<string>;
-  setUsernameHandle: (handle: string) => Promise<void>;
+  verifyWalletOnchain: () => Promise<{ signature: string; uid: string }>;
 }>({
   user: null,
   ready: false,
   connectWallet: async () => '',
   disconnectWallet: async () => undefined,
-  verifyWalletOnchain: async () => '',
-  setUsernameHandle: async () => undefined,
+  verifyWalletOnchain: async () => ({ signature: '', uid: '' }),
 });
 
+function readSavedAuthUser(): AuthUser | null {
+  const saved = safeStorageGet('bitnoir-solana-address');
+  const legacyUser = safeStorageGet('bitnoir-username');
+  if (!saved || saved === PROTOCOL_TREASURY_SOLANA || legacyUser === 'satoshinode') {
+    return null;
+  }
+  if (!isValidSolanaAddress(saved)) return null;
+  const isVer = safeStorageGet(`bitnoir-verified-${saved}`) === 'true';
+  const verTx = safeStorageGet(`bitnoir-verified-tx-${saved}`) || undefined;
+  let uid = '';
+  if (isVer) {
+    const savedUid = safeStorageGet(`bitnoir-uid-${saved}`) || '';
+    uid = claimLocalUniqueUid(saved, isValidUidFormat(savedUid) ? savedUid : undefined);
+    safeStorageSet(`bitnoir-uid-${saved}`, uid);
+    registerVerifiedUid(uid, saved);
+  }
+  return {
+    id: saved,
+    solanaAddress: saved,
+    uid,
+    name: uid ? `UID ${uid}` : 'Wallet',
+    email: uid ? `${uid}@bitnoir.io` : '',
+    isAdmin: false,
+    isVerified: isVer,
+    verifiedTx: verTx,
+  };
+}
+
 function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [ready, setReady] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(() => readSavedAuthUser());
+  const [ready, setReady] = useState<boolean>(() => Boolean(readSavedAuthUser()));
 
   const syncBackendSession = async (payload: {
     solanaAddress?: string;
     isVerified?: boolean;
     verifiedTx?: string;
-    username?: string;
+    uid?: string;
+    legacyUsername?: string;
     reset?: boolean;
   }) => {
     try {
-      await apiFetchJson('/api/accounts/me/sync-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const pendingRef = payload.reset ? undefined : safeStorageGet('bitnoir-pending-ref') || undefined;
+      const res = await apiFetchJson<{ account?: { uid?: string; isVerified?: boolean } }>(
+        '/api/accounts/me/sync-session',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pendingRef ? { ...payload, referredBy: pendingRef } : payload),
+        },
+      );
+      if (payload.solanaAddress && res?.account?.isVerified && res.account.uid) {
+        const syncedUid = normalizeUidInput(res.account.uid);
+        if (isValidUidFormat(syncedUid)) {
+          safeStorageSet(`bitnoir-uid-${payload.solanaAddress}`, syncedUid);
+          registerVerifiedUid(syncedUid, payload.solanaAddress);
+          unlockSpiderCardOnVerifiedUid(payload.solanaAddress);
+          setUser((prev) =>
+            prev && prev.solanaAddress === payload.solanaAddress && prev.uid !== syncedUid
+              ? { ...prev, uid: syncedUid, name: `UID ${syncedUid}`, isVerified: true }
+              : prev,
+          );
+        }
+      }
     } catch (err) {
       console.warn('Session sync warning:', err);
     }
@@ -378,12 +555,21 @@ function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // Capture ?ref=<uid> referral attribution if present
+    if (typeof window !== 'undefined') {
+      const refParam = new URLSearchParams(window.location.search).get('ref');
+      const cleanRef = normalizeUidInput(refParam || '');
+      if (cleanRef && (/^\d{6,12}$/.test(cleanRef) || /^[a-z0-9_]{3,20}$/i.test(cleanRef))) {
+        safeStorageSet('bitnoir-pending-ref', cleanRef);
+      }
+    }
+
     // 1. Check existing saved Solana public address from localStorage
     const saved = safeStorageGet('bitnoir-solana-address');
-    const savedUser = safeStorageGet('bitnoir-username');
+    const legacyUser = safeStorageGet('bitnoir-username');
 
     // Clear legacy mock satoshinode / treasury account
-    if (saved === PROTOCOL_TREASURY_SOLANA || savedUser === 'satoshinode') {
+    if (saved === PROTOCOL_TREASURY_SOLANA || legacyUser === 'satoshinode') {
       safeStorageRemove('bitnoir-solana-address');
       safeStorageRemove('bitnoir-username');
       setUser(null);
@@ -395,21 +581,32 @@ function AuthProvider({ children }: { children: ReactNode }) {
     if (saved && isValidSolanaAddress(saved)) {
       const isVer = safeStorageGet(`bitnoir-verified-${saved}`) === 'true';
       const verTx = safeStorageGet(`bitnoir-verified-tx-${saved}`) || undefined;
-      const uname = isVer ? (safeStorageGet(`bitnoir-username-${saved}`) || savedUser || '') : '';
-      if (isVer && uname) {
-        registerVerifiedUsername(uname, saved);
+      const legacyForWallet = safeStorageGet(`bitnoir-username-${saved}`) || legacyUser || undefined;
+      let uid = '';
+      if (isVer) {
+        const savedUid = safeStorageGet(`bitnoir-uid-${saved}`) || '';
+        uid = claimLocalUniqueUid(saved, isValidUidFormat(savedUid) ? savedUid : undefined);
+        safeStorageSet(`bitnoir-uid-${saved}`, uid);
+        registerVerifiedUid(uid, saved);
+        unlockSpiderCardOnVerifiedUid(saved);
       }
       setUser({
         id: saved,
         solanaAddress: saved,
-        username: uname,
-        name: uname ? `@${uname}` : 'Wallet',
-        email: uname ? `${uname}@bitnoir.io` : '',
+        uid,
+        name: uid ? `UID ${uid}` : 'Wallet',
+        email: uid ? `${uid}@bitnoir.io` : '',
         isAdmin: false,
         isVerified: isVer,
         verifiedTx: verTx,
       });
-      void syncBackendSession({ solanaAddress: saved, isVerified: isVer, verifiedTx: verTx, username: uname });
+      void syncBackendSession({
+        solanaAddress: saved,
+        isVerified: isVer,
+        verifiedTx: verTx,
+        uid,
+        legacyUsername: legacyForWallet,
+      });
       setReady(true);
       return;
     }
@@ -429,21 +626,32 @@ function AuthProvider({ children }: { children: ReactNode }) {
           safeStorageSet('bitnoir-solana-address', address);
           const isVer = safeStorageGet(`bitnoir-verified-${address}`) === 'true';
           const verTx = safeStorageGet(`bitnoir-verified-tx-${address}`) || undefined;
-          const uname = isVer ? (safeStorageGet(`bitnoir-username-${address}`) || '') : '';
-          if (isVer && uname) {
-            registerVerifiedUsername(uname, address);
+          const legacyForWallet = safeStorageGet(`bitnoir-username-${address}`) || undefined;
+          let uid = '';
+          if (isVer) {
+            const savedUid = safeStorageGet(`bitnoir-uid-${address}`) || '';
+            uid = claimLocalUniqueUid(address, isValidUidFormat(savedUid) ? savedUid : undefined);
+            safeStorageSet(`bitnoir-uid-${address}`, uid);
+            registerVerifiedUid(uid, address);
+            unlockSpiderCardOnVerifiedUid(address);
           }
           setUser({
             id: address,
             solanaAddress: address,
-            username: uname,
-            name: uname ? `@${uname}` : 'Wallet',
-            email: '',
+            uid,
+            name: uid ? `UID ${uid}` : 'Wallet',
+            email: uid ? `${uid}@bitnoir.io` : '',
             isAdmin: false,
             isVerified: isVer,
             verifiedTx: verTx,
           });
-          void syncBackendSession({ solanaAddress: address, isVerified: isVer, verifiedTx: verTx, username: uname });
+          void syncBackendSession({
+            solanaAddress: address,
+            isVerified: isVer,
+            verifiedTx: verTx,
+            uid,
+            legacyUsername: legacyForWallet,
+          });
         })
         .catch(() => {
           setUser(null);
@@ -480,96 +688,99 @@ function AuthProvider({ children }: { children: ReactNode }) {
     safeStorageSet('bitnoir-solana-address', address);
     const isVer = safeStorageGet(`bitnoir-verified-${address}`) === 'true';
     const verTx = safeStorageGet(`bitnoir-verified-tx-${address}`) || undefined;
-    const uname = isVer ? (safeStorageGet(`bitnoir-username-${address}`) || '') : '';
-    if (isVer && uname) {
-      safeStorageSet('bitnoir-username', uname);
-      registerVerifiedUsername(uname, address);
-    } else {
-      safeStorageRemove('bitnoir-username');
+    const legacyForWallet = safeStorageGet(`bitnoir-username-${address}`) || undefined;
+    let uid = '';
+    if (isVer) {
+      const savedUid = safeStorageGet(`bitnoir-uid-${address}`) || '';
+      uid = claimLocalUniqueUid(address, isValidUidFormat(savedUid) ? savedUid : undefined);
+      safeStorageSet(`bitnoir-uid-${address}`, uid);
+      registerVerifiedUid(uid, address);
+      unlockSpiderCardOnVerifiedUid(address);
     }
     const authUser: AuthUser = {
       id: address,
       solanaAddress: address,
-      username: uname,
-      name: uname ? `@${uname}` : 'Wallet',
-      email: '',
+      uid,
+      name: uid ? `UID ${uid}` : 'Wallet',
+      email: uid ? `${uid}@bitnoir.io` : '',
       isAdmin: false,
       isVerified: isVer,
       verifiedTx: verTx,
     };
     setUser(authUser);
-    await syncBackendSession({ solanaAddress: address, isVerified: isVer, verifiedTx: verTx, username: uname });
+    await syncBackendSession({
+      solanaAddress: address,
+      isVerified: isVer,
+      verifiedTx: verTx,
+      uid,
+      legacyUsername: legacyForWallet,
+    });
     return address;
   };
 
-  const verifyWalletOnchain = async (): Promise<string> => {
+  const verifyWalletOnchain = async (): Promise<{ signature: string; uid: string }> => {
     if (!user?.solanaAddress) {
       throw new Error('Please connect your Solana wallet first.');
     }
-    if (user.isVerified && user.verifiedTx) {
-      return user.verifiedTx;
+    if (user.isVerified && user.verifiedTx && user.uid) {
+      return { signature: user.verifiedTx, uid: user.uid };
     }
 
     const result = await sendSolanaTransactionOnchain({
       fromAddress: user.solanaAddress,
       toAddress: PROTOCOL_TREASURY_SOLANA,
       amountSol: VERIFICATION_FEE_SOL,
-      memo: 'Bitnoir One-Time Node Verification (0.02 SOL)',
+      memo: 'Bitnoir One-Time Node Verification',
     });
 
     const sig = result.signature;
-    await apiFetchJson('/api/accounts/me/verify-wallet', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signature: sig }),
-    });
+    const verifyRes = await apiFetchJson<{ uid?: string; signature?: string }>(
+      '/api/accounts/me/verify-wallet',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signature: sig }),
+      },
+    );
+
+    const assignedUid = claimLocalUniqueUid(
+      user.solanaAddress,
+      verifyRes?.uid && isValidUidFormat(verifyRes.uid) ? verifyRes.uid : undefined,
+    );
 
     safeStorageSet(`bitnoir-verified-${user.solanaAddress}`, 'true');
     safeStorageSet(`bitnoir-verified-tx-${user.solanaAddress}`, sig);
+    safeStorageSet(`bitnoir-uid-${user.solanaAddress}`, assignedUid);
+    registerVerifiedUid(assignedUid, user.solanaAddress);
+    unlockSpiderCardOnVerifiedUid(user.solanaAddress);
 
     saveLocalWalletActivity(user.solanaAddress, {
       id: Date.now(),
-      kind: 'verify',
-      title: '0.02 SOL Wallet Verification Confirmed',
-      detail: `Sent ${VERIFICATION_FEE_SOL} SOL to Bitnoir Treasury onchain. Eligible to set @username.`,
+      kind: 'uid',
+      title: `Verified · UID ${assignedUid} Assigned`,
+      detail: `One-time wallet verification confirmed, UID ${assignedUid} assigned, and referral link activated.`,
       txHash: sig,
       createdAt: new Date().toISOString(),
     });
 
-    setUser((prev) => (prev ? { ...prev, isVerified: true, verifiedTx: sig } : null));
-    return sig;
-  };
+    setUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            isVerified: true,
+            verifiedTx: sig,
+            uid: assignedUid,
+            name: `UID ${assignedUid}`,
+            email: `${assignedUid}@bitnoir.io`,
+          }
+        : null,
+    );
 
-  const setUsernameHandle = async (handle: string): Promise<void> => {
-    if (!user?.solanaAddress) throw new Error('Wallet not connected.');
-    if (!user.isVerified) {
-      throw new Error('Complete the 0.02 SOL onchain wallet verification first.');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('bitnoir-session-synced'));
     }
-    const clean = handle.trim().replace(/^@/, '').toLowerCase();
-    if (!clean || clean.length < 3 || clean.length > 20 || !/^[a-z0-9_]+$/.test(clean)) {
-      throw new Error('Username must be 3-20 lowercase letters, numbers, or underscore.');
-    }
 
-    await apiFetchJson('/api/accounts/me/set-username', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: clean }),
-    });
-
-    safeStorageSet(`bitnoir-username-${user.solanaAddress}`, clean);
-    safeStorageSet('bitnoir-username', clean);
-    registerVerifiedUsername(clean, user.solanaAddress);
-
-    saveLocalWalletActivity(user.solanaAddress, {
-      id: Date.now(),
-      kind: 'username',
-      title: `Username @${clean} Activated`,
-      detail: `Claimed @${clean} ID, generated referral link, and started Bits mining.`,
-      txHash: user.verifiedTx,
-      createdAt: new Date().toISOString(),
-    });
-
-    setUser((prev) => (prev ? { ...prev, username: clean, name: `@${clean}` } : null));
+    return { signature: sig, uid: assignedUid };
   };
 
   const disconnectWallet = async () => {
@@ -595,7 +806,6 @@ function AuthProvider({ children }: { children: ReactNode }) {
         connectWallet,
         disconnectWallet,
         verifyWalletOnchain,
-        setUsernameHandle,
       }}
     >
       {children}
@@ -632,26 +842,22 @@ function ConnectWalletModal({ open, onClose }: { open: boolean; onClose: () => v
     try {
       await connectWallet();
       toast({
-        title: 'Solana Wallet Connected',
-        description: 'Wallet connected. Click Start Mining (0.01/h · 3h) or verify with 0.02 SOL for 0.1/h · 24h.',
+        description: 'Solana wallet connected.',
         variant: 'success',
-        icon: <Wallet size={17} />,
       });
       onClose();
     } catch (err: any) {
       if (err?.message === 'PHANTOM_NOT_INSTALLED') {
-        const msg = 'Install Phantom or connect using a Solana address below.';
+        const msg = 'Phantom wallet was not detected. Connect with a Solana address below.';
         setFormError(msg);
         toast({
-          title: 'Phantom Extension Not Detected',
           description: msg,
           variant: 'destructive',
         });
       } else {
-        const msg = readableError(err, 'Could not connect Phantom.');
+        const msg = readableError(err, 'Unable to connect Phantom wallet.');
         setFormError(msg);
         toast({
-          title: 'Connection Failed',
           description: msg,
           variant: 'destructive',
         });
@@ -665,10 +871,9 @@ function ConnectWalletModal({ open, onClose }: { open: boolean; onClose: () => v
     setFormError(null);
     const target = (addrToUse || customAddr).trim();
     if (!isValidSolanaAddress(target)) {
-      const msg = 'Enter a valid base58 Solana public key (32-44 chars).';
+      const msg = 'Please enter a valid Solana wallet address.';
       setFormError(msg);
       toast({
-        title: 'Invalid Solana Address',
         description: msg,
         variant: 'destructive',
       });
@@ -678,18 +883,15 @@ function ConnectWalletModal({ open, onClose }: { open: boolean; onClose: () => v
     try {
       await connectWallet(target);
       toast({
-        title: 'Solana Wallet Connected',
-        description: 'Wallet connected. Click Start Mining (0.01/h · 3h) or activate in wallet tab.',
+        description: 'Solana wallet connected.',
         variant: 'success',
-        icon: <Wallet size={17} />,
       });
       setCustomAddr('');
       onClose();
     } catch (err) {
-      const msg = readableError(err, 'Could not connect wallet.');
+      const msg = readableError(err, 'Unable to connect wallet.');
       setFormError(msg);
       toast({
-        title: 'Connection Failed',
         description: msg,
         variant: 'destructive',
       });
@@ -706,14 +908,14 @@ function ConnectWalletModal({ open, onClose }: { open: boolean; onClose: () => v
         style={{
           maxWidth: 440,
           padding: 24,
-          background: 'linear-gradient(180deg, #15171e 0%, #0d0e13 100%)',
-          borderColor: 'rgba(247, 147, 26, 0.28)',
-          borderRadius: 20,
+          background: '#121212',
+          borderColor: 'rgba(255, 255, 255, 0.085)',
+          borderRadius: 18,
         }}
       >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-[#f7931a]/12 border border-[#f7931a]/30 flex items-center justify-center text-[#f7931a]">
+            <div className="w-9 h-9 rounded-xl bg-[#181818] border border-white/[0.08] flex items-center justify-center text-[#f7931a]">
               <PhantomLogo size={18} />
             </div>
             <div>
@@ -800,7 +1002,7 @@ function ConnectWalletModal({ open, onClose }: { open: boolean; onClose: () => v
 }
 
 // ---------------------------------------------------------------------------
-// ONE-TIME 0.02 SOL ONCHAIN VERIFICATION & USERNAME SETUP MODAL
+// ONE-TIME ONCHAIN VERIFICATION & UNIQUE UID ASSIGNMENT MODAL
 // ---------------------------------------------------------------------------
 function VerifyAndUsernameModal({
   open,
@@ -812,16 +1014,15 @@ function VerifyAndUsernameModal({
   onOpenConnect: () => void;
 }) {
   const client = useQueryClient();
-  const { user, verifyWalletOnchain, setUsernameHandle } = useAuth();
+  const { user, verifyWalletOnchain } = useAuth();
   const [verifying, setVerifying] = useState(false);
-  const [savingHandle, setSavingHandle] = useState(false);
-  const [handleInput, setHandleInput] = useState('');
-  const [copiedTreasury, setCopiedTreasury] = useState(false);
+  const [copiedUid, setCopiedUid] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
       setModalError(null);
+      setCopiedUid(false);
     }
   }, [open]);
 
@@ -829,30 +1030,24 @@ function VerifyAndUsernameModal({
 
   const isConnected = Boolean(user?.solanaAddress);
   const isVerified = Boolean(user?.isVerified);
-  const hasUsername = Boolean(user?.username);
-  const isComplete = isConnected && isVerified && hasUsername;
-
-  const cleanPreview = handleInput.trim().replace(/^@/, '').toLowerCase();
-  const isHandleValid = cleanPreview.length >= 3 && cleanPreview.length <= 20 && /^[a-z0-9_]+$/.test(cleanPreview);
+  const hasUid = Boolean(user?.uid);
+  const isComplete = isConnected && isVerified && hasUid;
 
   const handleVerifyTx = async () => {
     setModalError(null);
     setVerifying(true);
     try {
-      const sig = await verifyWalletOnchain();
+      const { uid } = await verifyWalletOnchain();
       toast({
-        title: 'Wallet Verified Onchain',
-        description: `0.02 SOL confirmed (${sig.slice(0, 8)}...${sig.slice(-6)}). Set your @username to unlock 24h · 0.1/h.`,
+        description: `Wallet verified. Your UID is ${uid}.`,
         variant: 'success',
-        icon: <ShieldCheck size={17} />,
       });
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
       void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
     } catch (err) {
-      const msg = readableError(err, 'Could not complete 0.02 SOL verification transaction.');
+      const msg = readableError(err, 'Unable to complete wallet verification.');
       setModalError(msg);
       toast({
-        title: 'Verification Failed',
         description: msg,
         variant: 'destructive',
       });
@@ -861,41 +1056,12 @@ function VerifyAndUsernameModal({
     }
   };
 
-  const handleClaimUsername = async () => {
-    setModalError(null);
-    if (!isHandleValid) {
-      const msg = 'Use 3-20 lowercase letters, numbers, or underscores.';
-      setModalError(msg);
-      toast({
-        title: 'Invalid Username',
-        description: msg,
-        variant: 'destructive',
-      });
-      return;
-    }
-    setSavingHandle(true);
-    try {
-      await setUsernameHandle(cleanPreview);
-      toast({
-        title: `@${cleanPreview} Verified`,
-        description: '24-hour mining (0.1000 /h) and your referral link are now active.',
-        variant: 'success',
-        icon: <ShieldCheck size={17} />,
-      });
-      void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-      void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
-      setHandleInput('');
-      onClose();
-    } catch (err) {
-      const msg = readableError(err, 'Verification required before claiming a username.');
-      setModalError(msg);
-      toast({
-        title: 'Could Not Set Username',
-        description: msg,
-        variant: 'destructive',
-      });
-    } finally {
-      setSavingHandle(false);
+  const handleCopyUid = async () => {
+    if (!user?.uid) return;
+    const ok = await copyToClipboard(user.uid);
+    if (ok) {
+      setCopiedUid(true);
+      setTimeout(() => setCopiedUid(false), 1800);
     }
   };
 
@@ -907,19 +1073,17 @@ function VerifyAndUsernameModal({
         style={{
           maxWidth: 480,
           padding: 24,
-          background: 'linear-gradient(180deg, #15171e 0%, #0d0e13 100%)',
-          borderColor: isComplete ? 'rgba(16, 185, 129, 0.3)' : 'rgba(247, 147, 26, 0.3)',
-          boxShadow: '0 28px 80px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
-          borderRadius: 20,
+          background: '#121212',
+          borderColor: isComplete ? 'rgba(16, 185, 129, 0.28)' : 'rgba(255, 255, 255, 0.085)',
+          boxShadow: '0 24px 64px rgba(0, 0, 0, 0.88)',
+          borderRadius: 18,
         }}
       >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
             <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center ${
-                isComplete
-                  ? 'bg-[#10b981]/12 border border-[#10b981]/30 text-[#34d399]'
-                  : 'bg-[#f7931a]/12 border border-[#f7931a]/30 text-[#f7931a]'
+              className={`w-9 h-9 rounded-xl flex items-center justify-center bg-[#181818] border border-white/[0.08] ${
+                isComplete ? 'text-[#34d399]' : 'text-[#f7931a]'
               }`}
             >
               <ShieldCheck size={18} />
@@ -928,11 +1092,6 @@ function VerifyAndUsernameModal({
               <h2 className="m-0 text-base font-extrabold text-white leading-snug">
                 {isComplete ? 'Verified Account' : 'Upgrade to Verified Node'}
               </h2>
-              <p className="m-0 text-[11px] font-mono text-zinc-400">
-                {isComplete
-                  ? `@${user?.username} · 24h Node Active`
-                  : '24-Hour Mining · 0.1/hr Base Rate · Unique ID & Referral Link'}
-              </p>
             </div>
           </div>
           <button type="button" className="modal-close-btn" onClick={onClose} aria-label="Close"><X size={16} /></button>
@@ -941,19 +1100,16 @@ function VerifyAndUsernameModal({
         {!isComplete && (
           <>
             <p className="text-xs text-zinc-300 m-0 leading-relaxed mb-4">
-              Base mining (<strong className="text-white">0.01/h · 3h</strong>) is already available. Verify once with <strong className="text-[#fbbf24]">0.02 SOL</strong> and set your <strong className="text-white">@username</strong> to unlock <strong className="text-[#34d399]">24-hour mining</strong>, <strong className="text-[#fbbf24]">0.1/hr base rate</strong>, and your unique referral link.
+              Base mining (<strong className="text-white">0.01/h · 3h</strong>) is already available. Verify your wallet once (requires a <strong className="text-[#fbbf24]">small one-time onchain fee</strong> to permanently prevent cloning, bots, and farming) to receive your <strong className="text-white">UID</strong> and unlock <strong className="text-[#34d399]">24-hour mining</strong>, <strong className="text-[#fbbf24]">0.1/hr base rate</strong>, and your UID referral link.
             </p>
 
-            {/* 3-STEP PROGRESS PILLS */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4 text-[11px] font-mono">
+            {/* 2-STEP PROGRESS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4 text-[11px] font-mono">
               <div className={`px-2.5 py-2 rounded-lg border ${isConnected ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]' : 'bg-white/5 border-white/15 text-white'}`}>
                 1. Connect Wallet {isConnected ? '✓' : ''}
               </div>
-              <div className={`px-2.5 py-2 rounded-lg border ${isVerified ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]' : isConnected ? 'bg-[#f7931a]/15 border-[#f7931a]/45 text-[#fbbf24]' : 'bg-white/[0.02] border-white/10 text-zinc-500'}`}>
-                2. Verify 0.02 SOL {isVerified ? '✓' : ''}
-              </div>
-              <div className={`px-2.5 py-2 rounded-lg border ${hasUsername ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]' : isVerified ? 'bg-[#f7931a]/15 border-[#f7931a]/45 text-[#fbbf24]' : 'bg-white/[0.02] border-white/10 text-zinc-500'}`}>
-                3. Set @username → 24h {hasUsername ? '✓' : ''}
+              <div className={`px-2.5 py-2 rounded-lg border ${isComplete ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]' : isConnected ? 'bg-[#f7931a]/15 border-[#f7931a]/45 text-[#fbbf24]' : 'bg-white/[0.02] border-white/10 text-zinc-500'}`}>
+                2. Verify → Get UID {isComplete ? '✓' : ''}
               </div>
             </div>
           </>
@@ -979,39 +1135,16 @@ function VerifyAndUsernameModal({
               <span>Connect Solana Wallet</span>
             </button>
           </div>
-        ) : !isVerified ? (
+        ) : !isComplete ? (
           <div className="flex flex-col gap-4">
-            <div className="p-4 rounded-xl bg-[#0b0c10] border border-white/10 flex flex-col gap-2.5 text-xs font-mono">
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400 font-sans">Verification Fee (One-Time)</span>
-                <strong className="text-[#fbbf24] text-sm">{VERIFICATION_FEE_SOL} SOL</strong>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-zinc-400 font-sans">Treasury Wallet</span>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const ok = await copyToClipboard(PROTOCOL_TREASURY_SOLANA);
-                    if (ok) {
-                      setCopiedTreasury(true);
-                      setTimeout(() => setCopiedTreasury(false), 1800);
-                    } else {
-                      toast({ title: 'Copy Failed', description: 'Could not access clipboard.', variant: 'destructive' });
-                    }
-                  }}
-                  className="inline-flex items-center gap-1.5 text-zinc-200 hover:text-[#f7931a] cursor-pointer bg-transparent border-0 p-0"
-                >
-                  <span>{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
-                  {copiedTreasury ? <Check size={12} className="text-[#10b981]" /> : <Copy size={12} />}
-                </button>
-              </div>
+            <div className="p-4 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col gap-2.5 text-xs font-mono">
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400 font-sans">Wallet Status</span>
                 <span className="text-[#34d399]">Connected</span>
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
                 <span className="text-zinc-400 font-sans">Unlocks</span>
-                <span className="text-[#34d399] font-semibold">24h · 0.1/hr · @username</span>
+                <span className="text-[#34d399] font-semibold">UID · 24h · 0.1/hr</span>
               </div>
             </div>
 
@@ -1023,87 +1156,19 @@ function VerifyAndUsernameModal({
             >
               {verifying ? (
                 <span className="flex items-center gap-2 justify-center">
-                  <RefreshCw size={14} className="animate-spin" /> Confirming 0.02 SOL Onchain…
+                  <RefreshCw size={14} className="animate-spin" /> Verifying &amp; Assigning UID…
                 </span>
               ) : (
                 <span className="flex items-center gap-2 justify-center">
-                  <ShieldCheck size={15} /> Verify Wallet (0.02 SOL)
-                </span>
-              )}
-            </button>
-          </div>
-        ) : !hasUsername ? (
-          <div className="flex flex-col gap-4">
-            <div className="p-3 rounded-xl bg-[#10b981]/10 border border-[#10b981]/30 flex items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 text-[#34d399] font-bold">
-                <Check size={14} strokeWidth={3} />
-                <span>0.02 SOL Verification Confirmed</span>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-bold block mb-1.5">
-                Set Your Unique @username ID
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono font-bold text-[#f7931a]">@</span>
-                <input
-                  type="text"
-                  placeholder="your_handle"
-                  value={handleInput}
-                  onChange={(e) => {
-                    setHandleInput(e.target.value.replace(/^@/, '').toLowerCase());
-                    if (modalError) setModalError(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && isHandleValid && !savingHandle) {
-                      void handleClaimUsername();
-                    }
-                  }}
-                  className="assets-input-field font-mono font-bold !pl-8"
-                  maxLength={20}
-                />
-              </div>
-              <div className="mt-2 flex items-center justify-between text-[11px] font-mono text-zinc-400">
-                <span>3-20 chars · a-z, 0-9, underscore</span>
-                {cleanPreview && (
-                  <span className={isHandleValid ? 'text-[#34d399]' : 'text-red-400'}>
-                    @{cleanPreview}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {isHandleValid && (
-              <div className="p-3 rounded-xl bg-[#0b0c10] border border-white/10 text-[11px] font-mono text-zinc-300">
-                Referral Link:{' '}
-                <span className="text-[#fbbf24]">
-                  {typeof window !== 'undefined' ? window.location.origin : 'https://bitnoir.io'}/?ref={cleanPreview}
-                </span>
-              </div>
-            )}
-
-            <button
-              type="button"
-              disabled={savingHandle || !isHandleValid}
-              onClick={handleClaimUsername}
-              className="clean-stake-confirm-btn !w-full !min-h-[44px] !text-xs !font-bold"
-            >
-              {savingHandle ? (
-                <span className="flex items-center gap-2 justify-center">
-                  <RefreshCw size={14} className="animate-spin" /> Activating 24h Node…
-                </span>
-              ) : (
-                <span className="flex items-center gap-2 justify-center">
-                  <User size={15} /> Set @{cleanPreview || 'username'} → Activate 24h
+                  <ShieldCheck size={15} /> Verify Wallet
                 </span>
               )}
             </button>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            <div className="p-4 rounded-xl bg-[#0b0c10] border border-white/10 flex flex-col gap-3 text-xs font-mono">
-              <div className="flex items-center justify-between pb-2.5 border-b border-white/[0.07]">
+            <div className="p-4 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col gap-3 text-xs font-mono">
+              <div className="flex items-center justify-between pb-2.5 border-b border-white/[0.06]">
                 <span className="text-zinc-400 font-sans">Status</span>
                 <span className="inline-flex items-center gap-1.5 text-[#34d399] font-bold">
                   <Check size={13} strokeWidth={3} />
@@ -1111,8 +1176,19 @@ function VerifyAndUsernameModal({
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400 font-sans">Unique ID</span>
-                <span className="text-white font-bold">@{user?.username}</span>
+                <span className="text-zinc-400 font-sans">UID</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyUid()}
+                    aria-label="Copy UID"
+                    title="Copy UID"
+                    className="inline-flex items-center justify-center w-6 h-6 rounded bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-zinc-200 cursor-pointer transition-colors"
+                  >
+                    {copiedUid ? <Check size={12} className="text-[#34d399]" /> : <Copy size={12} />}
+                  </button>
+                  <span className="text-[#fbbf24] font-bold tracking-wider">{user?.uid}</span>
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400 font-sans">Base Mining Rate</span>
@@ -1176,18 +1252,15 @@ function TopWalletConnect({
     try {
       await connectWallet();
       toast({
-        title: 'Solana Wallet Connected',
-        description: 'Wallet connected privately.',
+        description: 'Solana wallet connected.',
         variant: 'success',
-        icon: <Wallet size={17} />,
       });
     } catch (err: any) {
       if (err?.message === 'PHANTOM_NOT_INSTALLED' && onOpenConnect) {
         onOpenConnect();
       } else {
         toast({
-          title: 'Connection error',
-          description: readableError(err, 'Could not connect wallet.'),
+          description: readableError(err, 'Unable to connect wallet.'),
           variant: 'destructive',
         });
       }
@@ -1202,7 +1275,7 @@ function TopWalletConnect({
         type="button"
         onClick={handleConnect}
         disabled={connecting}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-b from-[#ffaa2b] to-[#f7931a] hover:from-[#ffb648] hover:to-[#f99d2b] border border-[#ffc86e]/40 text-[#09090b] text-xs font-bold transition-all duration-200 cursor-pointer shadow-[0_4px_16px_rgba(247,147,26,0.28)]"
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-transparent hover:bg-[#f59e0b]/10 border border-[#f59e0b]/80 hover:border-[#fbbf24] text-[#f59e0b] hover:text-[#fbbf24] text-xs font-semibold transition-colors duration-150 cursor-pointer"
       >
         <Wallet size={14} />
         <span>{connecting ? 'Connecting…' : 'Connect'}</span>
@@ -1215,16 +1288,15 @@ function TopWalletConnect({
       <button
         type="button"
         onClick={() => setMenuOpen(!menuOpen)}
-        className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.11] text-white text-xs font-mono font-medium transition-all duration-200 cursor-pointer shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px] bg-[#181818] hover:bg-[#202020] border border-white/[0.085] text-white text-xs font-mono font-medium transition-colors duration-150 cursor-pointer"
       >
-        <div className="w-5 h-5 rounded-full bg-[#f7931a]/15 border border-[#f7931a]/35 flex items-center justify-center text-[#f7931a]">
-          <PhantomLogo size={12} />
+        <div className="w-6 h-6 rounded-lg bg-[#121212] border border-white/[0.08] flex items-center justify-center text-[#f7931a] flex-shrink-0">
+          <Wallet size={13} strokeWidth={2.2} />
         </div>
-        <span className="flex items-center gap-1">
-          {user.username ? `@${user.username}` : 'Wallet'}
-          {user.isVerified && <Check size={11} className="text-[#10b981]" strokeWidth={3} />}
+        <span className="truncate max-w-[140px]">
+          {user.uid ? `UID ${user.uid}` : 'Wallet'}
         </span>
-        <ChevronDown size={12} className={`text-zinc-400 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown size={12} className={`text-zinc-400 transition-transform flex-shrink-0 ${menuOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {menuOpen && (
@@ -1234,11 +1306,11 @@ function TopWalletConnect({
             top: 'calc(100% + 8px)',
             right: 0,
             width: 290,
-            background: 'linear-gradient(180deg, #161820 0%, #0d0e13 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.11)',
+            background: '#121212',
+            border: '1px solid rgba(255, 255, 255, 0.085)',
             borderRadius: 14,
             padding: 14,
-            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
+            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.88)',
             zIndex: 100,
             textAlign: 'left',
           }}
@@ -1260,13 +1332,13 @@ function TopWalletConnect({
                 justifyContent: 'space-between',
                 gap: 8,
                 cursor: 'pointer',
-                background: (!user.isVerified || !user.username)
-                  ? 'linear-gradient(135deg, rgba(247, 147, 26, 0.18), rgba(251, 191, 36, 0.08))'
+                background: (!user.isVerified || !user.uid)
+                  ? 'rgba(247, 147, 26, 0.12)'
                   : 'rgba(16, 185, 129, 0.1)',
-                border: (!user.isVerified || !user.username)
-                  ? '1px solid rgba(247, 147, 26, 0.45)'
+                border: (!user.isVerified || !user.uid)
+                  ? '1px solid rgba(247, 147, 26, 0.35)'
                   : '1px solid rgba(16, 185, 129, 0.3)',
-                color: (!user.isVerified || !user.username) ? '#fbbf24' : '#34d399',
+                color: (!user.isVerified || !user.uid) ? '#fbbf24' : '#34d399',
                 fontSize: 12,
                 fontWeight: 700,
               }}
@@ -1274,18 +1346,16 @@ function TopWalletConnect({
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
                 <ShieldCheck size={14} />
                 <span>
-                  {!user.isVerified
-                    ? 'Upgrade to 24h · 0.02 SOL'
-                    : !user.username
-                      ? 'Set @username · Unlock 24h'
-                      : 'Verified Node · Active'}
+                  {(!user.isVerified || !user.uid)
+                    ? 'Upgrade to 24h · Verify'
+                    : 'Verified'}
                 </span>
               </span>
               <ChevronRight size={13} />
             </button>
           )}
 
-          <div style={{ padding: '8px 10px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: 8, marginBottom: 12, fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ padding: '9px 11px', background: '#181818', border: '1px solid rgba(255, 255, 255, 0.065)', borderRadius: 10, marginBottom: 12, fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a1a1aa' }}>
               <span>Verification</span>
               <strong style={{ color: user.isVerified ? '#34d399' : '#f7931a' }}>
@@ -1293,8 +1363,8 @@ function TopWalletConnect({
               </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a1a1aa' }}>
-              <span>Username ID</span>
-              <strong style={{ color: '#fff' }}>{user.username ? `@${user.username}` : 'Not set'}</strong>
+              <span>UID</span>
+              <strong style={{ color: '#fff' }}>{user.uid ? user.uid : 'Not assigned'}</strong>
             </div>
           </div>
 
@@ -1316,16 +1386,46 @@ function TopWalletConnect({
 }
 
 // ---------------------------------------------------------------------------
-// STANDALONE INDEPENDENT GUIDE PAGE
+// STANDALONE INDEPENDENT GUIDE PAGE (CLEAN UNIFIED PREMIUM VIEW — NO GRIDS)
 // ---------------------------------------------------------------------------
 function GuidePage({ onBack }: { onBack: () => void }) {
+  const { user } = useAuth();
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [connectModalOpen, setConnectModalOpen] = useState(false);
 
+  const isConnected = Boolean(user?.solanaAddress);
+  const isVerifiedNode = Boolean(user?.solanaAddress && user?.isVerified && user?.uid);
+
+  const sections = [
+    {
+      index: '01',
+      title: 'Base & Verified Mining Rates',
+      metric: '0.0100 → 0.1000 /h',
+      body: 'Any connected Solana wallet starts at 0.0100 Bits/hr on a 3-hour cycle. Complete one-time wallet verification (requires a small onchain fee to permanently stop cloning, bots, and farming) to receive your UID and unlock 0.1000 Bits/hr and 24-hour continuous mining.',
+    },
+    {
+      index: '02',
+      title: 'Direct Miners Power',
+      metric: '+10% Share',
+      body: 'Verified accounts receive a UID and invite link attached with their UID. Only verified and actively mining direct referrals contribute 10% of their mining rate to your velocity. Unverified wallets (treated as bots) and inactive miners share 0% until verified and actively mining.',
+    },
+    {
+      index: '03',
+      title: 'SOL Power Multiplier',
+      metric: 'Max +10.00 /h',
+      body: 'Verified accounts can contribute SOL flexibly from 0.1 SOL to scale mining velocity, up to a maximum of 3 SOL (+10.0000 Bits/hr) per account.',
+    },
+    {
+      index: '04',
+      title: 'Mining Cycles & Claims',
+      metric: '20% Unlock',
+      body: 'Base wallets mine for 3 hours and verified accounts mine for 24 hours, pausing automatically at 100% until claimed. Once your active cycle reaches 20% progress, you can claim mined Bits directly into your wallet balance anytime.',
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans">
-      {/* HEADER */}
-      <header className="border-b border-white/[0.08] bg-[#09090b]/85 backdrop-blur-xl sticky top-0 z-40">
+    <div className="min-h-screen bg-[#070707] text-zinc-100 flex flex-col font-sans">
+      <header className="border-b border-white/[0.07] bg-[#070707]/90 backdrop-blur-xl sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <Brand size="md" />
           <div className="flex items-center gap-3">
@@ -1337,92 +1437,90 @@ function GuidePage({ onBack }: { onBack: () => void }) {
         </div>
       </header>
 
-      {/* MAIN CONTAINER */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
-        {/* TOP NAVIGATION & HEADING */}
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8 sm:py-10">
         <div className="flex items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Guide</h1>
-          </div>
-
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">
+            Guide
+          </h1>
           <button
             type="button"
             onClick={onBack}
-            className="clean-action-btn-soft !min-h-[32px] !px-3 !text-[11px]"
+            className="clean-action-btn-soft !min-h-[34px] !px-3.5 !text-xs whitespace-nowrap shrink-0"
           >
-            <ChevronLeft size={13} />
+            <ChevronLeft size={14} />
             <span>Back to Mining</span>
           </button>
         </div>
 
-        {/* PROTOCOL OVERVIEW COCKPIT */}
-        <div className="pob-cockpit mb-6 p-5 sm:p-6 flex items-center gap-4">
-          <div
-            className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{
-              background: 'rgba(247, 147, 26, 0.14)',
-              border: '1px solid rgba(247, 147, 26, 0.28)',
-              color: '#f7931a',
-            }}
-          >
-            <Flame size={20} />
-          </div>
-          <div>
-            <h2 className="text-lg sm:text-xl font-extrabold text-white m-0">Bits Mining Protocol Guide</h2>
-            <p className="text-xs font-mono text-zinc-400 m-0 mt-1">
-              Proof-of-Power Multipliers &amp; Core Mechanics
-            </p>
-          </div>
-        </div>
-
-        {/* GUIDE RULES GRID */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="p-5 rounded-2xl bg-[#121318] border border-white/[0.08] shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <div className="flex items-center gap-2.5 mb-2.5 text-sm font-bold text-white">
-              <div className="w-8 h-8 rounded-lg bg-[#10b981]/15 border border-[#10b981]/30 flex items-center justify-center text-[#10b981] flex-shrink-0">
-                <Zap size={16} />
+        <div className="pob-cockpit overflow-hidden">
+          {/* Theme Header */}
+          <div className="px-6 py-5 sm:px-7 sm:py-6 border-b border-white/[0.07] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-[#181818] border border-white/[0.08] flex items-center justify-center flex-shrink-0 text-[#f7931a]">
+                <BookOpen size={18} />
               </div>
-              <span>1. Base Rate (0.01/h) &amp; Verified Rate (0.1/h)</span>
-            </div>
-            <p className="text-xs text-zinc-400 m-0 leading-relaxed">
-              Any connected Solana wallet can press Start Mining at 0.0100 Bits/hr on a 3-hour cycle. Complete one-time 0.02 SOL verification and @username setup to upgrade to 0.1000 Bits/hr and 24-hour mining.
-            </p>
-          </div>
-
-          <div className="p-5 rounded-2xl bg-[#121318] border border-white/[0.08] shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <div className="flex items-center gap-2.5 mb-2.5 text-sm font-bold text-white">
-              <div className="w-8 h-8 rounded-lg bg-[#fbbf24]/15 border border-[#fbbf24]/30 flex items-center justify-center text-[#fbbf24] flex-shrink-0">
-                <Hammer size={16} />
+              <div className="min-w-0">
+                <h2 className="text-lg sm:text-xl font-extrabold text-white tracking-tight m-0 text-balance">
+                  Bits Mining &amp; Power Guide
+                </h2>
+                <p className="text-xs text-zinc-400 m-0 mt-1">
+                  Rates, verification rules, direct miners, and SOL multipliers.
+                </p>
               </div>
-              <span>2. Direct Miners Power (10% Mining Power)</span>
             </div>
-            <p className="text-xs text-zinc-400 m-0 leading-relaxed">
-              Verified nodes receive their unique @username referral link. Active direct miners provide 10% of their mining power to their inviter.
-            </p>
+
+            {!isConnected ? (
+              <button
+                type="button"
+                onClick={() => setConnectModalOpen(true)}
+                className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[38px] !px-4 !text-xs !font-bold flex-shrink-0 whitespace-nowrap"
+              >
+                <Wallet size={14} />
+                <span>Connect Wallet</span>
+              </button>
+            ) : !isVerifiedNode ? (
+              <button
+                type="button"
+                onClick={() => setVerifyModalOpen(true)}
+                className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[38px] !px-4 !text-xs !font-bold flex-shrink-0 whitespace-nowrap"
+              >
+                <ShieldCheck size={14} />
+                <span>Verify Wallet</span>
+              </button>
+            ) : (
+              <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#fbbf24] whitespace-nowrap shrink-0">
+                <Check size={14} strokeWidth={2.5} />
+                <span>Verified · 24h Cycle</span>
+              </div>
+            )}
           </div>
 
-          <div className="p-5 rounded-2xl bg-[#121318] border border-white/[0.08] shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <div className="flex items-center gap-2.5 mb-2.5 text-sm font-bold text-white">
-              <div className="w-8 h-8 rounded-lg bg-[#f7931a]/15 border border-[#f7931a]/30 flex items-center justify-center text-[#f7931a] flex-shrink-0">
-                <Zap size={16} />
-              </div>
-              <span>3. SOL Power (Max 10 SOL Contribution)</span>
-            </div>
-            <p className="text-xs text-zinc-400 m-0 leading-relaxed">
-              Verified nodes can contribute SOL to acquire SOL Power. Each 1 SOL contributed grants +5.0000 Bits/hr of SOL Power (up to max 10 SOL per account).
-            </p>
-          </div>
+          {/* Rules List */}
+          <div className="divide-y divide-white/[0.065]">
+            {sections.map((item) => (
+              <article
+                key={item.index}
+                className="px-6 py-5 sm:px-7 sm:py-6 grid grid-cols-1 md:grid-cols-[240px_1fr] gap-3 md:gap-8"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-baseline gap-2.5">
+                    <span className="text-xs font-mono font-semibold text-[#f7931a] tabular-nums">
+                      {item.index}.
+                    </span>
+                    <h3 className="text-[15px] font-bold text-white m-0 tracking-tight leading-snug">
+                      {item.title}
+                    </h3>
+                  </div>
+                  <div className="mt-1.5 pl-6 text-xs font-mono font-semibold text-[#fbbf24] tabular-nums">
+                    {item.metric}
+                  </div>
+                </div>
 
-          <div className="p-5 rounded-2xl bg-[#121318] border border-white/[0.08] shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <div className="flex items-center gap-2.5 mb-2.5 text-sm font-bold text-white">
-              <div className="w-8 h-8 rounded-lg bg-[#34d399]/15 border border-[#34d399]/30 flex items-center justify-center text-[#34d399] flex-shrink-0">
-                <Sparkles size={16} />
-              </div>
-              <span>4. 3h / 24h Storage Tank &amp; Claims</span>
-            </div>
-            <p className="text-xs text-zinc-400 m-0 leading-relaxed">
-              Base wallets mine for 3 hours and stop at 100% until claimed. Verified nodes unlock a 24-hour Storage Tank. Once 20% capacity is reached, claim anytime to credit your wallet balance.
-            </p>
+                <p className="text-[13px] sm:text-sm text-zinc-300 m-0 leading-relaxed max-w-[65ch]">
+                  {item.body}
+                </p>
+              </article>
+            ))}
           </div>
         </div>
       </main>
@@ -1441,18 +1539,12 @@ function GuidePage({ onBack }: { onBack: () => void }) {
 // SOL MINING POWER DYNAMIC CURVE
 // ---------------------------------------------------------------------------
 function SolMiningPowerCurve({ solAmount }: { solAmount: number }) {
-  const norm = Math.max(0, Math.min(1, (solAmount - 0.1) / (10 - 0.1)));
+  const norm = Math.max(0, Math.min(1, (solAmount - 0.1) / (SOL_POWER_MAX_SOL - 0.1)));
   const x = 30 + norm * 400;
   const y = 62 - norm * 48;
 
   return (
-    <div className="w-full h-[76px] my-2 bg-[#09090b] rounded-xl p-2 border border-white/8 relative overflow-hidden">
-      <div className="absolute top-2 left-3 text-[10px] font-mono text-zinc-400">
-        SOL Power: <strong className="text-[#f7931a]">{(solAmount * 5).toFixed(1)} Bits/hr</strong>
-      </div>
-      <div className="absolute top-2 right-3 text-[10px] font-mono text-zinc-400">
-        Max: <strong className="text-[#34d399]">50.0 Bits/hr (10 SOL)</strong>
-      </div>
+    <div className="w-full h-[76px] my-2 bg-[#0d0d0d] rounded-xl p-2 border border-white/[0.07] relative overflow-hidden">
       <svg viewBox="0 0 460 72" className="w-full h-full overflow-visible">
         <defs>
           <linearGradient id="solCurveGradient" x1="0" y1="0" x2="0" y2="1">
@@ -1492,13 +1584,13 @@ function SolMiningPowerCurve({ solAmount }: { solAmount: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// SOL POWER MODAL: CONTRIBUTE SOL TO ACQUIRE SOL POWER (MAX 10 SOL)
+// SOL POWER MODAL: CONTRIBUTE SOL TO ACQUIRE SOL POWER (MAX 3 SOL / 10 BITS/HR)
 // ---------------------------------------------------------------------------
 function SolPowerModal({
   open,
   onClose,
   onCommitContribution,
-  currentContributed = 0.5,
+  currentContributed = 0,
   isPending = false,
 }: {
   open: boolean;
@@ -1507,7 +1599,7 @@ function SolPowerModal({
   currentContributed?: number;
   isPending?: boolean;
 }) {
-  const maxAccountSol = 10.0;
+  const maxAccountSol = SOL_POWER_MAX_SOL;
   const remainingQuota = Math.max(0, Number((maxAccountSol - currentContributed).toFixed(2)));
   const isCapped = remainingQuota <= 0;
   const defaultSol = Math.min(1.0, Math.max(0.1, remainingQuota > 0 ? remainingQuota : 0.1));
@@ -1525,9 +1617,10 @@ function SolPowerModal({
   if (!open) return null;
 
   const clampedSol = Math.max(0.1, Math.min(remainingQuota > 0 ? remainingQuota : 0.1, solAmount));
-  const rateBoost = clampedSol * 5.0; // 1 SOL = +5.0 Bits/hr
+  const rateBoost = Number(
+    (calculateSolPowerBoost(currentContributed + clampedSol) - calculateSolPowerBoost(currentContributed)).toFixed(4),
+  );
   const dailyOutput = rateBoost * 24;
-  const usdValue = clampedSol * 180;
 
   const handleSubmit = async () => {
     setSubmitError(null);
@@ -1538,7 +1631,7 @@ function SolPowerModal({
     try {
       await onCommitContribution(clampedSol);
     } catch (err) {
-      setSubmitError(readableError(err, 'Could not complete SOL contribution.'));
+      setSubmitError(readableError(err, 'Could not acquire SOL Power.'));
     }
   };
 
@@ -1547,14 +1640,11 @@ function SolPowerModal({
       <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(247, 147, 26, 0.14)', border: '1px solid rgba(247, 147, 26, 0.28)', display: 'grid', placeItems: 'center', color: '#f7931a' }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: '#181818', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'grid', placeItems: 'center', color: '#f7931a' }}>
               <Zap size={18} />
             </div>
             <div>
-              <h3 style={{ margin: 0, color: '#fff', fontSize: 18, fontWeight: 700 }}>Contribute SOL</h3>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--silver-dark)' }}>
-                Acquire SOL Power to mine more Bits · Max 10 SOL per account
-              </p>
+              <h3 style={{ margin: 0, color: '#fff', fontSize: 18, fontWeight: 700 }}>Acquire Power</h3>
             </div>
           </div>
           <button className="modal-close-btn" type="button" onClick={onClose} aria-label="Close"><X size={18} /></button>
@@ -1563,111 +1653,144 @@ function SolPowerModal({
         <div className="flex flex-col gap-4">
           <InlineErrorBanner message={submitError} />
 
-          <div className="p-3 rounded-xl bg-white/[0.025] border border-white/8 flex items-center justify-between text-xs font-mono">
+          <div className="p-3 rounded-xl bg-[#181818] border border-white/[0.075] flex items-center justify-between text-xs font-mono">
             <span className="text-zinc-400 font-sans">Account Limit:</span>
             <div className="flex items-center gap-2">
               <span className="text-white font-bold tabular-nums">
                 {currentContributed.toFixed(1)} / {maxAccountSol.toFixed(1)} SOL
               </span>
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                isCapped ? 'bg-red-500/20 text-red-400' : 'bg-[#10b981]/15 text-[#34d399]'
+                isCapped ? 'bg-[#f7931a]/20 text-[#fbbf24]' : 'bg-[#10b981]/15 text-[#34d399]'
               }`}>
                 {isCapped ? 'MAX REACHED' : `${remainingQuota.toFixed(1)} SOL REMAINING`}
               </span>
             </div>
           </div>
 
-          <div className="pob-input-box !bg-[#0b0c10] !border-white/10">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-semibold uppercase text-zinc-400 tracking-wider">SOL Power Contribution</span>
-              <span className="text-xs font-mono font-bold text-[#fbbf24] bg-[#f7931a]/12 px-2 py-0.5 rounded">
-                +{rateBoost.toFixed(4)} Bits/hr
-              </span>
-            </div>
+          {isCapped ? (
+            <>
+              <div className="p-5 rounded-2xl bg-[#181818] border border-[#f7931a]/25 flex flex-col items-center text-center gap-2.5">
+                <div className="w-11 h-11 rounded-full bg-[#121212] border border-[#f7931a]/40 flex items-center justify-center text-[#fbbf24]">
+                  <Check size={20} strokeWidth={2.5} />
+                </div>
+                <h4 className="m-0 text-base font-extrabold text-white tracking-tight">
+                  You Have Reached Max Power
+                </h4>
+              </div>
 
-            <SolMiningPowerCurve solAmount={clampedSol} />
+              <div className="pob-panel-body flex flex-col gap-2.5 bg-[#181818] p-3.5 rounded-xl border border-white/[0.075] font-mono text-xs">
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span className="text-zinc-400 font-sans">Acquired With SOL:</span>
+                  <span className="font-bold text-white tabular-nums">{currentContributed.toFixed(1)} / {maxAccountSol.toFixed(1)} SOL</span>
+                </div>
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span className="text-zinc-400 font-sans">Active SOL Power:</span>
+                  <span className="font-bold text-[#fbbf24] tabular-nums">+{calculateSolPowerBoost(currentContributed).toFixed(4)} Bits/hr</span>
+                </div>
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span className="text-zinc-400 font-sans">24h SOL Power Output:</span>
+                  <span className="font-bold text-[#34d399] tabular-nums">+{(calculateSolPowerBoost(currentContributed) * 24).toFixed(1)} Bits</span>
+                </div>
+              </div>
 
-            <div className="w-full py-2">
-              <input
-                type="range"
-                min="0.1"
-                max={Math.max(0.1, remainingQuota)}
-                step="0.1"
-                disabled={isCapped}
-                value={clampedSol}
-                onChange={(e) => {
-                  setSolAmount(Number(e.target.value));
-                  if (submitError) setSubmitError(null);
-                }}
-                className="modern-range-line"
-                aria-label="SOL to contribute"
-              />
-            </div>
+              <button
+                type="button"
+                className="clean-action-btn-soft !w-full !justify-center !min-h-[42px] !text-xs !font-bold"
+                onClick={onClose}
+              >
+                <span>Done</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="pob-input-box !bg-[#181818] !border-white/[0.08]">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold uppercase text-zinc-400 tracking-wider">SOL Power</span>
+                  <span className="text-xs font-mono font-bold text-[#fbbf24] bg-[#f7931a]/12 px-2 py-0.5 rounded">
+                    +{rateBoost.toFixed(4)} Bits/hr
+                  </span>
+                </div>
 
-            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-              {[0.5, 1.0, 2.0, 5.0].filter((val) => val <= remainingQuota).map((val) => (
-                <button
-                  key={val}
-                  type="button"
-                  className={`pob-preset-btn ${clampedSol === val ? '!bg-[#f7931a]/20 !text-[#fbbf24] !border-[#f7931a]/45 font-bold' : ''}`}
-                  onClick={() => {
-                    setSolAmount(val);
-                    if (submitError) setSubmitError(null);
-                  }}
-                >
-                  {val} SOL
-                </button>
-              ))}
-              {remainingQuota > 0 && (
-                <button
-                  type="button"
-                  className={`pob-preset-btn ${clampedSol === remainingQuota ? '!bg-[#f7931a]/20 !text-[#fbbf24] !border-[#f7931a]/45 font-bold' : ''}`}
-                  onClick={() => {
-                    setSolAmount(remainingQuota);
-                    if (submitError) setSubmitError(null);
-                  }}
-                >
-                  MAX ({remainingQuota.toFixed(1)} SOL)
-                </button>
-              )}
-            </div>
-          </div>
+                <SolMiningPowerCurve solAmount={clampedSol} />
 
-          <div className="pob-panel-body flex flex-col gap-2.5 bg-[#0b0c10] p-3.5 rounded-xl border border-white/8 font-mono text-xs">
-            <div className="flex justify-between items-center text-zinc-300">
-              <span className="text-zinc-400 font-sans">Contribute:</span>
-              <span className="font-bold text-white tabular-nums">{clampedSol.toFixed(1)} SOL <span className="text-zinc-500 font-normal font-sans">(≈ ${usdValue.toFixed(2)})</span></span>
-            </div>
-            <div className="flex justify-between items-center text-zinc-300">
-              <span className="text-zinc-400 font-sans">SOL Power Acquired:</span>
-              <span className="font-bold text-[#fbbf24] tabular-nums">+{rateBoost.toFixed(4)} Bits/hr</span>
-            </div>
-            <div className="flex justify-between items-center text-zinc-300">
-              <span className="text-zinc-400 font-sans">24h Estimated Output:</span>
-              <span className="font-bold text-[#34d399] tabular-nums">+{dailyOutput.toFixed(1)} Bits</span>
-            </div>
-          </div>
+                <div className="w-full py-2">
+                  <input
+                    type="range"
+                    min="0.1"
+                    max={Math.max(0.1, remainingQuota)}
+                    step="0.1"
+                    value={clampedSol}
+                    onChange={(e) => {
+                      setSolAmount(Number(e.target.value));
+                      if (submitError) setSubmitError(null);
+                    }}
+                    className="modern-range-line"
+                    aria-label="SOL to acquire power"
+                  />
+                </div>
 
-          <button
-            type="button"
-            className="clean-stake-confirm-btn !font-bold"
-            disabled={isPending || isCapped}
-            onClick={() => void handleSubmit()}
-          >
-            {isPending ? (
-              <span className="flex items-center gap-2 justify-center">
-                <RefreshCw size={14} className="animate-spin" /> Processing…
-              </span>
-            ) : isCapped ? (
-              <span className="flex items-center gap-2 justify-center">
-                <Check size={16} /> Max 10 SOL Contributed
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 justify-center">
-                <Zap size={16} /> Contribute {clampedSol.toFixed(1)} SOL to Acquire SOL Power
-              </span>
-            )}
-          </button>
+                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  {[0.2, 0.5, 1.0, 2.0].filter((val) => val < remainingQuota - 0.001).map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      className={`pob-preset-btn ${Math.abs(clampedSol - val) < 0.001 ? '!bg-[#f7931a]/20 !text-[#fbbf24] !border-[#f7931a]/45 font-bold' : ''}`}
+                      onClick={() => {
+                        setSolAmount(val);
+                        if (submitError) setSubmitError(null);
+                      }}
+                    >
+                      {val} SOL
+                    </button>
+                  ))}
+                  {remainingQuota > 0 && (
+                    <button
+                      type="button"
+                      className={`pob-preset-btn ${Math.abs(clampedSol - remainingQuota) < 0.001 ? '!bg-[#f7931a]/20 !text-[#fbbf24] !border-[#f7931a]/45 font-bold' : ''}`}
+                      onClick={() => {
+                        setSolAmount(remainingQuota);
+                        if (submitError) setSubmitError(null);
+                      }}
+                    >
+                      MAX
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="pob-panel-body flex flex-col gap-2.5 bg-[#181818] p-3.5 rounded-xl border border-white/[0.075] font-mono text-xs">
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span className="text-zinc-400 font-sans">Acquire With SOL:</span>
+                  <span className="font-bold text-white tabular-nums">{clampedSol.toFixed(1)} SOL</span>
+                </div>
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span className="text-zinc-400 font-sans">SOL Power Acquired:</span>
+                  <span className="font-bold text-[#fbbf24] tabular-nums">+{rateBoost.toFixed(4)} Bits/hr</span>
+                </div>
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span className="text-zinc-400 font-sans">24h Estimated Output:</span>
+                  <span className="font-bold text-[#34d399] tabular-nums">+{dailyOutput.toFixed(1)} Bits</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="clean-stake-confirm-btn !font-bold"
+                disabled={isPending}
+                onClick={() => void handleSubmit()}
+              >
+                {isPending ? (
+                  <span className="flex items-center gap-2 justify-center">
+                    <RefreshCw size={14} className="animate-spin" /> Processing…
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2 justify-center">
+                    <Zap size={16} /> Acquire SOL Power
+                  </span>
+                )}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -1688,9 +1811,9 @@ function LedgerPage({ onBack }: { onBack: () => void }) {
   const claimHistoryList = walletState ? walletState.claimHistory : [];
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#070707] text-zinc-100 flex flex-col font-sans">
       {/* HEADER */}
-      <header className="border-b border-white/[0.08] bg-[#09090b]/85 backdrop-blur-xl sticky top-0 z-40">
+      <header className="border-b border-white/[0.07] bg-[#070707]/90 backdrop-blur-xl sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <Brand size="md" />
           <div className="flex items-center gap-3">
@@ -1720,87 +1843,73 @@ function LedgerPage({ onBack }: { onBack: () => void }) {
           </button>
         </div>
 
-        {/* 1. CLAIMED POINTS SUMMARY COCKPIT */}
-        <div className="pob-cockpit mb-6 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-          <div className="flex items-center gap-3.5">
-            <BitsMark size={40} className="flex-shrink-0" />
-            <div>
-              <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold mb-1">
-                Claimed Points Ledger
-              </div>
-              <div className="text-3xl sm:text-4xl font-black font-mono text-[#34d399] tabular-nums tracking-tight">
-                {claimedTotalBits.toFixed(4)} <span className="text-xs text-zinc-400 font-normal">BITS</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-6 text-xs font-mono">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-0.5">Claims</div>
-              <div className="text-lg font-bold text-white tabular-nums">{claimHistoryList.length}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. CLAIMED POINTS HISTORY LIST */}
-        <div className="p-5 rounded-2xl bg-[#121318] border border-white/[0.08] shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-bold text-white m-0">Claim History</h2>
-            <span className="text-[11px] font-mono text-zinc-400 tabular-nums">
-              {claimHistoryList.length} {claimHistoryList.length === 1 ? 'Entry' : 'Entries'}
-            </span>
-          </div>
-
-          {!isConnected ? (
-            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="text-xs text-zinc-300">
-                Connect your wallet to view your claimed points ledger.
-              </div>
-              <button
-                type="button"
-                onClick={() => setConnectModalOpen(true)}
-                className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[36px] !px-4 !text-xs !font-bold flex-shrink-0"
-              >
-                <Wallet size={14} />
-                <span>Connect Wallet</span>
-              </button>
-            </div>
-          ) : claimHistoryList.length === 0 ? (
-            <div className="py-10 text-center text-zinc-500 text-xs font-mono">
-              No claimed points yet.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              {claimHistoryList.map((item, idx) => (
-                <div
-                  key={item.id || idx}
-                  className="flex items-center justify-between px-4 py-3.5 rounded-xl bg-white/[0.025] border border-white/[0.07] transition-colors hover:border-white/[0.12]"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-xs text-zinc-500 w-6 tabular-nums">
-                      {String(idx + 1).padStart(2, '0')}
-                    </span>
-                    <BitsMark size={24} />
-                    <span className="font-mono font-extrabold text-sm sm:text-base text-[#34d399] tabular-nums">
-                      +{item.amount.toFixed(4)} BITS
-                    </span>
-                  </div>
-
-                  <span
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-mono font-bold"
-                    style={{
-                      background: 'rgba(16, 185, 129, 0.12)',
-                      border: '1px solid rgba(16, 185, 129, 0.28)',
-                      color: '#34d399',
-                    }}
-                  >
-                    <Check size={12} strokeWidth={3} />
-                    Confirmed
-                  </span>
+        {/* SINGLE UNIFIED CLAIMED POINTS LEDGER CARD */}
+        <div className="pob-cockpit overflow-hidden">
+          {/* Top Claimed Points Summary */}
+          <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5 border-b border-white/[0.07]">
+            <div className="flex items-center gap-3.5">
+              <BitsMark size={40} className="flex-shrink-0" />
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold mb-1">
+                  Claimed Points Ledger
                 </div>
-              ))}
+                <div className="text-3xl sm:text-4xl font-black font-mono text-[#34d399] tabular-nums tracking-tight">
+                  {claimedTotalBits.toFixed(4)} <span className="text-xs text-zinc-400 font-normal">BITS</span>
+                </div>
+              </div>
             </div>
-          )}
+
+            <div className="flex items-center gap-6 text-xs font-mono">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-0.5">Claims</div>
+                <div className="text-lg font-bold text-white tabular-nums">{claimHistoryList.length}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Claimed Points Entries Below (No 'Confirmed' Text) */}
+          <div className="p-5">
+            {!isConnected ? (
+              <div className="p-4 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-xs text-zinc-300">
+                  Connect your wallet to view your claimed points ledger.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setConnectModalOpen(true)}
+                  className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[36px] !px-4 !text-xs !font-bold flex-shrink-0"
+                >
+                  <Wallet size={14} />
+                  <span>Connect Wallet</span>
+                </button>
+              </div>
+            ) : claimHistoryList.length === 0 ? (
+              <div className="py-8 text-center text-zinc-500 text-xs font-mono">
+                No claimed points yet.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {claimHistoryList.map((item, idx) => (
+                  <div
+                    key={item.id || idx}
+                    className="flex items-center justify-between px-4 py-3.5 rounded-xl bg-[#181818] border border-white/[0.07] transition-colors hover:border-white/[0.12]"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-xs text-zinc-500 w-6 tabular-nums">
+                        {String(idx + 1).padStart(2, '0')}
+                      </span>
+                      <BitsMark size={24} />
+                      <span className="font-mono font-extrabold text-sm sm:text-base text-[#34d399] tabular-nums">
+                        +{item.amount.toFixed(4)} BITS
+                      </span>
+                    </div>
+
+                    <Check size={14} strokeWidth={2.5} className="text-[#34d399] flex-shrink-0" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </main>
 
@@ -1810,6 +1919,574 @@ function LedgerPage({ onBack }: { onBack: () => void }) {
         onClose={() => setVerifyModalOpen(false)}
         onOpenConnect={() => setConnectModalOpen(true)}
       />
+    </div>
+  );
+}
+
+type DirectMinerMember = {
+  id: string;
+  handle: string;
+  isVerified: boolean;
+  isActive: boolean;
+  isEligible: boolean;
+  status: 'active' | 'inactive' | 'unverified';
+  miningPower: number;
+  providedPower: number;
+};
+
+function normalizeDirectMiner(m: any): DirectMinerMember {
+  const isVerified = Boolean(m?.isVerified);
+  const isActive = Boolean(m?.isActive);
+  // Rule: Inactive or unverified miners (treated as bots/unverified) share 0% mining power.
+  // Only verified AND actively mining direct referrals contribute 10% power to their inviter.
+  const isEligible = isVerified && isActive;
+  const miningPower = isActive ? Math.max(0, Number(m?.miningPower ?? (isVerified ? 0.1 : 0.01)) || 0) : 0;
+  const providedPower = isEligible
+    ? Math.max(0, Number(m?.providedPower ?? Number((miningPower * 0.1).toFixed(4))) || 0)
+    : 0;
+  const status: 'active' | 'inactive' | 'unverified' = !isVerified
+    ? 'unverified'
+    : isActive
+      ? 'active'
+      : 'inactive';
+  return {
+    id: String(m?.id || m?.handle || ''),
+    handle: String(m?.handle || 'unknown'),
+    isVerified,
+    isActive,
+    isEligible,
+    status,
+    miningPower,
+    providedPower,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// STANDALONE POWER CARDS REWARD PAGE (BTC ICON DESTINATION)
+// ---------------------------------------------------------------------------
+function formatCardCountdown(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const hms = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  return d > 0 ? `${d}d ${hms}` : hms;
+}
+
+function PowerCardsPage({ onBack }: { onBack: () => void }) {
+  const { user } = useAuth();
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false);
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [receivedCards, setReceivedCards] = useState<ReceivedPowerCard[]>(() =>
+    user?.solanaAddress ? getWalletPowerCards(user.solanaAddress) : [],
+  );
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [revealingCardId, setRevealingCardId] = useState<string | null>(null);
+  const revealTimeoutRef = useRef<number | null>(null);
+
+  const isConnected = Boolean(user?.solanaAddress);
+  const isVerifiedNode = Boolean(user?.solanaAddress && user?.isVerified && user?.uid);
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncCards = () => {
+      if (!user?.solanaAddress) {
+        setReceivedCards([]);
+        return;
+      }
+      if (isVerifiedNode && !hasUnlockedSpiderCardBefore(user.solanaAddress)) {
+        unlockSpiderCardOnVerifiedUid(user.solanaAddress);
+      }
+      if (isVerifiedNode && !hasUnlockedDragonCardBefore(user.solanaAddress)) {
+        const savedSol = getWalletMiningState(user.solanaAddress).contributedSol;
+        const solBoost = calculateSolPowerBoost(savedSol);
+        if (solBoost >= 2.0) {
+          unlockDragonCardOnSolPower(user.solanaAddress, solBoost);
+        }
+      }
+      const list = getWalletPowerCards(user.solanaAddress);
+      setReceivedCards(list);
+      setNowMs(Date.now());
+    };
+
+    syncCards();
+
+    // Check referral milestones to unlock PHOENIX CARD (3+ verified), SIREN CARD (>=0.5/h), and AURA CARD (10+ verified & active)
+    if (
+      user?.solanaAddress &&
+      (!hasUnlockedPhoenixCardBefore(user.solanaAddress) ||
+        (isVerifiedNode &&
+          (!hasUnlockedSirenCardBefore(user.solanaAddress) ||
+            !hasUnlockedAuraCardBefore(user.solanaAddress))))
+    ) {
+      const addr = user.solanaAddress;
+      apiFetchJson<any[]>('/api/accounts/me/team')
+        .then((data) => {
+          if (cancelled || !Array.isArray(data)) return;
+          const normalized = data.map(normalizeDirectMiner);
+          const verifiedCount = normalized.filter((m) => m.isVerified).length;
+          const eligibleMiners = normalized.filter((m) => m.isEligible);
+          const minersPowerPerHour = isVerifiedNode
+            ? eligibleMiners.reduce((sum, m) => sum + m.providedPower, 0)
+            : 0;
+          let unlockedAny = false;
+
+          if (verifiedCount >= 3 && !hasUnlockedPhoenixCardBefore(addr)) {
+            unlockPhoenixCardOnThreeVerifiedMiners(addr, verifiedCount);
+            unlockedAny = true;
+          }
+          if (isVerifiedNode && minersPowerPerHour >= 0.5 && !hasUnlockedSirenCardBefore(addr)) {
+            unlockSirenCardOnMinersPower(addr, minersPowerPerHour);
+            unlockedAny = true;
+          }
+          if (isVerifiedNode && eligibleMiners.length >= 10 && !hasUnlockedAuraCardBefore(addr)) {
+            unlockAuraCardOnTenVerifiedActiveMiners(addr, eligibleMiners.length);
+            unlockedAny = true;
+          }
+          if (unlockedAny) {
+            setReceivedCards(getWalletPowerCards(addr));
+          }
+        })
+        .catch(() => {
+          // Ignore silent check errors
+        });
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('bitnoir-cards-updated', syncCards);
+      return () => {
+        cancelled = true;
+        window.removeEventListener('bitnoir-cards-updated', syncCards);
+      };
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.solanaAddress, isVerifiedNode]);
+
+  useEffect(() => {
+    return () => {
+      if (revealTimeoutRef.current !== null) {
+        window.clearTimeout(revealTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const activeCardDef = getActivePowerCardDef(receivedCards);
+  const hasAnyActive = hasAnyActivePowerCard(receivedCards);
+
+  // Live 1-second timer to update active 24h countdown & auto-disappear expired cards
+  useEffect(() => {
+    if (!user?.solanaAddress || !hasAnyActive || !activeCardDef) return undefined;
+    const interval = window.setInterval(() => {
+      const currentNow = Date.now();
+      setNowMs(currentNow);
+      const rem = getPowerCardRemainingMs(receivedCards, activeCardDef.id);
+      if (rem <= 0 && user.solanaAddress) {
+        const refreshed = getWalletPowerCards(user.solanaAddress);
+        setReceivedCards(refreshed);
+        setRevealingCardId(null);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [user?.solanaAddress, receivedCards, hasAnyActive, activeCardDef]);
+
+  const catalogById = new Map(POWER_CARD_CATALOG.map((c) => [c.id, c]));
+  const visibleEntries = receivedCards
+    .map((entry) => ({ entry, def: catalogById.get(entry.cardId) }))
+    .filter((item): item is { entry: ReceivedPowerCard; def: NonNullable<typeof item.def> } => Boolean(item.def));
+
+  const hasUnlockedAnyBefore = Boolean(
+    user?.solanaAddress &&
+      (hasUnlockedGenesisAntCardBefore(user.solanaAddress) ||
+        hasUnlockedSpiderCardBefore(user.solanaAddress) ||
+        hasUnlockedPhoenixCardBefore(user.solanaAddress) ||
+        hasUnlockedSirenCardBefore(user.solanaAddress) ||
+        hasUnlockedAuraCardBefore(user.solanaAddress) ||
+        hasUnlockedDragonCardBefore(user.solanaAddress)),
+  );
+
+  const handleActivateCard = (cardId: string) => {
+    if (!user?.solanaAddress) return;
+    if (hasAnyActive) return;
+    const updated = activatePowerCard(user.solanaAddress, cardId, isVerifiedNode);
+    setReceivedCards(updated);
+    setNowMs(Date.now());
+
+    // One-time slow branded reveal animation overlay upon activation
+    const revealKey = `bitnoir-card-reveal-seen-${cardId}-${user.solanaAddress}`;
+    if (!safeStorageGet(revealKey)) {
+      safeStorageSet(revealKey, new Date().toISOString());
+      setRevealingCardId(cardId);
+      if (revealTimeoutRef.current !== null) {
+        window.clearTimeout(revealTimeoutRef.current);
+      }
+      revealTimeoutRef.current = window.setTimeout(() => {
+        setRevealingCardId(null);
+      }, 4900);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#070707] text-zinc-100 flex flex-col font-sans">
+      {/* HEADER */}
+      <header className="border-b border-white/[0.07] bg-[#070707]/90 backdrop-blur-xl sticky top-0 z-40">
+        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          <Brand size="md" />
+          <div className="flex items-center gap-3">
+            <TopWalletConnect
+              onOpenVerify={() => setVerifyModalOpen(true)}
+              onOpenConnect={() => setConnectModalOpen(true)}
+            />
+          </div>
+        </div>
+      </header>
+
+      {/* MAIN CONTAINER */}
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
+        {/* TOP NAVIGATION & HEADING */}
+        <div className="flex items-center justify-between gap-4 mb-8">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">
+              Power Cards
+            </h1>
+            <button
+              type="button"
+              onClick={() => setGuideModalOpen(true)}
+              title="Power Cards Guide · Rewards & Rules"
+              aria-label="Open Power Cards Guidelines"
+              className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[#161616] border border-[#f59e0b]/45 text-[#fbbf24] hover:bg-[#1f1b14] hover:border-[#fbbf24]/75 transition-colors cursor-pointer shrink-0"
+            >
+              <BookOpen size={15} />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={onBack}
+            className="clean-action-btn-soft !min-h-[32px] !px-3 !text-[11px] whitespace-nowrap shrink-0"
+          >
+            <ChevronLeft size={13} />
+            <span>Back to Mining</span>
+          </button>
+        </div>
+
+        {/* DIRECT HARDCODED POWER CARDS VIEW (NO BOXES, NO GRIDS) */}
+        {!isConnected ? (
+          <div className="w-full max-w-md mx-auto flex flex-col items-center text-center gap-4 py-12">
+            <BitcoinMark size={40} active={false} />
+            <p className="text-xs font-mono text-zinc-400 m-0">
+              Connect your wallet and start mining to unlock your Power Card.
+            </p>
+            <button
+              type="button"
+              onClick={() => setConnectModalOpen(true)}
+              className="clean-stake-confirm-btn !w-auto !min-h-[36px] !px-5 !text-xs !font-bold"
+            >
+              <Wallet size={14} />
+              <span>Connect Wallet</span>
+            </button>
+          </div>
+        ) : visibleEntries.length === 0 ? (
+          <div className="w-full max-w-md mx-auto flex flex-col items-center text-center gap-3 py-12">
+            <BitcoinMark size={40} active={false} />
+            <p className="text-xs font-mono text-zinc-500 m-0">
+              {hasUnlockedAnyBefore
+                ? 'No active Power Cards.'
+                : 'Start mining to unlock your Genesis Power Card.'}
+            </p>
+          </div>
+        ) : (
+          <div className="w-full max-w-md mx-auto flex flex-col gap-10">
+            {visibleEntries.map(({ entry, def }) => {
+              const isThisActive = isPowerCardActive(entry, nowMs);
+              const remainingMs = entry.expiresAt ? Math.max(0, Date.parse(entry.expiresAt) - nowMs) : 0;
+              const isRevealing = revealingCardId === def.id;
+              const blockedByOtherActive = !isThisActive && hasAnyActive && activeCardDef?.id !== def.id;
+              const durationLabel = formatPowerCardDurationShort(def.durationHours);
+              const isSpider = def.id === SPIDER_CARD_ID;
+              const isPhoenix = def.id === PHOENIX_CARD_ID;
+              const isSiren = def.id === SIREN_CARD_ID;
+              const isAura = def.id === AURA_CARD_ID;
+              const isDragon = def.id === DRAGON_CARD_ID;
+
+              return (
+                <div key={def.id} className="w-full flex flex-col gap-3">
+                  {/* EVERYTHING AT TOP OF CARD: NAME, REWARD, EXPIRY & ACTIVATE BUTTON */}
+                  <div className="flex items-center justify-between gap-3 px-0.5">
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2">
+                        <BitcoinMark size={18} active={isThisActive} />
+                        <span className="text-sm sm:text-base font-extrabold tracking-tight text-white">
+                          {def.name}
+                        </span>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-[#fbbf24] tabular-nums">
+                        +{def.boostPerHour.toFixed(4)} BITS/hr
+                      </span>
+                    </div>
+
+                    {isThisActive ? (
+                      <div className="text-right font-mono">
+                        <div className="text-[10px] uppercase tracking-wider text-[#34d399] font-bold">
+                          {durationLabel} Active
+                        </div>
+                        <div className="text-xs font-bold text-[#fbbf24] tabular-nums">
+                          Expires In {formatCardCountdown(remainingMs)}
+                        </div>
+                      </div>
+                    ) : blockedByOtherActive ? (
+                      <div className="text-right font-mono">
+                        <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">
+                          {durationLabel} · Locked
+                        </div>
+                        <div className="text-[11px] font-bold text-zinc-400">
+                          After {activeCardDef?.name}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <div className="text-right font-mono">
+                          <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Duration</div>
+                          <div className="text-xs font-bold text-zinc-200 tabular-nums">{durationLabel}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleActivateCard(def.id)}
+                          className="clean-stake-confirm-btn !w-auto !min-h-[34px] !px-4 !text-xs !font-bold whitespace-nowrap shrink-0"
+                        >
+                          <Zap size={13} />
+                          <span>Activate</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* CARD VISUAL: HIDDEN / SEALED UNTIL ACTIVATED, FULL PICTURE + ONE-TIME OVERLAY UPON ACTIVATION */}
+                  {!isThisActive ? (
+                    <div className="relative w-full aspect-[16/10] rounded-2xl bg-[#121212] border border-white/[0.075] overflow-hidden flex flex-col items-center justify-center gap-2 select-none">
+                      <div
+                        className="absolute inset-0 pointer-events-none"
+                        style={{
+                          background:
+                            'radial-gradient(circle at 50% 45%, rgba(247, 147, 26, 0.06) 0%, rgba(18, 18, 18, 0.96) 72%)',
+                        }}
+                      />
+                      <Lock size={22} className="relative z-10 text-[#f7931a]/65" />
+                      <span className="relative z-10 text-[11px] font-mono uppercase tracking-widest text-zinc-400">
+                        {blockedByOtherActive ? `Waiting · ${activeCardDef?.name} Active` : `Sealed ${def.tier} Card`}
+                      </span>
+                    </div>
+                  ) : (
+                    <div
+                      className="relative w-full overflow-hidden rounded-2xl select-none card-asset-protected"
+                      onContextMenu={(e) => e.preventDefault()}
+                      onDragStart={(e) => e.preventDefault()}
+                    >
+                      {def.imageUrl && (
+                        <img
+                          src={def.imageUrl}
+                          alt={def.name}
+                          referrerPolicy="no-referrer"
+                          draggable={false}
+                          decoding="async"
+                          onContextMenu={(e) => e.preventDefault()}
+                          onDragStart={(e) => e.preventDefault()}
+                          className={`w-full h-auto block rounded-2xl pointer-events-none select-none ${isRevealing ? 'ant-reveal-card-enter' : ''}`}
+                        />
+                      )}
+
+                      {/* Protective shield blocking tap-hold, drag, and right-click download while preserving vertical scroll */}
+                      <div
+                        aria-hidden="true"
+                        className="absolute inset-0 z-10 select-none touch-pan-y"
+                        onContextMenu={(e) => e.preventDefault()}
+                        onDragStart={(e) => e.preventDefault()}
+                      />
+
+                      {/* ONE-TIME SLOW BRANDED REVEAL ANIMATION OVERLAY */}
+                      {isRevealing && (
+                        <div
+                          className="pointer-events-none absolute inset-0 z-20 rounded-2xl overflow-hidden flex items-center justify-center ant-reveal-overlay"
+                          style={{
+                            background:
+                              'radial-gradient(circle at center, rgba(247, 147, 26, 0.24) 0%, rgba(9, 9, 11, 0.86) 76%)',
+                          }}
+                        >
+                          <div
+                            className="absolute inset-y-0 w-1/3 ant-reveal-sweep"
+                            style={{
+                              background:
+                                'linear-gradient(90deg, transparent 0%, rgba(251, 191, 36, 0.45) 50%, transparent 100%)',
+                            }}
+                          />
+                          <div className="absolute w-32 h-32 rounded-full border-2 border-[#fbbf24]/70 ant-reveal-ring" />
+                          <div className="relative z-10 flex flex-col items-center text-center gap-2 px-4 ant-reveal-crest">
+                            <div className="flex items-center justify-center">
+                              {isDragon ? (
+                                <DragonEmblemMark size={28} />
+                              ) : isAura ? (
+                                <AuraEmblemMark size={28} />
+                              ) : isSiren ? (
+                                <SirenEmblemMark size={28} />
+                              ) : isPhoenix ? (
+                                <PhoenixEmblemMark size={28} />
+                              ) : isSpider ? (
+                                <SpiderEmblemMark size={28} />
+                              ) : (
+                                <AntEmblemMark size={28} />
+                              )}
+                            </div>
+                            <span className="text-sm sm:text-base font-black tracking-[0.22em] uppercase text-white drop-shadow-[0_2px_12px_rgba(247,147,26,0.6)]">
+                              {def.name} ACTIVATED
+                            </span>
+                            <span className="text-[11px] font-mono font-bold text-[#fbbf24] tracking-wider">
+                              +{def.boostPerHour.toFixed(4)} BITS/HR · {durationLabel.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      <ConnectWalletModal open={connectModalOpen} onClose={() => setConnectModalOpen(false)} />
+      <VerifyAndUsernameModal
+        open={verifyModalOpen}
+        onClose={() => setVerifyModalOpen(false)}
+        onOpenConnect={() => setConnectModalOpen(true)}
+      />
+
+      {guideModalOpen && (
+        <div className="modal-backdrop" onClick={() => setGuideModalOpen(false)}>
+          <div
+            className="modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 540,
+              padding: 24,
+              background: '#121212',
+              borderColor: 'rgba(245, 158, 11, 0.28)',
+              borderRadius: 18,
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#181818] border border-[#f59e0b]/40 flex items-center justify-center text-[#fbbf24]">
+                  <BookOpen size={17} />
+                </div>
+                <div>
+                  <h3 className="m-0 text-base font-bold text-white">Power Cards Guidelines</h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setGuideModalOpen(false)}
+                aria-label="Close Guidelines"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="max-h-[72vh] overflow-y-auto pr-1 flex flex-col gap-5">
+              {/* ALL CARDS & HOW TO UNLOCK */}
+              <div className="flex flex-col gap-2.5">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-[#fbbf24] font-bold">
+                  All Cards &amp; Unlock Requirements
+                </div>
+                {POWER_CARD_CATALOG.map((card) => {
+                  const durationShort = formatPowerCardDurationShort(card.durationHours);
+                  const howToUnlock =
+                    card.id === ANT_CARD_ID
+                      ? 'Start your first mining session with a connected Solana wallet (also grants 24h cycle while active).'
+                      : card.id === SPIDER_CARD_ID
+                        ? 'Complete one-time 0.02 SOL wallet verification to receive your UID.'
+                        : card.id === PHOENIX_CARD_ID
+                          ? 'Invite 3 verified miners to join your direct team.'
+                          : card.id === SIREN_CARD_ID
+                            ? 'Reach 0.5000 BITS/hr Miners Power from active & verified direct miners for the first time.'
+                            : card.id === AURA_CARD_ID
+                              ? 'Reach 10 verified & actively mining direct miners in your team.'
+                              : 'Purchase at least 2.0000 BITS/hr in SOL Power (min. 0.60 SOL).';
+
+                  return (
+                    <div
+                      key={card.id}
+                      className="p-3.5 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col gap-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          {card.id === DRAGON_CARD_ID ? (
+                            <DragonEmblemMark size={18} />
+                          ) : card.id === AURA_CARD_ID ? (
+                            <AuraEmblemMark size={18} />
+                          ) : card.id === SIREN_CARD_ID ? (
+                            <SirenEmblemMark size={18} />
+                          ) : card.id === PHOENIX_CARD_ID ? (
+                            <PhoenixEmblemMark size={18} />
+                          ) : card.id === SPIDER_CARD_ID ? (
+                            <SpiderEmblemMark size={18} />
+                          ) : (
+                            <AntEmblemMark size={18} />
+                          )}
+                          <span className="text-xs font-extrabold tracking-wide text-white">
+                            {card.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-500 uppercase">
+                            {card.tier}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 font-mono text-[11px] font-bold shrink-0">
+                          <span className="text-[#fbbf24] tabular-nums">
+                            +{card.boostPerHour.toFixed(4)} /h
+                          </span>
+                          <span className="text-zinc-500">·</span>
+                          <span className="text-[#34d399] uppercase">{durationShort}</span>
+                        </div>
+                      </div>
+                      <p className="m-0 text-xs text-zinc-300 leading-relaxed">
+                        {howToUnlock}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* CORE RULES */}
+              <div className="p-4 rounded-xl bg-[#161616] border border-[#f59e0b]/25 flex flex-col gap-2">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-[#fbbf24] font-bold">
+                  Power Card Rules
+                </div>
+                <ul className="m-0 pl-4 flex flex-col gap-1.5 text-xs text-zinc-300 leading-relaxed">
+                  <li>
+                    <strong className="text-white">Sealed Until Activated:</strong> Newly earned cards arrive sealed so you control when to start their boost.
+                  </li>
+                  <li>
+                    <strong className="text-white">1 Active Card at a Time:</strong> Only one Power Card can run simultaneously; other unlocked cards wait until the active timer finishes.
+                  </li>
+                  <li>
+                    <strong className="text-white">One-Time Per Wallet:</strong> Each card unlocks once per Solana wallet when its milestone is reached.
+                  </li>
+                  <li>
+                    <strong className="text-white">Permanent Expiry:</strong> After its duration ends (24h, 3d, or 7d), the card disappears permanently.
+                  </li>
+                  <li>
+                    <strong className="text-white">Fair Bot Filter:</strong> Only verified &amp; actively mining referrals count toward Miners Power (Siren) and active miner milestones (Aura).
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1824,19 +2501,12 @@ function MinersPage({ onBack }: { onBack: () => void }) {
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
-  const [teamList, setTeamList] = useState<Array<{
-    id: string;
-    handle: string;
-    status: string;
-    isActive: boolean;
-    miningPower: number;
-    providedPower: number;
-  }>>([]);
+  const [teamList, setTeamList] = useState<DirectMinerMember[]>([]);
 
   const isConnected = Boolean(user?.solanaAddress);
   const isVerified = Boolean(user?.solanaAddress && user?.isVerified);
-  const username = user?.username || '';
-  const isUnlocked = isConnected && isVerified && Boolean(username);
+  const uid = user?.uid || '';
+  const isUnlocked = isConnected && isVerified && Boolean(uid);
 
   const loadTeam = async () => {
     if (!user?.solanaAddress) {
@@ -1849,16 +2519,22 @@ function MinersPage({ onBack }: { onBack: () => void }) {
     try {
       const data = await apiFetchJson<any[]>('/api/accounts/me/team');
       if (Array.isArray(data)) {
-        setTeamList(
-          data.map((m: any) => ({
-            id: m.id || m.handle,
-            handle: m.handle,
-            status: m.isActive || m.status === 'verified' ? 'Active' : 'Inactive',
-            isActive: Boolean(m.isActive || m.status === 'verified'),
-            miningPower: Number(m.miningPower ?? (m.isActive || m.status === 'verified' ? 0.1 : 0)),
-            providedPower: Number(m.providedPower ?? (m.isActive || m.status === 'verified' ? 0.01 : 0)),
-          }))
-        );
+        const normalized = data.map(normalizeDirectMiner);
+        setTeamList(normalized);
+        const verifiedCount = normalized.filter((m) => m.isVerified).length;
+        if (verifiedCount >= 3) {
+          unlockPhoenixCardOnThreeVerifiedMiners(user.solanaAddress, verifiedCount);
+        }
+        const eligibleMiners = normalized.filter((m) => m.isEligible);
+        const minersPower = isUnlocked
+          ? eligibleMiners.reduce((sum, m) => sum + m.providedPower, 0)
+          : 0;
+        if (isUnlocked && minersPower >= 0.5) {
+          unlockSirenCardOnMinersPower(user.solanaAddress, minersPower);
+        }
+        if (isUnlocked && eligibleMiners.length >= 10) {
+          unlockAuraCardOnTenVerifiedActiveMiners(user.solanaAddress, eligibleMiners.length);
+        }
       } else {
         setTeamList([]);
       }
@@ -1871,17 +2547,17 @@ function MinersPage({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     void loadTeam();
-  }, [user?.solanaAddress]);
+  }, [user?.solanaAddress, isUnlocked]);
 
-  const activeCount = isUnlocked ? teamList.filter((m) => m.isActive).length : 0;
+  const activeCount = isUnlocked ? teamList.filter((m) => m.isEligible).length : 0;
   const referralBoostPerHour = isUnlocked
-    ? teamList.filter((m) => m.isActive).reduce((sum, m) => sum + m.providedPower, 0)
+    ? teamList.filter((m) => m.isEligible).reduce((sum, m) => sum + m.providedPower, 0)
     : 0;
 
   const referralUrl = isUnlocked
     ? typeof window !== 'undefined'
-      ? `${window.location.origin}/?ref=${username}`
-      : `https://bitnoir.io/?ref=${username}`
+      ? `${window.location.origin}/?ref=${uid}`
+      : `https://bitnoir.io/?ref=${uid}`
     : '';
 
   const handleCopy = async () => {
@@ -1890,21 +2566,19 @@ function MinersPage({ onBack }: { onBack: () => void }) {
     if (ok) {
       setCopied(true);
       toast({
-        title: 'Copied',
-        description: 'Referral link copied to clipboard.',
+        description: 'Referral link copied.',
         variant: 'success',
-        icon: <Copy size={16} />,
       });
       setTimeout(() => setCopied(false), 2200);
     } else {
-      toast({ title: 'Copy Failed', description: 'Clipboard permission unavailable.', variant: 'destructive' });
+      toast({ description: 'Unable to copy link. Please copy it manually.', variant: 'destructive' });
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#070707] text-zinc-100 flex flex-col font-sans">
       {/* HEADER */}
-      <header className="border-b border-white/[0.08] bg-[#09090b]/85 backdrop-blur-xl sticky top-0 z-40">
+      <header className="border-b border-white/[0.07] bg-[#070707]/90 backdrop-blur-xl sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <Brand size="md" />
           <div className="flex items-center gap-3">
@@ -1947,7 +2621,7 @@ function MinersPage({ onBack }: { onBack: () => void }) {
 
           <div className="flex items-center gap-6 text-xs font-mono">
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-0.5">Active</div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-0.5">Verified Active</div>
               <div className="text-lg font-bold text-[#34d399] tabular-nums">{activeCount}</div>
             </div>
             <div className="h-8 w-px bg-white/10" />
@@ -1959,16 +2633,16 @@ function MinersPage({ onBack }: { onBack: () => void }) {
         </div>
 
         {/* 2. INVITE LINK CARD */}
-        <div className="mb-6 p-5 rounded-2xl bg-[#121318] border border-white/[0.08] shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <div className="mb-6 p-5 rounded-2xl bg-[#121212] border border-white/[0.075]">
           <div className="flex items-start gap-2.5 text-xs text-zinc-300 mb-4 leading-relaxed">
-            <Hammer size={15} className="text-[#fbbf24] mt-0.5 flex-shrink-0" />
+            <MiningPickaxeIcon size={15} className="text-[#fbbf24] mt-0.5 flex-shrink-0" />
             <div>
-              Active direct miners contribute <strong className="text-[#fbbf24]">10% of their mining power</strong> to your velocity. Inactive miners contribute 0% until activated.
+              Only verified &amp; active direct miners contribute <strong className="text-[#fbbf24]">10% of their mining power</strong> to your velocity. Inactive or unverified miners (bot protection) share 0% until verified and actively mining.
             </div>
           </div>
 
           {!isConnected ? (
-            <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-4 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="text-xs text-zinc-300">
                 Connect your wallet to unlock your Miners network and referral link.
               </div>
@@ -1982,12 +2656,12 @@ function MinersPage({ onBack }: { onBack: () => void }) {
               </button>
             </div>
           ) : !isUnlocked ? (
-            <div className="p-4 rounded-xl bg-[#f7931a]/[0.07] border border-[#f7931a]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-4 rounded-xl bg-[#181818] border border-[#f7931a]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start gap-2.5 text-xs text-zinc-200 leading-relaxed">
                 <Lock size={15} className="text-[#fbbf24] mt-0.5 flex-shrink-0" />
                 <div>
                   <strong className="text-white block">Referral Link Locked</strong>
-                  Complete <strong className="text-[#fbbf24]">0.02 SOL</strong> verification and set your <strong className="text-white">@username</strong> to generate your invite link.
+                  Complete wallet verification (small one-time fee to prevent cloning, bots &amp; farming) to receive your <strong className="text-white">UID</strong> and generate your invite link.
                 </div>
               </div>
               <button
@@ -1996,7 +2670,7 @@ function MinersPage({ onBack }: { onBack: () => void }) {
                 className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[36px] !px-4 !text-xs !font-bold flex-shrink-0"
               >
                 <ShieldCheck size={14} />
-                <span>{!isVerified ? 'Verify (0.02 SOL)' : 'Set @username'}</span>
+                <span>Verify Wallet</span>
               </button>
             </div>
           ) : (
@@ -2006,10 +2680,10 @@ function MinersPage({ onBack }: { onBack: () => void }) {
                   Your Miner Invite Link
                 </span>
                 <span className="font-mono text-xs text-zinc-400">
-                  Handle: <strong className="text-[#fbbf24]">@{username}</strong>
+                  UID: <strong className="text-[#fbbf24]">{uid}</strong>
                 </span>
               </div>
-              <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#0b0c10] border border-white/10">
+              <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#181818] border border-white/[0.075]">
                 <span className="font-mono text-xs text-zinc-200 truncate select-all">
                   {referralUrl}
                 </span>
@@ -2040,7 +2714,7 @@ function MinersPage({ onBack }: { onBack: () => void }) {
         </div>
 
         {/* 3. DIRECT MINERS LIST */}
-        <div className="p-5 rounded-2xl bg-[#121318] border border-white/[0.08] shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
+        <div className="p-5 rounded-2xl bg-[#121212] border border-white/[0.075]">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-bold text-white m-0">Direct Miners</h2>
             <span className="text-[11px] font-mono text-zinc-400 tabular-nums">
@@ -2066,16 +2740,21 @@ function MinersPage({ onBack }: { onBack: () => void }) {
                   key={member.id || idx}
                   className="flex items-center justify-between px-4 py-3 rounded-xl transition-colors"
                   style={{
-                    background: member.isActive ? 'rgba(247, 147, 26, 0.04)' : 'rgba(255, 255, 255, 0.02)',
-                    border: member.isActive ? '1px solid rgba(247, 147, 26, 0.18)' : '1px solid rgba(255, 255, 255, 0.06)',
+                    background: member.isEligible ? 'rgba(247, 147, 26, 0.04)' : '#181818',
+                    border: member.isEligible ? '1px solid rgba(247, 147, 26, 0.2)' : '1px solid rgba(255, 255, 255, 0.065)',
                   }}
                 >
                   <div className="flex items-center gap-3">
-                    <span className="font-mono text-xs text-zinc-500 w-6 tabular-nums">0{idx + 1}</span>
                     <div>
-                      <div className="font-semibold text-white text-xs">@{member.handle}</div>
+                      <div className="font-semibold text-white text-xs font-mono">
+                        {member.handle}
+                      </div>
                       <div className="text-[10px] font-mono text-zinc-400 mt-0.5 tabular-nums">
-                        Mining: {member.miningPower.toFixed(4)} /h
+                        {member.isEligible
+                          ? `Mining: ${member.miningPower.toFixed(4)} /h · Sharing +${member.providedPower.toFixed(4)} /h`
+                          : !member.isVerified
+                            ? '0.0000 /h shared · Unverified (bot filter)'
+                            : '0.0000 /h shared · Inactive miner'}
                       </div>
                     </div>
                   </div>
@@ -2083,16 +2762,24 @@ function MinersPage({ onBack }: { onBack: () => void }) {
                   <span
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider"
                     style={{
-                      background: member.isActive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.04)',
-                      color: member.isActive ? '#34d399' : '#71717a',
-                      border: member.isActive ? '1px solid rgba(16, 185, 129, 0.28)' : '1px solid rgba(255, 255, 255, 0.08)',
+                      background: member.isEligible
+                        ? 'rgba(16, 185, 129, 0.12)'
+                        : !member.isVerified
+                          ? 'rgba(239, 68, 68, 0.1)'
+                          : 'rgba(255, 255, 255, 0.04)',
+                      color: member.isEligible ? '#34d399' : !member.isVerified ? '#f87171' : '#71717a',
+                      border: member.isEligible
+                        ? '1px solid rgba(16, 185, 129, 0.28)'
+                        : !member.isVerified
+                          ? '1px solid rgba(239, 68, 68, 0.25)'
+                          : '1px solid rgba(255, 255, 255, 0.08)',
                     }}
                   >
                     <span
                       className="w-1.5 h-1.5 rounded-full"
-                      style={{ backgroundColor: member.isActive ? '#10b981' : '#71717a' }}
+                      style={{ backgroundColor: member.isEligible ? '#10b981' : !member.isVerified ? '#ef4444' : '#71717a' }}
                     />
-                    {member.isActive ? 'Active' : 'Inactive'}
+                    {member.isEligible ? 'Active · +10%' : !member.isVerified ? 'Unverified · 0%' : 'Inactive · 0%'}
                   </span>
                 </div>
               ))
@@ -2111,14 +2798,246 @@ function MinersPage({ onBack }: { onBack: () => void }) {
   );
 }
 
+// Geometric Gold Ant Emblem matching the Genesis ANT CARD artwork
+function AntEmblemMark({ size = 20, className = '' }: { size?: number; className?: string }) {
+  const gradId = useId();
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradId} x1="12" y1="8" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#fde68a" />
+          <stop offset="48%" stopColor="#fbbf24" />
+          <stop offset="100%" stopColor="#d97706" />
+        </linearGradient>
+      </defs>
+      {/* Swept antennae */}
+      <path
+        d="M27 20C24 13 18 10 11 10C15 13 20 16 23 23L27 20Z"
+        fill={`url(#${gradId})`}
+      />
+      <path
+        d="M37 20C40 13 46 10 53 10C49 13 44 16 41 23L37 20Z"
+        fill={`url(#${gradId})`}
+      />
+      {/* Curved mandibles */}
+      <path
+        d="M22 24C14 25 11 35 16 44C16 37 19 32 24 31L22 24Z"
+        fill={`url(#${gradId})`}
+      />
+      <path
+        d="M42 24C50 25 53 35 48 44C48 37 45 32 40 31L42 24Z"
+        fill={`url(#${gradId})`}
+      />
+      {/* Faceted crest head */}
+      <path
+        d="M32 19L41 26L39 40L32 54L25 40L23 26L32 19Z"
+        fill={`url(#${gradId})`}
+      />
+      <path d="M32 19V54L25 40L23 26L32 19Z" fill="rgba(255,255,255,0.16)" />
+    </svg>
+  );
+}
+
+// Geometric Gold Spider Emblem matching the SPIDER CARD artwork
+function SpiderEmblemMark({ size = 20, className = '' }: { size?: number; className?: string }) {
+  const gradId = useId();
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradId} x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#fde68a" />
+          <stop offset="48%" stopColor="#fbbf24" />
+          <stop offset="100%" stopColor="#d97706" />
+        </linearGradient>
+      </defs>
+      {/* Cephalothorax & Abdomen */}
+      <circle cx="32" cy="23" r="4.2" fill={`url(#${gradId})`} />
+      <path d="M32 28C37 28 39 36 32 45C25 36 27 28 32 28Z" fill={`url(#${gradId})`} />
+      {/* Front mandibles */}
+      <path d="M29.5 19L27 14L30.5 17.5Z" fill={`url(#${gradId})`} />
+      <path d="M34.5 19L37 14L33.5 17.5Z" fill={`url(#${gradId})`} />
+      {/* Left 4 sharp segmented legs */}
+      <path d="M28 22L19 16L17 9L21 15L28 21Z" fill={`url(#${gradId})`} />
+      <path d="M28 24L15 21L10 29L16 23L28 26Z" fill={`url(#${gradId})`} />
+      <path d="M28 27L14 31L12 43L16 33L28 29Z" fill={`url(#${gradId})`} />
+      <path d="M29 30L19 41L21 53L22 42L30 32Z" fill={`url(#${gradId})`} />
+      {/* Right 4 sharp segmented legs */}
+      <path d="M36 22L45 16L47 9L43 15L36 21Z" fill={`url(#${gradId})`} />
+      <path d="M36 24L49 21L54 29L48 23L36 26Z" fill={`url(#${gradId})`} />
+      <path d="M36 27L50 31L52 43L48 33L36 29Z" fill={`url(#${gradId})`} />
+      <path d="M35 30L45 41L43 53L42 42L34 32Z" fill={`url(#${gradId})`} />
+    </svg>
+  );
+}
+
+// Geometric Gold Phoenix Emblem matching the PHOENIX CARD artwork
+function PhoenixEmblemMark({ size = 20, className = '' }: { size?: number; className?: string }) {
+  const gradId = useId();
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradId} x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#fde68a" />
+          <stop offset="48%" stopColor="#fbbf24" />
+          <stop offset="100%" stopColor="#d97706" />
+        </linearGradient>
+      </defs>
+      {/* Crown & Head */}
+      <path d="M32 6L34.5 11.5L32 14L29.5 11.5L32 6Z" fill={`url(#${gradId})`} />
+      <path d="M32 13C34.5 13 35.5 16 34 19L32 23L30 19C28.5 16 29.5 13 32 13Z" fill={`url(#${gradId})`} />
+      {/* Chest / Body */}
+      <path d="M32 21L36.5 29L34 40L32 45L30 40L27.5 29L32 21Z" fill={`url(#${gradId})`} />
+      {/* Left Swept Wings */}
+      <path d="M28 28C18 25 11 17 12 8C16 14 21 19 29 24L28 28Z" fill={`url(#${gradId})`} />
+      <path d="M27 30C16 29 9 23 8 15C13 20 19 24 28 27L27 30Z" fill={`url(#${gradId})`} />
+      <path d="M28 33C19 33 12 29 11 22C16 26 21 28 28 30L28 33Z" fill={`url(#${gradId})`} />
+      {/* Right Swept Wings */}
+      <path d="M36 28C46 25 53 17 52 8C48 14 43 19 35 24L36 28Z" fill={`url(#${gradId})`} />
+      <path d="M37 30C48 29 55 23 56 15C51 20 45 24 36 27L37 30Z" fill={`url(#${gradId})`} />
+      <path d="M36 33C45 33 52 29 53 22C48 26 43 28 36 30L36 33Z" fill={`url(#${gradId})`} />
+      {/* Flowing Tail Plumes */}
+      <path d="M32 43L35 58L32 53L29 58L32 43Z" fill={`url(#${gradId})`} />
+      <path d="M29 41L23 55L26 48L21 50L28 39Z" fill={`url(#${gradId})`} />
+      <path d="M35 41L41 55L38 48L43 50L36 39Z" fill={`url(#${gradId})`} />
+    </svg>
+  );
+}
+
+// Geometric Gold Siren (Mermaid) Emblem matching the SIREN CARD artwork
+function SirenEmblemMark({ size = 20, className = '' }: { size?: number; className?: string }) {
+  const gradId = useId();
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradId} x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#fde68a" />
+          <stop offset="48%" stopColor="#fbbf24" />
+          <stop offset="100%" stopColor="#d97706" />
+        </linearGradient>
+      </defs>
+      {/* Flowing crown hair */}
+      <path d="M29 10C22 12 17 19 19 27C21 22 25 18 29 16L29 10Z" fill={`url(#${gradId})`} />
+      <path d="M36 10C43 13 46 21 43 28C41 23 38 18 35 16L36 10Z" fill={`url(#${gradId})`} />
+      {/* Head & Torso */}
+      <circle cx="32" cy="14.5" r="4.2" fill={`url(#${gradId})`} />
+      <path d="M28 21C28 19.5 36 19.5 36 21L35 33H29L28 21Z" fill={`url(#${gradId})`} />
+      {/* Curved Mermaid Tail */}
+      <path
+        d="M29 33H35C36 41 42 44 45 48C40 50 35 49 32 45C29 49 23 50 18 47C23 43 28 39 29 33Z"
+        fill={`url(#${gradId})`}
+      />
+      {/* Twin Tail Flukes */}
+      <path d="M19 47C13 46 10 51 12 56C16 54 19 52 22 49L19 47Z" fill={`url(#${gradId})`} />
+      <path d="M44 48C50 47 53 52 51 57C47 55 44 52 41 49L44 48Z" fill={`url(#${gradId})`} />
+    </svg>
+  );
+}
+
+// Geometric Gold Aura (Pegasus) Emblem matching the AURA CARD artwork
+function AuraEmblemMark({ size = 20, className = '' }: { size?: number; className?: string }) {
+  const gradId = useId();
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradId} x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#fde68a" />
+          <stop offset="48%" stopColor="#fbbf24" />
+          <stop offset="100%" stopColor="#d97706" />
+        </linearGradient>
+      </defs>
+      {/* Raised Pegasus Wings */}
+      <path d="M27 28C16 24 10 16 11 8C16 14 22 19 30 24L27 28Z" fill={`url(#${gradId})`} />
+      <path d="M26 30C15 29 9 23 8 16C13 21 19 25 28 27L26 30Z" fill={`url(#${gradId})`} />
+      <path d="M36 27C46 23 52 15 52 7C47 13 42 18 34 23L36 27Z" fill={`url(#${gradId})`} />
+      {/* Rearing Neck, Head & Muzzle */}
+      <path d="M32 13L38 11L44 16L41 19L36 18L34 29L27 29L29 17L32 13Z" fill={`url(#${gradId})`} />
+      {/* Body & Rearing Forelegs / Hindlegs */}
+      <path d="M26 29H36L40 40L32 42L24 39L26 29Z" fill={`url(#${gradId})`} />
+      <path d="M37 32L46 27L48 31L39 36Z" fill={`url(#${gradId})`} />
+      <path d="M26 39L21 54L25 54L29 41Z" fill={`url(#${gradId})`} />
+      <path d="M34 40L39 54L43 54L38 40Z" fill={`url(#${gradId})`} />
+      {/* Flowing Tail */}
+      <path d="M24 37C17 39 14 45 15 51C18 47 21 43 25 41L24 37Z" fill={`url(#${gradId})`} />
+    </svg>
+  );
+}
+
+// Geometric Gold Dragon Emblem matching the DRAGON CARD artwork
+function DragonEmblemMark({ size = 20, className = '' }: { size?: number; className?: string }) {
+  const gradId = useId();
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradId} x1="8" y1="10" x2="56" y2="54" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#fde68a" />
+          <stop offset="48%" stopColor="#fbbf24" />
+          <stop offset="100%" stopColor="#d97706" />
+        </linearGradient>
+      </defs>
+      {/* Horned Dragon Head & Neck */}
+      <path d="M31 11L35 7L34 14L40 16L37 21L33 20L34 29L28 29L27 17L24 12L31 11Z" fill={`url(#${gradId})`} />
+      {/* Spread Left Bat-Wing */}
+      <path d="M28 24C19 18 11 19 6 26C10 26 12 29 11 33C15 31 18 33 18 37C22 33 25 32 28 33V24Z" fill={`url(#${gradId})`} />
+      {/* Spread Right Bat-Wing */}
+      <path d="M36 24C45 18 53 19 58 26C54 26 52 29 53 33C49 31 46 33 46 37C42 33 39 32 36 33V24Z" fill={`url(#${gradId})`} />
+      {/* Armored Chest & Tail Spike */}
+      <path d="M27 28H37L35 43L32 56L29 43L27 28Z" fill={`url(#${gradId})`} />
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // STOPWATCH-STYLE LIVE MINING POINTS COUNTER (PRECISION ODOMETER TICKER)
 // ---------------------------------------------------------------------------
 function StopwatchPointsCounter({
   currentBits,
+  isAntActive = false,
 }: {
   ratePerHour: number;
   currentBits: number;
+  isAntActive?: boolean;
 }) {
   const formatted = currentBits.toFixed(7);
   const [intPart, decPart] = formatted.split('.');
@@ -2126,7 +3045,7 @@ function StopwatchPointsCounter({
   const microDec = (decPart || '0000000').slice(4, 7);
 
   return (
-    <div className="stopwatch-counter-cockpit my-1">
+    <div className={`stopwatch-counter-cockpit my-1 ${isAntActive ? 'ant-counter' : ''}`}>
       <div className="flex items-center gap-3.5 select-none">
         <BitsMark size={44} className="flex-shrink-0" />
         <div className="flex items-baseline font-mono select-none">
@@ -2137,7 +3056,11 @@ function StopwatchPointsCounter({
           <span className="text-3xl sm:text-4xl md:text-5xl font-bold text-[#fbbf24] tracking-tight tabular-nums">
             {primaryDec}
           </span>
-          <span className="text-2xl sm:text-3xl md:text-4xl font-semibold text-[#34d399]/85 tracking-tight tabular-nums">
+          <span
+            className={`text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight tabular-nums ${
+              isAntActive ? 'text-[#fde68a]/90' : 'text-[#34d399]/85'
+            }`}
+          >
             {microDec}
           </span>
           <span className="text-xs sm:text-sm font-mono font-bold tracking-widest text-zinc-400 ml-2.5 uppercase self-center">
@@ -2152,7 +3075,101 @@ function StopwatchPointsCounter({
 // ---------------------------------------------------------------------------
 // THE STANDALONE BITS MINING PAGE
 // ---------------------------------------------------------------------------
-function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: { onOpenAssets?: () => void; onOpenMiners?: () => void; onOpenGuide?: () => void; onOpenLedger?: () => void }) {
+function computeInitialMiningSnapshot(address: string | undefined, isVerifiedNode: boolean) {
+  if (!address) {
+    return {
+      loadedAddr: '',
+      hasStartedMiningOnce: false,
+      isMiningSessionActive: false,
+      sessionElapsedSec: 0,
+      unclaimedBits: 0,
+      claimedTotalBits: 0,
+      contributedSol: 0,
+      claimHistory: [] as Array<{ id: number; amount: number; status: string }>,
+      receivedCards: [] as ReceivedPowerCard[],
+    };
+  }
+  const saved = getWalletMiningState(address);
+  let alreadyStarted = Boolean(
+    saved.hasStartedMiningOnce ||
+      saved.isMiningSessionActive ||
+      saved.sessionElapsedSec > 0 ||
+      saved.claimedTotalBits > 0 ||
+      saved.claimHistory.length > 0 ||
+      hasUnlockedGenesisAntCardBefore(address),
+  );
+  if (alreadyStarted && !hasUnlockedGenesisAntCardBefore(address)) {
+    unlockGenesisAntCardOnStartMining(address);
+  }
+  const savedCards = getWalletPowerCards(address);
+  const savedCardsBoost = getCardPowerBoostPerHour(savedCards);
+  const initHas24h = isVerifiedNode || hasActiveAntCard(savedCards);
+  const initCycleSec = initHas24h ? 24 * 3600 : 3 * 3600;
+  const initRate =
+    (isVerifiedNode ? 0.1 + calculateSolPowerBoost(saved.contributedSol) : 0.01) + savedCardsBoost;
+
+  let unclaimedBits = saved.unclaimedBits;
+  let sessionElapsedSec = saved.sessionElapsedSec;
+  let isMiningSessionActive = false;
+
+  const oneTimeCompleteKey = 'bitnoir-cycle-complete-test-v1';
+  if (!safeStorageGet(oneTimeCompleteKey)) {
+    safeStorageSet(oneTimeCompleteKey, address);
+    alreadyStarted = true;
+    sessionElapsedSec = initCycleSec;
+    unclaimedBits = Number((initRate * (initCycleSec / 3600)).toFixed(4));
+    isMiningSessionActive = false;
+    saveWalletMiningState(address, {
+      unclaimedBits,
+      claimedTotalBits: saved.claimedTotalBits,
+      contributedSol: saved.contributedSol,
+      lastTickAt: Date.now(),
+      isMiningSessionActive: false,
+      sessionElapsedSec,
+      claimHistory: saved.claimHistory,
+      hasStartedMiningOnce: true,
+    });
+  } else if (saved.isMiningSessionActive) {
+    const elapsedDelta = Math.max(0, (Date.now() - saved.lastTickAt) / 1000);
+    const nextElapsed = Math.min(initCycleSec, saved.sessionElapsedSec + elapsedDelta);
+    const activeDelta = Math.max(0, nextElapsed - saved.sessionElapsedSec);
+    unclaimedBits = saved.unclaimedBits + (initRate / 3600) * activeDelta;
+    sessionElapsedSec = nextElapsed;
+    isMiningSessionActive = nextElapsed < initCycleSec;
+  } else if (alreadyStarted && saved.sessionElapsedSec === 0 && saved.unclaimedBits === 0) {
+    unclaimedBits = 0;
+    sessionElapsedSec = 0;
+    isMiningSessionActive = true;
+  }
+
+  return {
+    loadedAddr: address,
+    hasStartedMiningOnce: alreadyStarted,
+    isMiningSessionActive,
+    sessionElapsedSec,
+    unclaimedBits,
+    claimedTotalBits: saved.claimedTotalBits,
+    contributedSol: saved.contributedSol,
+    claimHistory: saved.claimHistory,
+    receivedCards: savedCards,
+  };
+}
+
+function MiningPage({
+  isVisible = true,
+  onOpenAssets,
+  onOpenMiners,
+  onOpenGuide,
+  onOpenLedger,
+  onOpenCards,
+}: {
+  isVisible?: boolean;
+  onOpenAssets?: () => void;
+  onOpenMiners?: () => void;
+  onOpenGuide?: () => void;
+  onOpenLedger?: () => void;
+  onOpenCards?: () => void;
+}) {
   const client = useQueryClient();
   const { user, connectWallet } = useAuth();
 
@@ -2164,85 +3181,138 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
 
   const isConnected = Boolean(user?.solanaAddress);
   const isVerified = Boolean(user?.solanaAddress && user?.isVerified);
-  const hasUsername = Boolean(user?.username);
-  // Verified node gets 24h cycle, 0.1/h base rate, referral link & multipliers; Base connected wallet gets 3h cycle at 0.01/h
-  const isVerifiedNode = isConnected && isVerified && hasUsername;
-  const cycleHours = isVerifiedNode ? 24 : 3;
-  const cycleTotalSeconds = cycleHours * 3600;
+  const hasUid = Boolean(user?.uid);
+  // Verified node gets 24h cycle, 0.1/h base rate, UID referral link & multipliers; Base connected wallet gets 3h cycle at 0.01/h (or 24h while Genesis ANT CARD is active)
+  const isVerifiedNode = isConnected && isVerified && hasUid;
 
-  // 1. Base Rate: 0.01/h for connected Base wallets, 0.1000/h once Verified + @username
+  // Synchronous initial snapshot eliminates any frame-0 flash of Start Mining / 0.0000000
+  const [initialSnap] = useState(() =>
+    computeInitialMiningSnapshot(user?.solanaAddress, isVerifiedNode),
+  );
+
+  // 2. Direct Referral Power (starts at zero — populated only from verified + active referrals)
   const baseRatePerHour = isVerifiedNode ? 0.1000 : isConnected ? 0.0100 : 0.0000;
-
-  // 2. Direct Referral Power (starts at zero — populated only from real active referrals)
-  const [directTeam, setDirectTeam] = useState<Array<{
-    id: string;
-    handle: string;
-    status: string;
-    isActive: boolean;
-    miningPower: number;
-    providedPower: number;
-  }>>([]);
+  const [directTeam, setDirectTeam] = useState<DirectMinerMember[]>([]);
 
   useEffect(() => {
-    if (!user?.solanaAddress) {
-      setDirectTeam([]);
-      return;
-    }
-    apiFetchJson<any[]>('/api/accounts/me/team')
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setDirectTeam(
-            data.map((m: any) => ({
-              id: m.id || m.handle,
-              handle: m.handle,
-              status: m.isActive || m.status === 'verified' ? 'Active' : 'Inactive',
-              isActive: Boolean(m.isActive || m.status === 'verified'),
-              miningPower: Number(m.miningPower ?? (m.isActive || m.status === 'verified' ? 0.1 : 0)),
-              providedPower: Number(m.providedPower ?? (m.isActive || m.status === 'verified' ? 0.01 : 0)),
-            }))
-          );
-        } else {
-          setDirectTeam([]);
-        }
-      })
-      .catch((err) => {
-        console.warn('Direct team fetch warning:', err);
+    const fetchDirectTeam = () => {
+      if (!user?.solanaAddress) {
         setDirectTeam([]);
-      });
-  }, [user?.solanaAddress]);
+        return;
+      }
+      apiFetchJson<any[]>('/api/accounts/me/team')
+        .then((data) => {
+          if (Array.isArray(data)) {
+            const normalized = data.map(normalizeDirectMiner);
+            setDirectTeam(normalized);
+            const verifiedCount = normalized.filter((m) => m.isVerified).length;
+            if (verifiedCount >= 3 && user?.solanaAddress) {
+              unlockPhoenixCardOnThreeVerifiedMiners(user.solanaAddress, verifiedCount);
+            }
+            const eligibleMiners = normalized.filter((m) => m.isEligible);
+            const minersPower = isVerifiedNode
+              ? eligibleMiners.reduce((sum, m) => sum + m.providedPower, 0)
+              : 0;
+            if (isVerifiedNode && minersPower >= 0.5 && user?.solanaAddress) {
+              unlockSirenCardOnMinersPower(user.solanaAddress, minersPower);
+            }
+            if (isVerifiedNode && eligibleMiners.length >= 10 && user?.solanaAddress) {
+              unlockAuraCardOnTenVerifiedActiveMiners(user.solanaAddress, eligibleMiners.length);
+            }
+          } else {
+            setDirectTeam([]);
+          }
+        })
+        .catch((err) => {
+          console.warn('Direct team fetch warning:', err);
+          setDirectTeam([]);
+        });
+    };
+
+    fetchDirectTeam();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('bitnoir-session-synced', fetchDirectTeam);
+      return () => window.removeEventListener('bitnoir-session-synced', fetchDirectTeam);
+    }
+    return undefined;
+  }, [user?.solanaAddress, isVerifiedNode]);
 
   const referralBoostPerHour = isVerifiedNode
-    ? directTeam.filter((m) => m.isActive).reduce((sum, m) => sum + m.providedPower, 0)
+    ? directTeam.filter((m) => m.isEligible).reduce((sum, m) => sum + m.providedPower, 0)
     : 0;
 
-  // 3. SOL Power Multiplier: Max 10 SOL per account (+5 Bits/hr per SOL)
-  const [contributedSol, setContributedSol] = useState<number>(0);
-  const solPowerBoostPerHour = isVerifiedNode ? contributedSol * 5.0 : 0;
+  // 3. SOL Power Multiplier: Max 3 SOL per account (up to +10 Bits/hr max)
+  const [contributedSol, setContributedSol] = useState<number>(initialSnap.contributedSol);
+  const solPowerBoostPerHour = isVerifiedNode ? calculateSolPowerBoost(contributedSol) : 0;
+  const hasAcquiredSolPower = isVerifiedNode && contributedSol > 0;
+
+  // 4. Power Cards Reward State (per-wallet; ANT/SPIDER/PHOENIX/SIREN/AURA/DRAGON)
+  const [receivedCards, setReceivedCards] = useState<ReceivedPowerCard[]>(initialSnap.receivedCards);
+  useEffect(() => {
+    const syncCards = () => {
+      if (!user?.solanaAddress) {
+        setReceivedCards([]);
+        return;
+      }
+      if (isVerifiedNode && !hasUnlockedSpiderCardBefore(user.solanaAddress)) {
+        unlockSpiderCardOnVerifiedUid(user.solanaAddress);
+      }
+      if (isVerifiedNode && !hasUnlockedDragonCardBefore(user.solanaAddress)) {
+        const savedSol = getWalletMiningState(user.solanaAddress).contributedSol;
+        const solBoost = calculateSolPowerBoost(savedSol);
+        if (solBoost >= 2.0) {
+          unlockDragonCardOnSolPower(user.solanaAddress, solBoost);
+        }
+      }
+      setReceivedCards(getWalletPowerCards(user.solanaAddress));
+    };
+    syncCards();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('bitnoir-cards-updated', syncCards);
+      return () => window.removeEventListener('bitnoir-cards-updated', syncCards);
+    }
+    return undefined;
+  }, [user?.solanaAddress, isVerifiedNode]);
+
+  const cardPowerBoostPerHour = getCardPowerBoostPerHour(receivedCards);
+  const activeCardDef = getActivePowerCardDef(receivedCards);
+  const hasActiveCard = Boolean(activeCardDef);
+  const isSpiderCardActive = activeCardDef?.id === SPIDER_CARD_ID;
+  const isPhoenixCardActive = activeCardDef?.id === PHOENIX_CARD_ID;
+  const isSirenCardActive = activeCardDef?.id === SIREN_CARD_ID;
+  const isAuraCardActive = activeCardDef?.id === AURA_CARD_ID;
+  const isDragonCardActive = activeCardDef?.id === DRAGON_CARD_ID;
+  const hasAntCard = hasActiveAntCard(receivedCards);
+  const hasActivatedCards = hasActiveCard;
+  const has24hCycle = isVerifiedNode || hasAntCard;
+  const cycleHours = has24hCycle ? 24 : 3;
+  const cycleTotalSeconds = cycleHours * 3600;
 
   // Configured hash rate when running
   const configuredRatePerHour = isConnected
-    ? baseRatePerHour + referralBoostPerHour + solPowerBoostPerHour
+    ? baseRatePerHour + referralBoostPerHour + solPowerBoostPerHour + cardPowerBoostPerHour
     : 0;
 
   // 4. Mining Session State & Live Ticking Counter
-  const [isMiningSessionActive, setIsMiningSessionActive] = useState<boolean>(false);
-  const [sessionElapsedSec, setSessionElapsedSec] = useState<number>(0);
-  const [unclaimedBits, setUnclaimedBits] = useState<number>(0);
-  const [claimedTotalBits, setClaimedTotalBits] = useState<number>(0);
-  const [claimHistoryList, setClaimHistoryList] = useState<Array<{ id: number; amount: number; status: string }>>([]);
+  const [hasStartedMiningOnce, setHasStartedMiningOnce] = useState<boolean>(initialSnap.hasStartedMiningOnce);
+  const [isMiningSessionActive, setIsMiningSessionActive] = useState<boolean>(initialSnap.isMiningSessionActive);
+  const [sessionElapsedSec, setSessionElapsedSec] = useState<number>(initialSnap.sessionElapsedSec);
+  const [unclaimedBits, setUnclaimedBits] = useState<number>(initialSnap.unclaimedBits);
+  const [claimedTotalBits, setClaimedTotalBits] = useState<number>(initialSnap.claimedTotalBits);
+  const [claimHistoryList, setClaimHistoryList] = useState<Array<{ id: number; amount: number; status: string }>>(initialSnap.claimHistory);
 
   const isLiveMining = isConnected && isMiningSessionActive && sessionElapsedSec < cycleTotalSeconds;
   const totalMiningRatePerHour = isLiveMining ? configuredRatePerHour : 0;
 
-  const baseBitsRef = useRef<number>(0);
-  const baseElapsedRef = useRef<number>(0);
+  const baseBitsRef = useRef<number>(initialSnap.unclaimedBits);
+  const baseElapsedRef = useRef<number>(initialSnap.sessionElapsedSec);
   const baseTimeRef = useRef<number>(Date.now());
   const rateRef = useRef<number>(configuredRatePerHour);
   rateRef.current = configuredRatePerHour;
   const cycleSecRef = useRef<number>(cycleTotalSeconds);
   cycleSecRef.current = cycleTotalSeconds;
-  const loadedAddrRef = useRef<string>('');
-  const prevVerifiedRef = useRef<boolean>(false);
+  const loadedAddrRef = useRef<string>(initialSnap.loadedAddr);
+  const prevVerifiedRef = useRef<boolean>(isVerifiedNode);
 
   // Load or reset per-wallet mining state on wallet connect / switch / disconnect
   useEffect(() => {
@@ -2252,6 +3322,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
       baseBitsRef.current = 0;
       baseElapsedRef.current = 0;
       baseTimeRef.current = Date.now();
+      setHasStartedMiningOnce(false);
       setIsMiningSessionActive(false);
       setSessionElapsedSec(0);
       setUnclaimedBits(0);
@@ -2265,46 +3336,30 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
     loadedAddrRef.current = user.solanaAddress;
     prevVerifiedRef.current = isVerifiedNode;
 
-    const saved = getWalletMiningState(user.solanaAddress);
-    const initCycleSec = isVerifiedNode ? 24 * 3600 : 3 * 3600;
-    const initRate = isVerifiedNode
-      ? 0.1 + directTeam.filter((m) => m.isActive).reduce((sum, m) => sum + m.providedPower, 0) + saved.contributedSol * 5.0
-      : 0.01;
+    const snap = computeInitialMiningSnapshot(user.solanaAddress, isVerifiedNode);
+    baseBitsRef.current = snap.unclaimedBits;
+    baseElapsedRef.current = snap.sessionElapsedSec;
+    baseTimeRef.current = Date.now();
+    setHasStartedMiningOnce(snap.hasStartedMiningOnce);
+    setUnclaimedBits(snap.unclaimedBits);
+    setSessionElapsedSec(snap.sessionElapsedSec);
+    setIsMiningSessionActive(snap.isMiningSessionActive);
+    setContributedSol(snap.contributedSol);
+    setClaimedTotalBits(snap.claimedTotalBits);
+    setClaimHistoryList(snap.claimHistory);
 
-    if (saved.isMiningSessionActive) {
-      const elapsedDelta = Math.max(0, (Date.now() - saved.lastTickAt) / 1000);
-      const nextElapsed = Math.min(initCycleSec, saved.sessionElapsedSec + elapsedDelta);
-      const activeDelta = Math.max(0, nextElapsed - saved.sessionElapsedSec);
-      const resumedBits = saved.unclaimedBits + (initRate / 3600) * activeDelta;
-      const stillRunning = nextElapsed < initCycleSec;
-
-      baseBitsRef.current = resumedBits;
-      baseElapsedRef.current = nextElapsed;
-      baseTimeRef.current = Date.now();
-      setUnclaimedBits(resumedBits);
-      setSessionElapsedSec(nextElapsed);
-      setIsMiningSessionActive(stillRunning);
-      if (!stillRunning) {
-        saveWalletMiningState(user.solanaAddress, {
-          ...saved,
-          unclaimedBits: resumedBits,
-          sessionElapsedSec: nextElapsed,
-          isMiningSessionActive: false,
-          lastTickAt: Date.now(),
-        });
-      }
-    } else {
-      baseBitsRef.current = saved.unclaimedBits;
-      baseElapsedRef.current = saved.sessionElapsedSec;
-      baseTimeRef.current = Date.now();
-      setUnclaimedBits(saved.unclaimedBits);
-      setSessionElapsedSec(saved.sessionElapsedSec);
-      setIsMiningSessionActive(false);
+    if (snap.hasStartedMiningOnce) {
+      saveWalletMiningState(user.solanaAddress, {
+        unclaimedBits: snap.unclaimedBits,
+        claimedTotalBits: snap.claimedTotalBits,
+        contributedSol: snap.contributedSol,
+        lastTickAt: Date.now(),
+        isMiningSessionActive: snap.isMiningSessionActive,
+        sessionElapsedSec: snap.sessionElapsedSec,
+        claimHistory: snap.claimHistory,
+        hasStartedMiningOnce: true,
+      });
     }
-
-    setContributedSol(saved.contributedSol);
-    setClaimedTotalBits(saved.claimedTotalBits);
-    setClaimHistoryList(saved.claimHistory);
   }, [user?.solanaAddress]);
 
   // Immediately upgrade & start 24h 0.1/h mining as soon as wallet completes 0.02 SOL verification + @username
@@ -2318,6 +3373,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
       baseBitsRef.current = lockedBits;
       baseElapsedRef.current = lockedElapsed;
       baseTimeRef.current = Date.now();
+      setHasStartedMiningOnce(true);
       setUnclaimedBits(lockedBits);
       setSessionElapsedSec(lockedElapsed);
       setIsMiningSessionActive(true);
@@ -2329,17 +3385,53 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
         isMiningSessionActive: true,
         sessionElapsedSec: lockedElapsed,
         claimHistory: claimHistoryList,
+        hasStartedMiningOnce: true,
       });
     } else {
       prevVerifiedRef.current = isVerifiedNode;
     }
   }, [isVerifiedNode, user?.solanaAddress]);
 
-  // Real-time ticker (automatically stops when 3h Base or 24h Verified cycle completes)
+  // Watch for active 24h Power Card (ANT or SPIDER) automatic expiration
   useEffect(() => {
-    if (!isConnected || !isMiningSessionActive || !user?.solanaAddress) return;
+    if (!user?.solanaAddress || !activeCardDef) return undefined;
+    const interval = window.setInterval(() => {
+      if (!user.solanaAddress) return;
+      if (getPowerCardRemainingMs(receivedCards, activeCardDef.id) <= 0) {
+        if (isMiningSessionActive) {
+          const dt = Math.max(0, (Date.now() - baseTimeRef.current) / 1000);
+          const lockedBits = baseBitsRef.current + (rateRef.current / 3600) * dt;
+          const nextMaxSec = isVerifiedNode ? 24 * 3600 : 3 * 3600;
+          const lockedElapsed = Math.min(nextMaxSec, baseElapsedRef.current + dt);
+          const stillActive = lockedElapsed < nextMaxSec;
+          baseBitsRef.current = lockedBits;
+          baseElapsedRef.current = lockedElapsed;
+          baseTimeRef.current = Date.now();
+          setUnclaimedBits(lockedBits);
+          setSessionElapsedSec(lockedElapsed);
+          setIsMiningSessionActive(stillActive);
+          saveWalletMiningState(user.solanaAddress, {
+            unclaimedBits: lockedBits,
+            claimedTotalBits,
+            contributedSol,
+            lastTickAt: Date.now(),
+            isMiningSessionActive: stillActive,
+            sessionElapsedSec: lockedElapsed,
+            claimHistory: claimHistoryList,
+          });
+        }
+        setReceivedCards(getWalletPowerCards(user.solanaAddress));
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [user?.solanaAddress, receivedCards, activeCardDef, isMiningSessionActive, isVerifiedNode, claimedTotalBits, contributedSol, claimHistoryList]);
+
+  // Real-time ticker (pauses UI frames while on subpages & caps React paints at ~20fps for lightweight performance)
+  useEffect(() => {
+    if (!isVisible || !isConnected || !isMiningSessionActive || !user?.solanaAddress) return;
     let animId: number;
-    const tick = () => {
+    let lastPaintAt = 0;
+    const tick = (rafNow = performance.now()) => {
       const dt = Math.max(0, (Date.now() - baseTimeRef.current) / 1000);
       const totalElapsed = baseElapsedRef.current + dt;
       const maxSec = cycleSecRef.current;
@@ -2361,16 +3453,20 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
           isMiningSessionActive: false,
           sessionElapsedSec: maxSec,
           claimHistory: claimHistoryList,
+          hasStartedMiningOnce: true,
         });
         return;
       }
 
-      const currentBits = baseBitsRef.current + (rateRef.current / 3600) * dt;
-      setSessionElapsedSec(totalElapsed);
-      setUnclaimedBits(currentBits);
+      if (lastPaintAt === 0 || rafNow - lastPaintAt >= 48) {
+        lastPaintAt = rafNow;
+        const currentBits = baseBitsRef.current + (rateRef.current / 3600) * dt;
+        setSessionElapsedSec(totalElapsed);
+        setUnclaimedBits(currentBits);
+      }
       animId = requestAnimationFrame(tick);
     };
-    animId = requestAnimationFrame(tick);
+    tick(performance.now());
 
     const persistInterval = window.setInterval(() => {
       if (!user?.solanaAddress) return;
@@ -2387,14 +3483,15 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
         isMiningSessionActive: cappedElapsed < maxSec,
         sessionElapsedSec: cappedElapsed,
         claimHistory: claimHistoryList,
+        hasStartedMiningOnce: true,
       });
-    }, 2000);
+    }, 3000);
 
     return () => {
       cancelAnimationFrame(animId);
       clearInterval(persistInterval);
     };
-  }, [isConnected, isMiningSessionActive, configuredRatePerHour, cycleTotalSeconds, user?.solanaAddress, claimedTotalBits, contributedSol, claimHistoryList]);
+  }, [isVisible, isConnected, isMiningSessionActive, configuredRatePerHour, cycleTotalSeconds, user?.solanaAddress, claimedTotalBits, contributedSol, claimHistoryList]);
 
   // Storage tank progress & countdown (3-hour cycle for Base, 24-hour cycle for Verified)
   const minClaimThresholdPercent = 20;
@@ -2426,6 +3523,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
         baseBitsRef.current = 0;
         baseElapsedRef.current = 0;
         baseTimeRef.current = Date.now();
+        setHasStartedMiningOnce(true);
         setUnclaimedBits(0);
         setSessionElapsedSec(0);
         setIsMiningSessionActive(true);
@@ -2437,20 +3535,25 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
           isMiningSessionActive: true,
           sessionElapsedSec: 0,
           claimHistory: [],
+          hasStartedMiningOnce: true,
         });
+        const connectedCards = unlockGenesisAntCardOnStartMining(addr);
+        setReceivedCards(connectedCards);
+        const connectedHas24h = hasActiveAntCard(connectedCards);
+        const startBoost = getCardPowerBoostPerHour(connectedCards);
+        const startRate = (0.01 + startBoost).toFixed(4);
         toast({
-          title: '3h Base Mining Started',
-          description: 'Mining at 0.0100 Bits/hr. Stops at 3h cap for claim.',
+          description: connectedHas24h
+            ? `Mining started at ${startRate} Bits/hr for 24 hours.`
+            : 'Mining started at 0.0100 Bits/hr for 3 hours.',
           variant: 'gold',
-          icon: <Hammer size={17} />,
         });
       } catch (err: any) {
         if (err?.message === 'PHANTOM_NOT_INSTALLED') {
           setConnectModalOpen(true);
         } else {
           toast({
-            title: 'Could Not Start Mining',
-            description: readableError(err, 'Unable to start mining session.'),
+            description: readableError(err, 'Unable to start mining. Please try again.'),
             variant: 'destructive',
           });
         }
@@ -2471,6 +3574,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
       baseBitsRef.current = startBits;
       baseElapsedRef.current = startElapsed;
       baseTimeRef.current = Date.now();
+      setHasStartedMiningOnce(true);
       setUnclaimedBits(startBits);
       setSessionElapsedSec(startElapsed);
       setIsMiningSessionActive(true);
@@ -2483,20 +3587,21 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
         isMiningSessionActive: true,
         sessionElapsedSec: startElapsed,
         claimHistory: claimHistoryList,
+        hasStartedMiningOnce: true,
       });
 
+      const nextCards = unlockGenesisAntCardOnStartMining(user.solanaAddress);
+      setReceivedCards(nextCards);
+
       toast({
-        title: isVerifiedNode ? '24h Verified Mining Started' : '3h Base Mining Started',
-        description: isVerifiedNode
-          ? `Mining live at ${configuredRatePerHour.toFixed(4)} Bits/hr for 24 hours.`
-          : 'Mining live at 0.0100 Bits/hr for 3 hours (stops at 3h cap for claim).',
+        description: has24hCycle
+          ? `Mining started at ${configuredRatePerHour.toFixed(4)} Bits/hr for 24 hours.`
+          : `Mining started at ${configuredRatePerHour.toFixed(4)} Bits/hr for 3 hours.`,
         variant: 'gold',
-        icon: <Hammer size={17} />,
       });
     } catch (err) {
       toast({
-        title: 'Could Not Start Mining',
-        description: readableError(err, 'Unable to start mining session.'),
+        description: readableError(err, 'Unable to start mining. Please try again.'),
         variant: 'destructive',
       });
     }
@@ -2510,8 +3615,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
     }
     if (!is20PercentReached || isClaiming || !Number.isFinite(unclaimedBits) || unclaimedBits <= 0) {
       toast({
-        title: 'Minimum Threshold',
-        description: 'Reach 20% storage tank capacity to claim mined Bits.',
+        description: 'Reach 20% cycle progress before claiming mined Bits.',
         variant: 'warning',
       });
       return;
@@ -2519,7 +3623,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
     setIsClaiming(true);
     const claimedAmount = unclaimedBits;
     try {
-      const data = await apiFetchJson<{ message?: string }>('/api/accounts/me/claim-mined-bits', {
+      await apiFetchJson('/api/accounts/me/claim-mined-bits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: claimedAmount }),
@@ -2529,9 +3633,10 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
       baseBitsRef.current = 0;
       baseElapsedRef.current = 0;
       baseTimeRef.current = Date.now();
+      setHasStartedMiningOnce(true);
       setUnclaimedBits(0);
       setSessionElapsedSec(0);
-      setIsMiningSessionActive(false);
+      setIsMiningSessionActive(true);
       setClaimedTotalBits(nextClaimed);
       setClaimHistoryList(nextHistory);
       if (user?.solanaAddress) {
@@ -2540,23 +3645,21 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
           claimedTotalBits: nextClaimed,
           contributedSol,
           lastTickAt: Date.now(),
-          isMiningSessionActive: false,
+          isMiningSessionActive: true,
           sessionElapsedSec: 0,
           claimHistory: nextHistory,
+          hasStartedMiningOnce: true,
         });
       }
       toast({
-        title: 'Mined Bits Claimed',
-        description: data.message || `Claimed +${claimedAmount.toFixed(4)} Bits into your balance.`,
+        description: `Claimed ${claimedAmount.toFixed(4)} Bits to your balance.`,
         variant: 'success',
-        icon: <BitsMark size={22} />,
       });
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
       void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
     } catch (err) {
       toast({
-        title: 'Claim Failed',
-        description: readableError(err, 'Could not claim mined Bits.'),
+        description: readableError(err, 'Unable to claim mined Bits.'),
         variant: 'destructive',
       });
     } finally {
@@ -2564,7 +3667,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
     }
   };
 
-  // Contribute SOL Handler (Max 10 SOL per account)
+  // Contribute SOL Handler (Max 3 SOL / +10 Bits/hr per account)
   const handleCommitSolPower = async (solAmount: number) => {
     if (!isVerifiedNode || !user?.solanaAddress) {
       setSolPowerModalOpen(false);
@@ -2574,6 +3677,10 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
     if (!Number.isFinite(solAmount) || solAmount <= 0) {
       throw new Error('Enter a valid SOL amount.');
     }
+    if (contributedSol >= SOL_POWER_MAX_SOL) {
+      setSolPowerModalOpen(false);
+      return;
+    }
     setIsContributing(true);
     try {
       const tx = await sendSolanaTransactionOnchain({
@@ -2582,13 +3689,13 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
         amountSol: solAmount,
         memo: `Bitnoir SOL Power Boost: ${solAmount} SOL`,
       });
-      const data = await apiFetchJson<{ message?: string }>('/api/accounts/me/contribute-sol', {
+      await apiFetchJson('/api/accounts/me/contribute-sol', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ solAmount, txSignature: tx.signature }),
       });
-      const boost = solAmount * 5.0;
-      const nextSol = Number((contributedSol + solAmount).toFixed(2));
+      const nextSol = Math.min(SOL_POWER_MAX_SOL, Number((contributedSol + solAmount).toFixed(2)));
+      const boost = Number((calculateSolPowerBoost(nextSol) - calculateSolPowerBoost(contributedSol)).toFixed(4));
 
       // Lock in accrued bits and elapsed time before changing rate
       const currentDt = isMiningSessionActive ? Math.max(0, (Date.now() - baseTimeRef.current) / 1000) : 0;
@@ -2610,19 +3717,20 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
         sessionElapsedSec: currentElapsed,
         claimHistory: claimHistoryList,
       });
+      const totalSolBoost = calculateSolPowerBoost(nextSol);
+      if (totalSolBoost >= 2.0) {
+        unlockDragonCardOnSolPower(user.solanaAddress, totalSolBoost);
+      }
       setSolPowerModalOpen(false);
       toast({
-        title: 'SOL Power Acquired',
-        description: data.message || `Contributed ${solAmount} SOL for +${boost.toFixed(4)} Bits/hr SOL Power.`,
+        description: `Added +${boost.toFixed(4)} Bits/hr SOL Power.`,
         variant: 'gold',
-        icon: <Zap size={17} />,
       });
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
       void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
     } catch (err) {
       toast({
-        title: 'Contribution Failed',
-        description: readableError(err, 'Could not contribute SOL for SOL Power.'),
+        description: readableError(err, 'Unable to acquire SOL Power.'),
         variant: 'destructive',
       });
       throw err;
@@ -2632,9 +3740,9 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans">
+    <div className={`min-h-screen text-zinc-100 flex flex-col font-sans transition-colors duration-500 ${hasActiveCard ? 'ant-theme-page' : 'bg-[#070707]'}`}>
       {/* TOP CLEAN APP HEADER */}
-      <header className="border-b border-white/[0.08] bg-[#09090b]/85 backdrop-blur-xl sticky top-0 z-40">
+      <header className="border-b border-white/[0.07] bg-[#070707]/90 backdrop-blur-xl sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <Brand size="md" />
           <div className="flex items-center gap-3">
@@ -2648,28 +3756,93 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
 
       {/* MAIN BITS MINING STAGE */}
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
-        {/* 1. TOP HEADER WITH OFFICIAL BITS LOGO & CLEAN ACTION BUTTONS */}
-        <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Bits Mining</h1>
-            {isLiveMining ? (
-              <span className="w-2 h-2 rounded-full bg-[#10b981]" title="Mining Live" />
-            ) : isConnected && unclaimedBits > 0 ? (
-              <span className="px-2.5 py-0.5 rounded-full bg-[#f7931a]/15 border border-[#f7931a]/35 text-[#fbbf24] text-[10px] font-mono font-bold uppercase tracking-wider">
-                {isVerifiedNode ? '24h Cap · Claim' : '3h Stopped · Claim'}
-              </span>
-            ) : null}
+        {/* 1. TOP HEADER WITH OFFICIAL BITS LOGO, BTC POWER CARDS ICON & CLEAN ACTION BUTTONS */}
+        <div className="flex flex-col gap-2.5 mb-6">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Bits Mining</h1>
+              {hasActiveCard && activeCardDef && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold tracking-[0.16em] uppercase text-[#fbbf24]">
+                  {isDragonCardActive ? (
+                    <DragonEmblemMark size={15} />
+                  ) : isAuraCardActive ? (
+                    <AuraEmblemMark size={15} />
+                  ) : isSirenCardActive ? (
+                    <SirenEmblemMark size={15} />
+                  ) : isPhoenixCardActive ? (
+                    <PhoenixEmblemMark size={15} />
+                  ) : isSpiderCardActive ? (
+                    <SpiderEmblemMark size={15} />
+                  ) : (
+                    <AntEmblemMark size={15} />
+                  )}
+                  <span>
+                    {isDragonCardActive
+                      ? 'DRAGON'
+                      : isAuraCardActive
+                        ? 'AURA'
+                        : isSirenCardActive
+                          ? 'SIREN'
+                          : isPhoenixCardActive
+                            ? 'PHOENIX'
+                            : isSpiderCardActive
+                              ? 'SPIDER'
+                              : 'ANT'}
+                  </span>
+                </span>
+              )}
+              {isLiveMining ? (
+                <span className={`w-2 h-2 rounded-full ${hasActiveCard ? 'bg-[#fbbf24]' : 'bg-[#10b981]'}`} title="Mining Live" />
+              ) : isConnected && unclaimedBits > 0 ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-[#f7931a]/15 border border-[#f7931a]/35 text-[#fbbf24] text-[10px] font-mono font-bold uppercase tracking-wider">
+                  {has24hCycle ? '24h Cap · Claim' : '3h Stopped · Claim'}
+                </span>
+              ) : null}
+            </div>
+
+            {/* HARDCODED BTC ICON ON RIGHT SIDE ABOVE SOL POWER BUTTON (NO BOX, NO COUNT) */}
+            <button
+              type="button"
+              onClick={() => {
+                if (user?.solanaAddress && isMiningSessionActive) {
+                  const dt = Math.max(0, (Date.now() - baseTimeRef.current) / 1000);
+                  const maxSec = cycleSecRef.current;
+                  const cappedElapsed = Math.min(maxSec, baseElapsedRef.current + dt);
+                  const activeDt = Math.max(0, cappedElapsed - baseElapsedRef.current);
+                  const currentBits = baseBitsRef.current + (rateRef.current / 3600) * activeDt;
+                  saveWalletMiningState(user.solanaAddress, {
+                    unclaimedBits: currentBits,
+                    claimedTotalBits,
+                    contributedSol,
+                    lastTickAt: Date.now(),
+                    isMiningSessionActive: cappedElapsed < maxSec,
+                    sessionElapsedSec: cappedElapsed,
+                    claimHistory: claimHistoryList,
+                  });
+                }
+                onOpenCards?.();
+              }}
+              title={
+                hasActivatedCards
+                  ? `Power Cards Activated · +${cardPowerBoostPerHour.toFixed(4)} /h`
+                  : 'Power Cards · Open Reward Cards'
+              }
+              aria-label="Open Power Cards"
+              className="inline-flex items-center justify-center p-1 bg-transparent border-0 rounded-full cursor-pointer flex-shrink-0 transition-transform duration-200 hover:scale-105 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a]/60"
+            >
+              <BitcoinMark size={32} active={hasActivatedCards} />
+            </button>
           </div>
 
           {/* ACTION BUTTONS: MINERS, GUIDE, ASSETS & SOL POWER */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center justify-end gap-2 flex-wrap">
             <button
               type="button"
               className="clean-action-btn-soft"
               onClick={onOpenMiners}
               title="Miners (Active miners provide 10% mining power)"
             >
-              <Hammer size={14} className="text-[#fbbf24]" />
+              <MiningPickaxeIcon size={14} className="text-[#fbbf24]" />
               <span>Miners</span>
             </button>
             <button
@@ -2682,16 +3855,20 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
             </button>
             <button
               type="button"
-              className="clean-action-btn-soft !bg-[#f7931a]/10 !border-[#f7931a]/35 !text-[#fbbf24] hover:!bg-[#f7931a]/20 hover:!border-[#f7931a]/70"
+              className="clean-action-btn-soft !border-[#f59e0b]/80 !text-[#f59e0b] hover:!bg-[#f59e0b]/10 hover:!border-[#fbbf24] hover:!text-[#fbbf24]"
               onClick={onOpenAssets}
-              title="Assets · Onchain Send, Receive & Withdraw"
+              title="Assets · Deposit, Withdraw & Transfer"
             >
-              <Wallet size={14} className="text-[#f7931a]" />
+              <Wallet size={14} className="text-[#f59e0b]" />
               <span>Assets</span>
             </button>
             <button
               type="button"
-              className="clean-stake-confirm-btn !w-auto !min-h-[38px] !px-4 !py-1.5 !text-xs !font-bold"
+              className={
+                hasAcquiredSolPower
+                  ? 'clean-action-btn-soft !border-[#f59e0b]/80 !text-[#f59e0b] hover:!bg-[#f59e0b]/10 hover:!border-[#fbbf24] hover:!text-[#fbbf24]'
+                  : 'clean-action-btn-soft hover:!border-white/25'
+              }
               onClick={() => {
                 if (!isVerifiedNode) {
                   setVerifyModalOpen(true);
@@ -2700,56 +3877,75 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
                 }
               }}
             >
-              <Zap size={14} />
+              <Zap size={14} className={hasAcquiredSolPower ? 'text-[#f7931a]' : 'text-zinc-300'} />
               <span>SOL Power</span>
             </button>
           </div>
         </div>
 
         {/* 2. MINING COCKPIT */}
-        <div className="pob-cockpit mb-6">
+        <div className={`pob-cockpit mb-6 ${hasActiveCard ? 'ant-cockpit' : ''}`}>
           <div className="pob-cockpit-hero">
-            <div className="pob-live-info">
+            {hasActiveCard && (
+              <div className="pointer-events-none select-none absolute right-10 top-1/2 -translate-y-1/2 opacity-[0.045]">
+                {isDragonCardActive ? (
+                  <DragonEmblemMark size={168} />
+                ) : isAuraCardActive ? (
+                  <AuraEmblemMark size={168} />
+                ) : isSirenCardActive ? (
+                  <SirenEmblemMark size={168} />
+                ) : isPhoenixCardActive ? (
+                  <PhoenixEmblemMark size={168} />
+                ) : isSpiderCardActive ? (
+                  <SpiderEmblemMark size={168} />
+                ) : (
+                  <AntEmblemMark size={168} />
+                )}
+              </div>
+            )}
+            <div className="pob-live-info relative z-10">
               {/* STOPWATCH PRECISION POINTS COUNTER */}
               <StopwatchPointsCounter
                 ratePerHour={totalMiningRatePerHour}
                 currentBits={unclaimedBits}
+                isAntActive={hasActiveCard}
               />
 
-              {/* Storage Tank Progress Bar */}
-              <div className="relative w-full max-w-md mt-2">
-                <div className="w-full h-2.5 bg-white/[0.08] rounded-full overflow-hidden border border-white/[0.05]">
+              {/* Mining Progress Bar */}
+              <div className="w-full max-w-md mt-2">
+                <div className="flex items-center justify-between gap-2 mb-1.5 text-[11px] font-mono select-none">
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold">Progress</span>
+                    <span className={`font-bold tabular-nums ${hasActiveCard ? 'text-[#fbbf24]' : 'text-[#34d399]'}`}>
+                      {tankFillPercent.toFixed(1)}%
+                    </span>
+                  </span>
+                  <span className="text-white font-bold tabular-nums">{countdownTimer}</span>
+                </div>
+                <div className="relative w-full">
+                  <div className={`w-full h-2.5 rounded-full overflow-hidden border ${hasActiveCard ? 'bg-[#f7931a]/10 border-[#f7931a]/20' : 'bg-white/[0.08] border-white/[0.05]'}`}>
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ease-out ${
+                        hasActiveCard
+                          ? 'bg-gradient-to-r from-[#d97706] via-[#f7931a] to-[#fbbf24]'
+                          : is20PercentReached
+                            ? 'bg-gradient-to-r from-[#10b981] via-[#fbbf24] to-[#f7931a]'
+                            : 'bg-gradient-to-r from-zinc-600 to-zinc-400'
+                      }`}
+                      style={{ width: `${tankFillPercent}%` }}
+                    />
+                  </div>
                   <div
-                    className={`h-full rounded-full transition-all duration-300 ease-out ${
-                      is20PercentReached
-                        ? 'bg-gradient-to-r from-[#10b981] via-[#fbbf24] to-[#f7931a]'
-                        : 'bg-gradient-to-r from-zinc-600 to-zinc-400'
-                    }`}
-                    style={{ width: `${tankFillPercent}%` }}
+                    className="absolute top-0 bottom-0 w-0.5 bg-white/35 pointer-events-none"
+                    style={{ left: '20%' }}
+                    title="20% Minimum Claim Unlock Notch"
                   />
                 </div>
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-white/35 pointer-events-none"
-                  style={{ left: '20%' }}
-                  title="20% Minimum Claim Unlock Notch"
-                />
               </div>
             </div>
 
             {/* TOP BUTTONS: MINERS BUTTON ALONG WITH CLAIMED LEDGER POINT BUTTON */}
-            <div className="pob-live-action flex flex-col items-end">
-              <div className="flex items-center gap-2 mb-1.5 justify-end text-[11px] font-mono select-none">
-                <span className="flex items-center gap-1">
-                  <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold">Progress</span>
-                  <span className="text-[#34d399] font-bold tabular-nums">{tankFillPercent.toFixed(1)}%</span>
-                </span>
-                <span className="text-zinc-600">·</span>
-                <span className="flex items-center gap-1">
-                  <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-bold">Timer</span>
-                  <span className="text-white font-bold tabular-nums">{countdownTimer}</span>
-                </span>
-              </div>
-
+            <div className="pob-live-action relative z-10 flex flex-col items-end">
               <div className="flex items-center gap-1.5 mb-2 justify-end flex-wrap">
                 <button
                   type="button"
@@ -2757,7 +3953,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
                   onClick={onOpenMiners}
                   title="Miners (Active miners provide 10% mining power)"
                 >
-                  <Hammer size={12} className="text-[#fbbf24]" />
+                  <MiningPickaxeIcon size={12} className="text-[#fbbf24]" />
                   <span className="font-mono font-bold text-white tabular-nums text-[11px]">+{referralBoostPerHour.toFixed(4)}</span>
                   <span className="text-[9px] font-mono text-[#fbbf24] font-bold tracking-wider">MINERS</span>
                   <ChevronRight size={11} className="text-zinc-400" />
@@ -2776,17 +3972,19 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
                 </button>
               </div>
 
-              {(!isConnected || (!isMiningSessionActive && unclaimedBits <= 0)) ? (
+              {(!isConnected || !hasStartedMiningOnce) ? (
                 <button
+                  key="start-mining-btn"
                   type="button"
                   className="claim-btn-active-colorful"
                   onClick={() => void handleStartMining()}
                 >
-                  <Zap size={13} />
+                  <MiningPickaxeIcon size={14} />
                   <span>Start Mining</span>
                 </button>
               ) : (
                 <button
+                  key="claim-mining-btn"
                   type="button"
                   className={is20PercentReached ? 'claim-btn-active-colorful' : 'claim-btn-plane'}
                   disabled={!is20PercentReached || isClaiming}
@@ -2851,49 +4049,7 @@ function MiningPage({ onOpenAssets, onOpenMiners, onOpenGuide, onOpenLedger }: {
 // ---------------------------------------------------------------------------
 // DETERMINISTIC SOLANA QR MATRIX SVG
 // ---------------------------------------------------------------------------
-function SolanaAddressQr({ address }: { address: string }) {
-  const size = 21;
-  const cells: Array<{ x: number; y: number }> = [];
-  let seed = 0;
-  for (let i = 0; i < address.length; i++) {
-    seed = (seed * 31 + address.charCodeAt(i)) >>> 0;
-  }
-
-  const isFinder = (r: number, c: number) =>
-    (r < 7 && c < 7) || (r < 7 && c >= size - 7) || (r >= size - 7 && c < 7);
-
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      if (isFinder(r, c)) continue;
-      const hash = ((seed ^ (r * 73856093) ^ (c * 19349663)) >>> 0) % 10;
-      if (hash < 5) cells.push({ x: c, y: r });
-    }
-  }
-
-  return (
-    <svg width="136" height="136" viewBox={`0 0 ${size + 2} ${size + 2}`} fill="none">
-      <rect width={size + 2} height={size + 2} rx="2" fill="white" />
-      {/* Finder patterns */}
-      {[
-        [1, 1],
-        [size - 6, 1],
-        [1, size - 6],
-      ].map(([fx, fy], idx) => (
-        <g key={idx}>
-          <rect x={fx} y={fy} width="7" height="7" fill="#09090b" />
-          <rect x={fx + 1} y={fy + 1} width="5" height="5" fill="white" />
-          <rect x={fx + 2} y={fy + 2} width="3" height="3" fill="#09090b" />
-        </g>
-      ))}
-      {cells.map((cell, i) => (
-        <rect key={i} x={cell.x + 1} y={cell.y + 1} width="1" height="1" fill="#09090b" />
-      ))}
-    </svg>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// CLEAN PREMIUM ASSETS PAGE (NO BOTTOM SEND/RECEIVE/SWAP; ONCHAIN SEND/RECEIVE/WITHDRAW MODALS)
+// CLEAN PREMIUM ASSETS PAGE (DEPOSIT OFF, WITHDRAW COMING SOON, TRANSFER USERNAME-TO-USERNAME)
 // ---------------------------------------------------------------------------
 function AssetsPage({ onBack }: { onBack: () => void }) {
   const client = useQueryClient();
@@ -2904,39 +4060,40 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
   const [activities, setActivities] = useState<any[]>([]);
   const [activitiesError, setActivitiesError] = useState<string | null>(null);
   const [activitiesLoading, setActivitiesLoading] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
 
-  // In-app Modal states (Send, Receive) & Onchain Withdraw
-  const [activeActionModal, setActiveActionModal] = useState<'send' | 'receive' | 'withdraw' | null>(null);
+  // In-app Username-to-Username Transfer Modal, Withdraw Coming Soon Modal & Receipt Detail state
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
+  const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
 
-  // In-app Send state
-  const [sendAsset, setSendAsset] = useState<'bits' | 'bitnoir'>('bits');
+  // In-app Transfer state
   const [sendRecipient, setSendRecipient] = useState('');
   const [sendAmount, setSendAmount] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-
-  // In-app Receive state
-  const [copiedHandle, setCopiedHandle] = useState(false);
-
-  // Onchain Withdraw state
-  const [withdrawAsset, setWithdrawAsset] = useState<'bitnoir' | 'bits'>('bitnoir');
-  const [withdrawAddress, setWithdrawAddress] = useState('');
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [withdrawError, setWithdrawError] = useState<string | null>(null);
-  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [recipientLookup, setRecipientLookup] = useState<{
+    handle: string;
+    status: 'idle' | 'checking' | 'valid' | 'not_found' | 'self';
+  }>({ handle: '', status: 'idle' });
 
   const isConnected = Boolean(user?.solanaAddress);
   const isVerified = Boolean(user?.solanaAddress && user?.isVerified);
-  const hasUsername = Boolean(user?.username);
-  const canUsernameTransfer = isConnected && isVerified && hasUsername;
+  const hasUid = Boolean(user?.uid);
+  const canUidTransfer = isConnected && isVerified && hasUid;
 
-  const openActionModal = (modal: 'send' | 'receive' | 'withdraw') => {
+  const openTransferModal = () => {
     setSendError(null);
-    setWithdrawError(null);
-    setActiveActionModal(modal);
+    setTransferModalOpen(true);
+  };
+
+  const isTransferReceipt = (item: any): boolean => {
+    const kind = String(item?.kind || '').toLowerCase();
+    const title = String(item?.title || '');
+    if (kind !== 'send' && kind !== 'receive') return false;
+    if (/activated|verification|signup|allocation/i.test(title)) return false;
+    return true;
   };
 
   const refreshActivity = async () => {
@@ -2954,12 +4111,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
       const merged = [...local, ...remote];
       const seen = new Set<string>();
       const deduped = merged.filter((item) => {
-        if (
-          item.title === 'Received 5,000 Bits Onchain Allocation' ||
-          item.title === 'Received 100 Free Signup Bits'
-        ) {
-          return false;
-        }
+        if (!isTransferReceipt(item)) return false;
         const key = `${item.title}-${item.txHash || item.id}`;
         if (seen.has(key)) return false;
         seen.add(key);
@@ -2968,7 +4120,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
       setActivities(deduped.slice(0, 20));
     } catch (err) {
       setActivitiesError(readableError(err, 'Could not load transaction history.'));
-      setActivities(getLocalWalletActivities(user.solanaAddress).slice(0, 20));
+      setActivities(getLocalWalletActivities(user.solanaAddress).filter(isTransferReceipt).slice(0, 20));
     } finally {
       setActivitiesLoading(false);
     }
@@ -2985,14 +4137,47 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
   }, [user?.solanaAddress]);
 
   const bitsPurchased = isConnected ? (account?.balances?.purchased ?? 0) : 0;
-  const noirClaimed = isConnected ? ((account?.balances as any)?.claimed ?? 0) : 0;
-  const totalUsd = bitsPurchased * 0.10 + noirClaimed * 1.10;
 
   const cleanRecipientInput = sendRecipient.trim();
-  const resolvedRecipientHandle = cleanRecipientInput
-    ? cleanRecipientInput.replace(/^@/, '').toLowerCase()
+  const resolvedRecipientUid = cleanRecipientInput
+    ? normalizeUidInput(cleanRecipientInput)
     : '';
-  const isRecipientHandleValid = /^[a-z0-9_]{3,20}$/.test(resolvedRecipientHandle);
+  const isRecipientUidValid = isValidUidFormat(resolvedRecipientUid);
+
+  useEffect(() => {
+    if (!transferModalOpen || !resolvedRecipientUid || !isRecipientUidValid) {
+      setRecipientLookup({ handle: resolvedRecipientUid, status: 'idle' });
+      return;
+    }
+    if (resolvedRecipientUid === (user?.uid || '')) {
+      setRecipientLookup({ handle: resolvedRecipientUid, status: 'self' });
+      return;
+    }
+
+    let cancelled = false;
+    setRecipientLookup({ handle: resolvedRecipientUid, status: 'checking' });
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await apiFetchJson<{ exists: boolean; uid: string }>(
+          `/api/accounts/check-uid?uid=${encodeURIComponent(resolvedRecipientUid)}`
+        );
+        if (cancelled) return;
+        setRecipientLookup({
+          handle: resolvedRecipientUid,
+          status: res?.exists ? 'valid' : 'not_found',
+        });
+      } catch {
+        if (cancelled) return;
+        setRecipientLookup({ handle: resolvedRecipientUid, status: 'not_found' });
+      }
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [transferModalOpen, resolvedRecipientUid, isRecipientUidValid, user?.uid]);
 
   const handleInAppSend = async () => {
     setSendError(null);
@@ -3000,12 +4185,11 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
       setConnectModalOpen(true);
       return;
     }
-    if (!canUsernameTransfer) {
-      setActiveActionModal(null);
+    if (!canUidTransfer) {
+      setTransferModalOpen(false);
       setVerifyModalOpen(true);
       toast({
-        title: 'Verification & @username Required',
-        description: 'Complete 0.02 SOL verification and set your @username for in-app transfers.',
+        description: 'Please verify your wallet before transferring Bits.',
         variant: 'destructive',
       });
       return;
@@ -3013,20 +4197,38 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
 
     const amt = Number(sendAmount);
     if (!cleanRecipientInput || !Number.isFinite(amt) || amt <= 0) {
-      const msg = 'Enter recipient @username and a valid positive amount.';
+      const msg = 'Enter recipient UID and a valid positive amount.';
       setSendError(msg);
       return;
     }
-    if (!isRecipientHandleValid) {
-      setSendError('Enter a valid recipient @username (3-20 lowercase letters, numbers, or underscore).');
+    if (!isRecipientUidValid) {
+      setSendError('Enter a valid 8-digit recipient UID.');
       return;
     }
-    if (resolvedRecipientHandle === (user.username || '').toLowerCase()) {
-      setSendError('Cannot transfer to your own @username.');
+    if (resolvedRecipientUid === (user.uid || '')) {
+      setSendError('Cannot transfer to your own UID.');
       return;
     }
 
-    const maxAvailable = sendAsset === 'bits' ? bitsPurchased : noirClaimed;
+    // Confirm recipient UID actually exists before transferring
+    if (recipientLookup.handle !== resolvedRecipientUid || recipientLookup.status !== 'valid') {
+      try {
+        const check = await apiFetchJson<{ exists: boolean }>(
+          `/api/accounts/check-uid?uid=${encodeURIComponent(resolvedRecipientUid)}`
+        );
+        if (!check?.exists) {
+          setRecipientLookup({ handle: resolvedRecipientUid, status: 'not_found' });
+          setSendError(`UID ${resolvedRecipientUid} does not exist.`);
+          return;
+        }
+        setRecipientLookup({ handle: resolvedRecipientUid, status: 'valid' });
+      } catch {
+        setSendError(`UID ${resolvedRecipientUid} does not exist.`);
+        return;
+      }
+    }
+
+    const maxAvailable = bitsPurchased;
     if (amt > maxAvailable) {
       setSendError('Amount exceeds available balance.');
       return;
@@ -3034,124 +4236,51 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
 
     setIsSending(true);
     try {
-      const targetLabel = `@${resolvedRecipientHandle}`;
+      const targetLabel = `UID ${resolvedRecipientUid}`;
       await apiFetchJson('/api/wallet/send-inapp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          asset: sendAsset,
+          asset: 'bits',
           amount: amt,
-          recipient: targetLabel,
-          sender: user.username,
+          recipient: resolvedRecipientUid,
+          sender: user.uid,
         }),
       });
 
       saveLocalWalletActivity(user.solanaAddress, {
         id: Date.now(),
         kind: 'send',
-        title: `Sent ${amt} ${sendAsset === 'bits' ? 'Bits' : 'Bitnoir'} to ${targetLabel}`,
-        detail: `In-app transfer @${user.username} → ${targetLabel}`,
+        title: `Sent ${amt} Bits to ${targetLabel}`,
+        detail: `In-app transfer UID ${user.uid} → ${targetLabel}`,
         amount: amt,
-        asset: sendAsset,
+        asset: 'bits',
         createdAt: new Date().toISOString(),
       });
 
       toast({
-        title: 'Sent In-App',
-        description: `Transferred ${amt} ${sendAsset === 'bits' ? 'Bits' : 'Bitnoir'} to ${targetLabel}.`,
+        description: `Transferred ${amt} Bits to ${targetLabel}.`,
         variant: 'success',
-        icon: <Send size={16} />,
       });
       setSendAmount('');
       setSendRecipient('');
       setSendError(null);
-      setActiveActionModal(null);
+      setTransferModalOpen(false);
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
       void refreshActivity();
     } catch (err) {
-      const msg = readableError(err, 'Could not complete transfer.');
+      const msg = readableError(err, 'Unable to complete transfer. Please try again.');
       setSendError(msg);
-      toast({ title: 'Transfer Failed', description: msg, variant: 'destructive' });
+      toast({ description: msg, variant: 'destructive' });
     } finally {
       setIsSending(false);
     }
   };
 
-  const handleOnchainWithdraw = async () => {
-    setWithdrawError(null);
-    if (!isConnected || !user?.solanaAddress) {
-      setConnectModalOpen(true);
-      return;
-    }
-    const dest = withdrawAddress.trim();
-    const amt = Number(withdrawAmount);
-    if (!isValidSolanaAddress(dest)) {
-      setWithdrawError('Enter a valid destination Solana address (32-44 base58 characters).');
-      return;
-    }
-    if (!Number.isFinite(amt) || amt <= 0) {
-      setWithdrawError('Enter a valid positive withdrawal amount.');
-      return;
-    }
-    const maxAvailable = withdrawAsset === 'bits' ? bitsPurchased : noirClaimed;
-    if (amt > maxAvailable) {
-      setWithdrawError('Amount exceeds available balance.');
-      return;
-    }
-
-    setIsWithdrawing(true);
-    try {
-      const signed = await signOnchainWalletAction({
-        fromAddress: user.solanaAddress,
-        memo: `Bitnoir Onchain Withdraw: ${amt} ${withdrawAsset.toUpperCase()} to ${dest}`,
-      });
-
-      await apiFetchJson('/api/wallet/withdraw-onchain', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          asset: withdrawAsset,
-          amount: amt,
-          destinationAddress: dest,
-          txSignature: signed.signature,
-        }),
-      });
-
-      saveLocalWalletActivity(user.solanaAddress, {
-        id: Date.now(),
-        kind: 'withdraw',
-        title: `Withdrew ${amt} ${withdrawAsset === 'bits' ? 'Bits' : 'Bitnoir'} Onchain`,
-        detail: `Onchain withdrawal to ${shortSolanaAddress(dest)}`,
-        amount: amt,
-        asset: withdrawAsset,
-        txHash: signed.signature,
-        createdAt: new Date().toISOString(),
-      });
-
-      toast({
-        title: 'Withdrawal Confirmed Onchain',
-        description: `Withdrew ${amt} ${withdrawAsset === 'bits' ? 'Bits' : 'Bitnoir'} to ${shortSolanaAddress(dest)}.`,
-        variant: 'success',
-        icon: <ArrowUpRight size={17} />,
-      });
-      setWithdrawAmount('');
-      setWithdrawError(null);
-      setActiveActionModal(null);
-      void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
-      void refreshActivity();
-    } catch (err) {
-      const msg = readableError(err, 'Could not complete onchain withdrawal.');
-      setWithdrawError(msg);
-      toast({ title: 'Withdrawal Failed', description: msg, variant: 'destructive' });
-    } finally {
-      setIsWithdrawing(false);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#070707] text-zinc-100 flex flex-col font-sans">
       {/* HEADER */}
-      <header className="border-b border-white/[0.08] bg-[#09090b]/85 backdrop-blur-xl sticky top-0 z-40">
+      <header className="border-b border-white/[0.07] bg-[#070707]/90 backdrop-blur-xl sticky top-0 z-40">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <Brand size="md" />
           <div className="flex items-center gap-3">
@@ -3167,19 +4296,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
         {/* TOP NAVIGATION & HEADING */}
         <div className="flex items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Assets</h1>
-            <button
-              type="button"
-              onClick={() => setHistoryOpen(true)}
-              className="clean-action-btn-soft !min-h-[32px] !px-3 !text-xs"
-              title="Transaction History"
-              aria-label="Transaction History"
-            >
-              <History size={14} className="text-[#f7931a]" />
-              <span className="text-xs font-sans">History</span>
-            </button>
-          </div>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Assets</h1>
 
           <button
             type="button"
@@ -3191,43 +4308,42 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
           </button>
         </div>
 
-        {/* 1. TOTAL BALANCE + ONCHAIN ACTION BAR (SEND · RECEIVE · WITHDRAW) */}
-        <div className="pob-cockpit mb-6 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold">
-                Total Balance
-              </span>
-            </div>
-            <div className="text-3xl sm:text-4xl font-black font-mono text-white tabular-nums tracking-tight">
-              ${totalUsd.toFixed(2)} <span className="text-xs text-zinc-400 font-normal">USD</span>
+        {/* 1. BITS BALANCE + 3-COLUMN ACTION BAR (DEPOSIT · WITHDRAW · TRANSFER) */}
+        <div className="pob-cockpit mb-6 p-5 sm:p-6 flex flex-col gap-5">
+          <div className="flex items-center gap-3.5">
+            <BitsMark size={38} className="flex-shrink-0" />
+            <div>
+              <div className="text-xs font-mono uppercase tracking-wider text-zinc-400 font-bold mb-0.5">
+                Bits
+              </div>
+              <div className="text-3xl sm:text-4xl font-black font-mono text-white tabular-nums tracking-tight">
+                {bitsPurchased.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="grid grid-cols-3 gap-2.5 w-full">
             <button
               type="button"
-              onClick={() => openActionModal('send')}
-              className="clean-stake-confirm-btn !w-auto !min-h-[40px] !px-4 !text-xs"
+              disabled
+              aria-disabled="true"
+              className="h-10 rounded-lg border border-white/[0.14] bg-transparent text-zinc-500 text-xs sm:text-sm font-medium flex items-center justify-center cursor-not-allowed pointer-events-none select-none"
             >
-              <ArrowUpRight size={15} />
-              <span>Send</span>
+              Deposit
             </button>
             <button
               type="button"
-              onClick={() => openActionModal('receive')}
-              className="clean-action-btn-soft !min-h-[40px] !px-4 !text-xs !font-bold !text-white"
+              onClick={() => setWithdrawModalOpen(true)}
+              className="h-10 rounded-lg border border-[#f59e0b]/80 bg-transparent text-[#f59e0b] hover:bg-[#f59e0b]/10 hover:border-[#fbbf24] hover:text-[#fbbf24] transition-colors duration-150 text-xs sm:text-sm font-medium flex items-center justify-center cursor-pointer"
             >
-              <ArrowDownLeft size={15} className="text-[#34d399]" />
-              <span>Receive</span>
+              Withdraw
             </button>
             <button
               type="button"
-              onClick={() => openActionModal('withdraw')}
-              className="clean-action-btn-soft !min-h-[40px] !px-4 !text-xs !font-bold !text-white"
+              onClick={openTransferModal}
+              className="h-10 rounded-lg border border-[#f59e0b]/80 bg-transparent text-[#f59e0b] hover:bg-[#f59e0b]/10 hover:border-[#fbbf24] hover:text-[#fbbf24] transition-colors duration-150 text-xs sm:text-sm font-medium flex items-center justify-center cursor-pointer"
             >
-              <ExternalLink size={14} className="text-[#f7931a]" />
-              <span>Withdraw</span>
+              Transfer
             </button>
           </div>
         </div>
@@ -3241,108 +4357,225 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
-        {/* VERIFICATION PROMPT IF USERNAME ID NOT YET UNLOCKED */}
-        {!canUsernameTransfer && (
-          <div className="mb-6 p-4 rounded-xl bg-[#f7931a]/[0.07] border border-[#f7931a]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-2.5 text-xs text-zinc-300">
-              <ShieldCheck size={16} className="text-[#fbbf24] mt-0.5 flex-shrink-0" />
-              <div>
-                <strong className="text-white block">In-App Username Transfers Locked</strong>
-                Verify your wallet once (<strong className="text-[#fbbf24]">0.02 SOL</strong>) and set your <strong className="text-white">@username</strong> ID to send and receive Bits in-app between usernames.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => (!isConnected ? setConnectModalOpen(true) : setVerifyModalOpen(true))}
-              className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[36px] !px-4 !text-xs !font-bold flex-shrink-0"
-            >
-              {!isConnected ? 'Connect Wallet' : !isVerified ? 'Verify (0.02 SOL)' : 'Set @username'}
-            </button>
-          </div>
-        )}
-
-        {/* 2. EXACT TWO CORE ASSETS (CLEAN, NO BOTTOM SEND/RECEIVE/SWAP PANEL) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* BITS */}
-          <div className="p-5 rounded-2xl bg-[#121318] border border-white/[0.08] hover:border-[#f7931a]/30 transition-all duration-200 flex items-center justify-between shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <div className="flex items-center gap-3.5">
-              <BitsMark size={36} />
-              <div>
-                <div className="text-xs font-mono uppercase text-zinc-400 font-bold mb-0.5">Bits</div>
-                <div className="text-xl sm:text-2xl font-black font-mono text-white tabular-nums">
-                  {bitsPurchased.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                </div>
-              </div>
-            </div>
-            <span className="text-xs font-mono text-zinc-400 font-bold tabular-nums">
-              ${(bitsPurchased * 0.1).toFixed(2)}
+        {/* 2. TRANSACTION HISTORY */}
+        <div className="p-5 sm:p-6 rounded-2xl bg-[#121212] border border-white/[0.075]">
+          <div className="flex items-center justify-between pb-3.5 border-b border-white/[0.08]">
+            <h2 className="text-sm sm:text-base font-semibold text-zinc-200 m-0">Transaction History</h2>
+            <span className="text-[11px] font-mono text-zinc-500 tabular-nums">
+              {activities.length} {activities.length === 1 ? 'Record' : 'Records'}
             </span>
           </div>
 
-          {/* BITNOIR */}
-          <div className="p-5 rounded-2xl bg-[#121318] border border-white/[0.08] hover:border-[#f7931a]/30 transition-all duration-200 flex items-center justify-between shadow-[0_12px_30px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.05)]">
-            <div className="flex items-center gap-3.5">
-              <BitnoirMark size={36} />
-              <div>
-                <div className="text-xs font-mono uppercase text-zinc-400 font-bold mb-0.5">Bitnoir</div>
-                <div className="text-xl sm:text-2xl font-black font-mono text-white tabular-nums">
-                  {noirClaimed.toFixed(4)}
-                </div>
+          <div>
+            {activitiesError && (
+              <div className="mt-3 mb-2">
+                <InlineErrorBanner message={activitiesError} onRetry={() => void refreshActivity()} />
               </div>
-            </div>
-            <span className="text-xs font-mono text-zinc-400 font-bold tabular-nums">
-              ${(noirClaimed * 1.10).toFixed(2)}
-            </span>
+            )}
+            {activitiesLoading && activities.length === 0 ? (
+              <div className="py-10 text-center text-zinc-400 text-xs font-mono flex items-center justify-center gap-2">
+                <RefreshCw size={14} className="animate-spin text-[#f7931a]" />
+                <span>Loading records…</span>
+              </div>
+            ) : activities.length === 0 ? (
+              <div className="py-10 text-center text-zinc-500 text-xs font-mono">
+                No record
+              </div>
+            ) : (
+              <div className="divide-y divide-white/[0.06]">
+                {activities.map((act) => {
+                  const isSend = act.kind === 'send';
+                  const parsedAmt =
+                    typeof act.amount === 'number' && Number.isFinite(act.amount)
+                      ? act.amount
+                      : (() => {
+                          const m = String(act.title || '').match(/(?:Sent|Received)\s+([\d,.]+)/i);
+                          return m ? Number(m[1].replace(/,/g, '')) : 0;
+                        })();
+                  const d = new Date(act.createdAt);
+                  const pad2 = (n: number) => String(n).padStart(2, '0');
+                  const formattedClockDate = Number.isNaN(d.getTime())
+                    ? '--:-- --/--'
+                    : `${pad2(d.getHours())}:${pad2(d.getMinutes())} ${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+
+                  const rowLabel = isSend ? 'Transfer' : 'Received';
+
+                  return (
+                    <button
+                      key={act.id}
+                      type="button"
+                      onClick={() => setSelectedReceipt(act)}
+                      className="w-full text-left py-4 first:pt-3.5 last:pb-1 hover:bg-white/[0.02] transition-colors cursor-pointer rounded-lg px-1 -mx-1"
+                    >
+                      <div className="flex items-center justify-between mb-2.5">
+                        <span className="text-sm font-medium text-zinc-100">{rowLabel}</span>
+                        <ChevronRight size={14} className="text-zinc-500 flex-shrink-0" />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 items-end">
+                        <div>
+                          <div className="text-[11px] text-zinc-500 mb-1">Amount</div>
+                          <div className="text-xs sm:text-sm font-semibold font-mono text-white tabular-nums">
+                            {isSend ? '-' : '+'}
+                            {parsedAmt.toFixed(4)}
+                          </div>
+                        </div>
+
+                        <div className="text-center">
+                          <div className="text-[11px] text-zinc-500 mb-1">Status</div>
+                          <div className="text-xs sm:text-sm font-medium text-zinc-200">Completed</div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-[11px] text-zinc-500 mb-1">Time</div>
+                          <div className="text-xs sm:text-sm font-medium font-mono text-zinc-400 tabular-nums">
+                            {formattedClockDate}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* MODAL: IN-APP SEND (USERNAME-TO-USERNAME BITS & BITNOIR) */}
-        {activeActionModal === 'send' && (
-          <div className="modal-backdrop" onClick={() => setActiveActionModal(null)}>
+        {/* MODAL: WITHDRAW COMING SOON */}
+        {withdrawModalOpen && (
+          <div className="modal-backdrop" onClick={() => setWithdrawModalOpen(false)}>
+            <div
+              className="modal-dialog"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: 340,
+                padding: '22px 24px 18px',
+                background: '#1e1e1e',
+                borderColor: 'rgba(255, 255, 255, 0.08)',
+                boxShadow: '0 20px 56px rgba(0, 0, 0, 0.85)',
+                borderRadius: 12,
+              }}
+            >
+              <p className="text-[15px] text-zinc-100 leading-relaxed m-0 mb-6">
+                Bits withdrawals are coming soon.
+              </p>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setWithdrawModalOpen(false)}
+                  className="text-sm font-semibold text-[#f59e0b] hover:text-[#fbbf24] bg-transparent border-0 px-2 py-1 cursor-pointer transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: TRANSFER RECEIPT DETAILS */}
+        {selectedReceipt && (
+          <div className="modal-backdrop" onClick={() => setSelectedReceipt(null)}>
+            <div
+              className="modal-dialog"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: 420,
+                padding: 24,
+                background: '#121212',
+                borderColor: 'rgba(255, 255, 255, 0.085)',
+                boxShadow: '0 24px 64px rgba(0, 0, 0, 0.88)',
+                borderRadius: 18,
+              }}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-white m-0">Transfer Receipt</h2>
+                <button type="button" className="modal-close-btn" onClick={() => setSelectedReceipt(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-3 text-xs font-mono mb-5">
+                <div className="p-3.5 rounded-xl bg-[#181818] border border-white/[0.07] flex items-center justify-between">
+                  <span className="text-zinc-400">Type</span>
+                  <span className="text-white font-semibold">
+                    {selectedReceipt.kind === 'send' ? 'Sent Transfer' : 'Received Transfer'}
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-xl bg-[#181818] border border-white/[0.07] flex items-center justify-between">
+                  <span className="text-zinc-400">Details</span>
+                  <span className="text-white font-semibold truncate ml-3">{selectedReceipt.title}</span>
+                </div>
+                <div className="p-3.5 rounded-xl bg-[#181818] border border-white/[0.07] flex items-center justify-between">
+                  <span className="text-zinc-400">Status</span>
+                  <span className="text-[#34d399] font-semibold">Completed</span>
+                </div>
+                <div className="p-3.5 rounded-xl bg-[#181818] border border-white/[0.07] flex items-center justify-between">
+                  <span className="text-zinc-400">Time</span>
+                  <span className="text-zinc-300 tabular-nums">
+                    {new Date(selectedReceipt.createdAt).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedReceipt(null)}
+                className="clean-stake-confirm-btn !w-full !min-h-[40px] !text-xs !font-bold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: IN-APP TRANSFER (USERNAME-TO-USERNAME BITS) */}
+        {transferModalOpen && (
+          <div className="modal-backdrop" onClick={() => setTransferModalOpen(false)}>
             <div
               className="modal-dialog"
               onClick={(e) => e.stopPropagation()}
               style={{
                 maxWidth: 460,
                 padding: 24,
-                background: 'linear-gradient(180deg, #15171e 0%, #0d0e13 100%)',
-                borderColor: 'rgba(247, 147, 26, 0.25)',
-                boxShadow: '0 24px 70px rgba(0, 0, 0, 0.88), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
-                borderRadius: 20,
+                background: '#121212',
+                borderColor: 'rgba(255, 255, 255, 0.085)',
+                boxShadow: '0 24px 64px rgba(0, 0, 0, 0.88)',
+                borderRadius: 18,
               }}
             >
               <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-[#f7931a]/15 border border-[#f7931a]/35 flex items-center justify-center text-[#f7931a]">
+                  <div className="w-9 h-9 rounded-xl bg-[#181818] border border-white/[0.08] flex items-center justify-center text-[#f7931a]">
                     <ArrowUpRight size={18} />
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold text-white m-0">Send</h2>
-                    <p className="text-[11px] font-mono text-zinc-400 m-0">In-App Username-to-Username Transfer</p>
+                    <h2 className="text-lg font-bold text-white m-0">Transfer</h2>
+                    <p className="text-[11px] font-mono text-zinc-400 m-0">UID to UID</p>
                   </div>
                 </div>
-                <button type="button" className="modal-close-btn" onClick={() => setActiveActionModal(null)}>
+                <button type="button" className="modal-close-btn" onClick={() => setTransferModalOpen(false)}>
                   <X size={16} />
                 </button>
               </div>
 
-              {!canUsernameTransfer ? (
+              {!canUidTransfer ? (
                 <div className="flex flex-col gap-3">
                   <div className="p-4 rounded-xl bg-[#f7931a]/[0.08] border border-[#f7931a]/30 text-xs text-zinc-200 leading-relaxed">
-                    <strong className="text-white block mb-1">Verification &amp; @username ID Required</strong>
-                    Verify your wallet once (<strong className="text-[#fbbf24]">0.02 SOL</strong>) and set your <strong className="text-white">@username</strong> to send Bits &amp; Bitnoir in-app.
+                    <strong className="text-white block mb-1">Verification &amp; UID Required</strong>
+                    Verify your wallet once (small one-time fee to prevent cloning, bots &amp; farming) to receive your <strong className="text-white">UID</strong> and send Bits in-app.
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      setActiveActionModal(null);
+                      setTransferModalOpen(false);
                       if (!isConnected) setConnectModalOpen(true);
                       else setVerifyModalOpen(true);
                     }}
                     className="clean-stake-confirm-btn !w-full !min-h-[42px] !text-xs !font-bold"
                   >
                     <ShieldCheck size={15} />
-                    <span>{!isConnected ? 'Connect Solana Wallet' : !isVerified ? 'Verify Wallet (0.02 SOL)' : 'Set @username'}</span>
+                    <span>{!isConnected ? 'Connect Solana Wallet' : 'Verify Wallet'}</span>
                   </button>
                 </div>
               ) : (
@@ -3350,47 +4583,17 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
                   <InlineErrorBanner message={sendError} />
 
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-between text-xs font-mono">
-                    <span className="text-zinc-400">From Node ID</span>
+                    <span className="text-zinc-400">From UID</span>
                     <span className="text-[#34d399] font-bold flex items-center gap-1">
-                      @{user?.username} <Check size={12} strokeWidth={3} />
+                      {user?.uid} <Check size={12} strokeWidth={3} />
                     </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSendAsset('bits');
-                        if (sendError) setSendError(null);
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg border text-xs font-bold font-mono transition-all duration-200 cursor-pointer tabular-nums ${
-                        sendAsset === 'bits'
-                          ? 'bg-[#f7931a]/15 border-[#f7931a] text-[#fbbf24]'
-                          : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
-                      }`}
-                    >
-                      Bits ({bitsPurchased.toLocaleString(undefined, { maximumFractionDigits: 4 })})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSendAsset('bitnoir');
-                        if (sendError) setSendError(null);
-                      }}
-                      className={`flex-1 px-3 py-2 rounded-lg border text-xs font-bold font-mono transition-all duration-200 cursor-pointer tabular-nums ${
-                        sendAsset === 'bitnoir'
-                          ? 'bg-[#f7931a]/15 border-[#f7931a] text-[#fbbf24]'
-                          : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
-                      }`}
-                    >
-                      Bitnoir ({noirClaimed.toFixed(2)})
-                    </button>
                   </div>
 
                   <div>
                     <input
                       type="text"
-                      placeholder="Recipient @username"
+                      inputMode="numeric"
+                      placeholder="Recipient UID (e.g. 88001001)"
                       value={sendRecipient}
                       onChange={(e) => {
                         setSendRecipient(e.target.value);
@@ -3400,10 +4603,18 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
                     />
                     {cleanRecipientInput && (
                       <div className="mt-1.5 text-[11px] font-mono">
-                        {isRecipientHandleValid ? (
-                          <span className="text-[#34d399]">@{resolvedRecipientHandle} · In-App ID</span>
+                        {!isRecipientUidValid ? (
+                          <span className="text-zinc-400">Enter a valid 8-digit recipient UID</span>
+                        ) : recipientLookup.status === 'self' ? (
+                          <span className="text-red-400">Cannot transfer to your own UID</span>
+                        ) : recipientLookup.status === 'checking' || recipientLookup.handle !== resolvedRecipientUid ? (
+                          <span className="text-zinc-400">Checking UID {resolvedRecipientUid}…</span>
+                        ) : recipientLookup.status === 'valid' ? (
+                          <span className="text-[#34d399] inline-flex items-center gap-1">
+                            <Check size={12} strokeWidth={3} /> UID {resolvedRecipientUid} · Valid ID
+                          </span>
                         ) : (
-                          <span className="text-zinc-400">Use 3-20 chars (@username)</span>
+                          <span className="text-red-400">UID {resolvedRecipientUid} · User ID does not exist</span>
                         )}
                       </div>
                     )}
@@ -3425,7 +4636,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
                     <button
                       type="button"
                       onClick={() => {
-                        setSendAmount(String(sendAsset === 'bits' ? bitsPurchased : noirClaimed));
+                        setSendAmount(String(bitsPurchased));
                         if (sendError) setSendError(null);
                       }}
                       className="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-white/10 text-[10px] font-mono font-bold text-white hover:bg-white/20 transition-colors cursor-pointer"
@@ -3437,16 +4648,22 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
                   <button
                     type="button"
                     onClick={handleInAppSend}
-                    disabled={isSending}
+                    disabled={
+                      isSending ||
+                      (Boolean(cleanRecipientInput) &&
+                        (recipientLookup.status === 'not_found' ||
+                          recipientLookup.status === 'self' ||
+                          recipientLookup.status === 'checking'))
+                    }
                     className="clean-stake-confirm-btn !w-full !min-h-[42px] !text-xs !font-bold"
                   >
                     {isSending ? (
                       <span className="flex items-center gap-2 justify-center">
-                        <RefreshCw size={14} className="animate-spin" /> Sending…
+                        <RefreshCw size={14} className="animate-spin" /> Transferring…
                       </span>
                     ) : (
                       <span className="flex items-center gap-2 justify-center">
-                        <Send size={14} /> Send {sendAsset === 'bits' ? 'Bits' : 'Bitnoir'}
+                        <Send size={14} /> Transfer Bits
                       </span>
                     )}
                   </button>
@@ -3456,338 +4673,6 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
-        {/* MODAL: IN-APP RECEIVE (@USERNAME ONLY — NO SOLANA ADDRESS DISCLOSED) */}
-        {activeActionModal === 'receive' && (
-          <div className="modal-backdrop" onClick={() => setActiveActionModal(null)}>
-            <div
-              className="modal-dialog"
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                maxWidth: 440,
-                padding: 24,
-                background: 'linear-gradient(180deg, #15171e 0%, #0d0e13 100%)',
-                borderColor: 'rgba(16, 185, 129, 0.25)',
-                boxShadow: '0 24px 70px rgba(0, 0, 0, 0.88), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
-                borderRadius: 20,
-              }}
-            >
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-[#10b981]/15 border border-[#10b981]/35 flex items-center justify-center text-[#34d399]">
-                    <QrCode size={18} />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-white m-0">Receive</h2>
-                    <p className="text-[11px] font-mono text-zinc-400 m-0">In-App Username Transfer</p>
-                  </div>
-                </div>
-                <button type="button" className="modal-close-btn" onClick={() => setActiveActionModal(null)}>
-                  <X size={16} />
-                </button>
-              </div>
-
-              {!isConnected ? (
-                <div className="flex flex-col gap-3">
-                  <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-zinc-300">
-                    Connect your wallet and verify your @username ID to receive in-app transfers.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveActionModal(null);
-                      setConnectModalOpen(true);
-                    }}
-                    className="clean-stake-confirm-btn !w-full !min-h-[42px] !text-xs !font-bold"
-                  >
-                    <Wallet size={15} />
-                    <span>Connect Solana Wallet</span>
-                  </button>
-                </div>
-              ) : !canUsernameTransfer ? (
-                <div className="flex flex-col gap-3">
-                  <div className="p-4 rounded-xl bg-[#f7931a]/[0.08] border border-[#f7931a]/30 text-xs text-zinc-200 leading-relaxed">
-                    <strong className="text-white block mb-1">Verified @username Required</strong>
-                    Verify once (<strong className="text-[#fbbf24]">0.02 SOL</strong>) and set your <strong className="text-white">@username</strong> ID to receive Bits &amp; Bitnoir in-app.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveActionModal(null);
-                      setVerifyModalOpen(true);
-                    }}
-                    className="clean-stake-confirm-btn !w-full !min-h-[42px] !text-xs !font-bold"
-                  >
-                    <ShieldCheck size={15} />
-                    <span>{!isVerified ? 'Verify Wallet (0.02 SOL)' : 'Set @username'}</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-4">
-                  <div className="p-3 bg-white rounded-xl shadow-md flex items-center justify-center">
-                    <SolanaAddressQr address={`@${user?.username}`} />
-                  </div>
-
-                  <div className="w-full p-3.5 rounded-xl bg-[#10b981]/10 border border-[#10b981]/30 flex items-center justify-between gap-2">
-                    <div>
-                      <span className="text-[10px] font-mono uppercase text-zinc-400 block">In-App Receive ID</span>
-                      <strong className="font-mono text-base text-[#34d399]">@{user?.username}</strong>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const ok = await copyToClipboard(`@${user?.username}`);
-                        if (ok) {
-                          setCopiedHandle(true);
-                          setTimeout(() => setCopiedHandle(false), 1800);
-                          toast({
-                            title: 'Copied',
-                            description: `@${user?.username} copied.`,
-                            variant: 'success',
-                            icon: <Copy size={16} />,
-                          });
-                        } else {
-                          toast({ title: 'Copy Failed', description: 'Clipboard permission unavailable.', variant: 'destructive' });
-                        }
-                      }}
-                      className="clean-action-btn-soft !min-h-[32px] !px-3 !text-xs"
-                    >
-                      {copiedHandle ? <Check size={13} className="text-[#34d399]" /> : <Copy size={13} />}
-                      <span>{copiedHandle ? 'Copied' : 'Copy ID'}</span>
-                    </button>
-                  </div>
-
-                  <p className="text-[11px] font-mono text-zinc-400 text-center m-0">
-                    Share your <strong className="text-white">@{user?.username}</strong> ID to receive instant in-app transfers.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* MODAL: ONCHAIN WITHDRAW */}
-        {activeActionModal === 'withdraw' && (
-          <div className="modal-backdrop" onClick={() => setActiveActionModal(null)}>
-            <div
-              className="modal-dialog"
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                maxWidth: 460,
-                padding: 24,
-                background: 'linear-gradient(180deg, #15171e 0%, #0d0e13 100%)',
-                borderColor: 'rgba(247, 147, 26, 0.3)',
-                boxShadow: '0 24px 70px rgba(0, 0, 0, 0.88), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
-                borderRadius: 20,
-              }}
-            >
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-[#f7931a]/15 border border-[#f7931a]/35 flex items-center justify-center text-[#f7931a]">
-                    <ExternalLink size={18} />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-white m-0">Withdraw Onchain</h2>
-                    <p className="text-[11px] font-mono text-zinc-400 m-0">Settle directly to external Solana wallet</p>
-                  </div>
-                </div>
-                <button type="button" className="modal-close-btn" onClick={() => setActiveActionModal(null)}>
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-4">
-                <InlineErrorBanner message={withdrawError} />
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWithdrawAsset('bitnoir');
-                      if (withdrawError) setWithdrawError(null);
-                    }}
-                    className={`flex-1 px-3 py-2 rounded-lg border text-xs font-bold font-mono transition-all duration-200 cursor-pointer tabular-nums ${
-                      withdrawAsset === 'bitnoir'
-                        ? 'bg-[#f7931a]/15 border-[#f7931a] text-[#fbbf24]'
-                        : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    Bitnoir ({noirClaimed.toFixed(2)})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWithdrawAsset('bits');
-                      if (withdrawError) setWithdrawError(null);
-                    }}
-                    className={`flex-1 px-3 py-2 rounded-lg border text-xs font-bold font-mono transition-all duration-200 cursor-pointer tabular-nums ${
-                      withdrawAsset === 'bits'
-                        ? 'bg-[#f7931a]/15 border-[#f7931a] text-[#fbbf24]'
-                        : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    Bits ({bitsPurchased.toLocaleString(undefined, { maximumFractionDigits: 4 })})
-                  </button>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold block mb-1.5">
-                    Destination Solana Address
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Solana wallet address (base58)"
-                    value={withdrawAddress}
-                    onChange={(e) => {
-                      setWithdrawAddress(e.target.value);
-                      if (withdrawError) setWithdrawError(null);
-                    }}
-                    className="assets-input-field font-mono text-xs"
-                  />
-                </div>
-
-                <div className="relative">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    placeholder="0.00"
-                    value={withdrawAmount}
-                    onChange={(e) => {
-                      setWithdrawAmount(e.target.value);
-                      if (withdrawError) setWithdrawError(null);
-                    }}
-                    className="assets-input-field font-mono font-bold pr-16"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWithdrawAmount(String(withdrawAsset === 'bits' ? bitsPurchased : noirClaimed));
-                      if (withdrawError) setWithdrawError(null);
-                    }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-white/10 text-[10px] font-mono font-bold text-white hover:bg-white/20 transition-colors cursor-pointer"
-                  >
-                    MAX
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleOnchainWithdraw}
-                  disabled={isWithdrawing}
-                  className="clean-stake-confirm-btn !w-full !min-h-[42px] !text-xs !font-bold"
-                >
-                  {isWithdrawing ? (
-                    <span className="flex items-center gap-2 justify-center">
-                      <RefreshCw size={14} className="animate-spin" /> Settling Onchain…
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2 justify-center">
-                      <ExternalLink size={14} /> Confirm Onchain Withdraw
-                    </span>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TRANSACTION HISTORY MODAL (OPENED FROM TOP ICON) */}
-        {historyOpen && (
-          <div className="modal-backdrop" onClick={() => setHistoryOpen(false)}>
-            <div
-              className="modal-dialog"
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                maxWidth: 480,
-                padding: 24,
-                background: 'linear-gradient(180deg, #15171e 0%, #0d0e13 100%)',
-                borderColor: 'rgba(247, 147, 26, 0.25)',
-                boxShadow: '0 24px 70px rgba(0, 0, 0, 0.88), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
-                borderRadius: 20,
-              }}
-            >
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#f7931a]/15 border border-[#f7931a]/30 flex items-center justify-center text-[#f7931a]">
-                    <History size={16} />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-white m-0">Transaction History</h2>
-                    <p className="text-[11px] font-mono text-zinc-400 m-0">Wallet &amp; transfer activity</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setHistoryOpen(false)}
-                  className="modal-close-btn"
-                  aria-label="Close"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-2 max-h-[380px] overflow-y-auto pr-1">
-                {activitiesError && (
-                  <div className="mb-2">
-                    <InlineErrorBanner message={activitiesError} onRetry={() => void refreshActivity()} />
-                  </div>
-                )}
-                {activitiesLoading && activities.length === 0 ? (
-                  <div className="py-8 text-center text-zinc-400 text-xs font-mono flex items-center justify-center gap-2">
-                    <RefreshCw size={14} className="animate-spin text-[#f7931a]" />
-                    <span>Loading transactions…</span>
-                  </div>
-                ) : activities.length === 0 ? (
-                  <div className="py-8 text-center text-zinc-500 text-xs font-mono">
-                    No transactions recorded yet.
-                  </div>
-                ) : (
-                  activities.map((act) => {
-                    const isSend = act.kind === 'send';
-                    const isWithdraw = act.kind === 'withdraw';
-                    const isVerify = act.kind === 'verify' || act.kind === 'username';
-                    return (
-                      <div
-                        key={act.id}
-                        className="p-3 rounded-xl bg-white/[0.025] border border-white/[0.06] flex items-center justify-between gap-2 text-xs font-mono transition-colors hover:border-white/[0.12]"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div
-                            className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                              isSend
-                                ? 'bg-red-500/15 text-red-400'
-                                : isWithdraw
-                                ? 'bg-[#f7931a]/15 text-[#fbbf24]'
-                                : isVerify
-                                ? 'bg-[#f7931a]/15 text-[#fbbf24]'
-                                : 'bg-[#10b981]/15 text-[#34d399]'
-                            }`}
-                          >
-                            {isSend ? (
-                              <ArrowUpRight size={13} />
-                            ) : isWithdraw ? (
-                              <ExternalLink size={13} />
-                            ) : isVerify ? (
-                              <ShieldCheck size={13} />
-                            ) : (
-                              <ArrowDownLeft size={13} />
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-white font-medium truncate">{act.title}</div>
-                            <div className="text-[10px] text-zinc-500">
-                              {new Date(act.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </div>
-        )}
       </main>
 
       <ConnectWalletModal open={connectModalOpen} onClose={() => setConnectModalOpen(false)} />
@@ -3801,10 +4686,10 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// APPLICATION ROUTER (EXACT CLEAN ROUTES: MINING, MINERS, GUIDE, LEDGER & ASSETS)
+// APPLICATION ROUTER (EXACT CLEAN ROUTES: MINING, MINERS, GUIDE, LEDGER, CARDS & ASSETS)
 // ---------------------------------------------------------------------------
 function App() {
-  const [currentView, setCurrentView] = useState<'mining' | 'assets' | 'miners' | 'guide' | 'ledger'>('mining');
+  const [currentView, setCurrentView] = useState<'mining' | 'assets' | 'miners' | 'guide' | 'ledger' | 'cards'>('mining');
 
   return (
     <AuthProvider>
@@ -3825,6 +4710,9 @@ function App() {
               <Route path="/ledger">
                 {() => <LedgerPage onBack={() => setCurrentView('mining')} />}
               </Route>
+              <Route path="/cards">
+                {() => <PowerCardsPage onBack={() => setCurrentView('mining')} />}
+              </Route>
               <Route path="/mining">
                 {() => (
                   <MiningPage
@@ -3832,47 +4720,50 @@ function App() {
                     onOpenMiners={() => setCurrentView('miners')}
                     onOpenGuide={() => setCurrentView('guide')}
                     onOpenLedger={() => setCurrentView('ledger')}
+                    onOpenCards={() => setCurrentView('cards')}
                   />
                 )}
               </Route>
               <Route path="/">
-                {() =>
-                  currentView === 'assets' ? (
-                    <AssetsPage onBack={() => setCurrentView('mining')} />
-                  ) : currentView === 'miners' ? (
-                    <MinersPage onBack={() => setCurrentView('mining')} />
-                  ) : currentView === 'guide' ? (
-                    <GuidePage onBack={() => setCurrentView('mining')} />
-                  ) : currentView === 'ledger' ? (
-                    <LedgerPage onBack={() => setCurrentView('mining')} />
-                  ) : (
+                {() => (
+                  <>
+                    <div className={currentView === 'mining' ? 'block' : 'hidden'}>
+                      <MiningPage
+                        isVisible={currentView === 'mining'}
+                        onOpenAssets={() => setCurrentView('assets')}
+                        onOpenMiners={() => setCurrentView('miners')}
+                        onOpenGuide={() => setCurrentView('guide')}
+                        onOpenLedger={() => setCurrentView('ledger')}
+                        onOpenCards={() => setCurrentView('cards')}
+                      />
+                    </div>
+                    {currentView === 'assets' && <AssetsPage onBack={() => setCurrentView('mining')} />}
+                    {currentView === 'miners' && <MinersPage onBack={() => setCurrentView('mining')} />}
+                    {currentView === 'guide' && <GuidePage onBack={() => setCurrentView('mining')} />}
+                    {currentView === 'ledger' && <LedgerPage onBack={() => setCurrentView('mining')} />}
+                    {currentView === 'cards' && <PowerCardsPage onBack={() => setCurrentView('mining')} />}
+                  </>
+                )}
+              </Route>
+              <Route component={() => (
+                <>
+                  <div className={currentView === 'mining' ? 'block' : 'hidden'}>
                     <MiningPage
+                      isVisible={currentView === 'mining'}
                       onOpenAssets={() => setCurrentView('assets')}
                       onOpenMiners={() => setCurrentView('miners')}
                       onOpenGuide={() => setCurrentView('guide')}
                       onOpenLedger={() => setCurrentView('ledger')}
+                      onOpenCards={() => setCurrentView('cards')}
                     />
-                  )
-                }
-              </Route>
-              <Route component={() =>
-                currentView === 'assets' ? (
-                  <AssetsPage onBack={() => setCurrentView('mining')} />
-                ) : currentView === 'miners' ? (
-                  <MinersPage onBack={() => setCurrentView('mining')} />
-                ) : currentView === 'guide' ? (
-                  <GuidePage onBack={() => setCurrentView('mining')} />
-                ) : currentView === 'ledger' ? (
-                  <LedgerPage onBack={() => setCurrentView('mining')} />
-                ) : (
-                  <MiningPage
-                    onOpenAssets={() => setCurrentView('assets')}
-                    onOpenMiners={() => setCurrentView('miners')}
-                    onOpenGuide={() => setCurrentView('guide')}
-                    onOpenLedger={() => setCurrentView('ledger')}
-                  />
-                )
-              } />
+                  </div>
+                  {currentView === 'assets' && <AssetsPage onBack={() => setCurrentView('mining')} />}
+                  {currentView === 'miners' && <MinersPage onBack={() => setCurrentView('mining')} />}
+                  {currentView === 'guide' && <GuidePage onBack={() => setCurrentView('mining')} />}
+                  {currentView === 'ledger' && <LedgerPage onBack={() => setCurrentView('mining')} />}
+                  {currentView === 'cards' && <PowerCardsPage onBack={() => setCurrentView('mining')} />}
+                </>
+              )} />
             </Switch>
           </WouterRouter>
         </ErrorBoundary>
