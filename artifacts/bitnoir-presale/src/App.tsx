@@ -3112,7 +3112,7 @@ function computeInitialMiningSnapshot(address: string | undefined, isVerifiedNod
   let sessionElapsedSec = saved.sessionElapsedSec;
   let isMiningSessionActive = false;
 
-  const oneTimeCompleteKey = 'bitnoir-cycle-complete-test-v1';
+  const oneTimeCompleteKey = 'bitnoir-cycle-complete-test-v2';
   if (!safeStorageGet(oneTimeCompleteKey)) {
     safeStorageSet(oneTimeCompleteKey, address);
     alreadyStarted = true;
@@ -3155,6 +3155,81 @@ function computeInitialMiningSnapshot(address: string | undefined, isVerifiedNod
   };
 }
 
+interface FlyingBitsParticle {
+  id: number;
+  startX: number;
+  startY: number;
+  midX: number;
+  midY: number;
+  endX: number;
+  endY: number;
+  delay: number;
+  duration: number;
+  size: number;
+  spinDeg: number;
+}
+
+const FlyingBitsToken = memo(function FlyingBitsToken({ particle }: { particle: FlyingBitsParticle }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof el.animate !== 'function') return;
+    const anim = el.animate(
+      [
+        {
+          transform: `translate3d(${particle.startX}px, ${particle.startY}px, 0) scale(0.45) rotate(0deg)`,
+          opacity: 0,
+        },
+        {
+          transform: `translate3d(${particle.startX}px, ${particle.startY - 14}px, 0) scale(1.12) rotate(${Math.round(particle.spinDeg * 0.18)}deg)`,
+          opacity: 1,
+          offset: 0.16,
+        },
+        {
+          transform: `translate3d(${particle.midX}px, ${particle.midY}px, 0) scale(1.0) rotate(${Math.round(particle.spinDeg * 0.58)}deg)`,
+          opacity: 1,
+          offset: 0.58,
+        },
+        {
+          transform: `translate3d(${particle.endX}px, ${particle.endY}px, 0) scale(0.62) rotate(${particle.spinDeg}deg)`,
+          opacity: 0.95,
+          offset: 0.9,
+        },
+        {
+          transform: `translate3d(${particle.endX}px, ${particle.endY}px, 0) scale(0.2) rotate(${particle.spinDeg}deg)`,
+          opacity: 0,
+        },
+      ],
+      {
+        duration: particle.duration,
+        delay: particle.delay,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'forwards',
+      },
+    );
+    return () => anim.cancel();
+  }, [particle]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        marginLeft: -particle.size / 2,
+        marginTop: -particle.size / 2,
+        opacity: 0,
+        willChange: 'transform, opacity',
+        filter: 'drop-shadow(0 0 8px rgba(247, 147, 26, 0.55))',
+      }}
+    >
+      <BitsMark size={particle.size} />
+    </div>
+  );
+});
+
 function MiningPage({
   isVisible = true,
   onOpenAssets,
@@ -3178,6 +3253,13 @@ function MiningPage({
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [isContributing, setIsContributing] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
+  const [flyingTokens, setFlyingTokens] = useState<FlyingBitsParticle[]>([]);
+  const [ledgerPulse, setLedgerPulse] = useState(false);
+
+  const counterAreaRef = useRef<HTMLDivElement>(null);
+  const claimBtnRef = useRef<HTMLButtonElement>(null);
+  const ledgerBtnRef = useRef<HTMLButtonElement>(null);
+  const claimAnimTimersRef = useRef<number[]>([]);
 
   const isConnected = Boolean(user?.solanaAddress);
   const isVerified = Boolean(user?.solanaAddress && user?.isVerified);
@@ -3607,6 +3689,67 @@ function MiningPage({
     }
   };
 
+  useEffect(() => {
+    return () => {
+      claimAnimTimersRef.current.forEach((t) => window.clearTimeout(t));
+      claimAnimTimersRef.current = [];
+    };
+  }, []);
+
+  const triggerClaimToLedgerAnimation = () => {
+    claimAnimTimersRef.current.forEach((t) => window.clearTimeout(t));
+    claimAnimTimersRef.current = [];
+
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+    const ledgerRect = ledgerBtnRef.current?.getBoundingClientRect();
+    const claimRect = claimBtnRef.current?.getBoundingClientRect();
+    const counterRect = counterAreaRef.current?.getBoundingClientRect();
+
+    if (!prefersReducedMotion && ledgerRect && (claimRect || counterRect)) {
+      const endX = ledgerRect.left + ledgerRect.width * 0.42;
+      const endY = ledgerRect.top + ledgerRect.height * 0.5;
+      const batchBase = Date.now();
+      const particles: FlyingBitsParticle[] = Array.from({ length: 10 }, (_, idx) => {
+        const useCounterOrigin = counterRect && idx % 2 === 0;
+        const originRect = useCounterOrigin ? counterRect : (claimRect || counterRect)!;
+        const startX =
+          originRect.left +
+          originRect.width * (useCounterOrigin ? 0.28 + (idx / 10) * 0.35 : 0.35 + (idx / 10) * 0.3);
+        const startY = originRect.top + originRect.height * 0.48 + ((idx % 3) - 1) * 8;
+        const arcOffsetX = (idx % 2 === 0 ? -1 : 1) * (18 + (idx % 4) * 14);
+        const arcLiftY = 48 + (idx % 3) * 24;
+        const midX = (startX + endX) / 2 + arcOffsetX;
+        const midY = Math.min(startY, endY) - arcLiftY;
+        return {
+          id: batchBase + idx,
+          startX,
+          startY,
+          midX,
+          midY,
+          endX: endX + ((idx % 3) - 1) * 4,
+          endY: endY + ((idx % 2 === 0 ? -1 : 1) * 2),
+          delay: idx * 36,
+          duration: 700 + (idx % 3) * 85,
+          size: idx % 3 === 0 ? 22 : 18,
+          spinDeg: (idx % 2 === 0 ? 1 : -1) * (180 + idx * 24),
+        };
+      });
+      setFlyingTokens(particles);
+
+      const pulseStart = window.setTimeout(() => setLedgerPulse(true), 460);
+      const pulseEnd = window.setTimeout(() => setLedgerPulse(false), 1120);
+      const clearParticles = window.setTimeout(() => setFlyingTokens([]), 1450);
+      claimAnimTimersRef.current.push(pulseStart, pulseEnd, clearParticles);
+    } else {
+      setLedgerPulse(true);
+      const pulseEnd = window.setTimeout(() => setLedgerPulse(false), 750);
+      claimAnimTimersRef.current.push(pulseEnd);
+    }
+  };
+
   // Claim handler (works for both 3h Base users and 24h Verified users)
   const handleClaimMinedBits = async () => {
     if (!isConnected) {
@@ -3651,10 +3794,7 @@ function MiningPage({
           hasStartedMiningOnce: true,
         });
       }
-      toast({
-        description: `Claimed ${claimedAmount.toFixed(4)} Bits to your balance.`,
-        variant: 'success',
-      });
+      triggerClaimToLedgerAnimation();
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
       void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
     } catch (err) {
@@ -3903,7 +4043,7 @@ function MiningPage({
                 )}
               </div>
             )}
-            <div className="pob-live-info relative z-10">
+            <div ref={counterAreaRef} className="pob-live-info relative z-10">
               {/* STOPWATCH PRECISION POINTS COUNTER */}
               <StopwatchPointsCounter
                 ratePerHour={totalMiningRatePerHour}
@@ -3960,8 +4100,13 @@ function MiningPage({
                 </button>
 
                 <button
+                  ref={ledgerBtnRef}
                   type="button"
-                  className="claimed-points-top-btn"
+                  className={`claimed-points-top-btn transition-all duration-200 ${
+                    ledgerPulse
+                      ? '!border-[#34d399]/75 !bg-[#10b981]/20 shadow-[0_0_20px_rgba(52,211,153,0.45)] scale-[1.05]'
+                      : ''
+                  }`}
                   onClick={onOpenLedger}
                   title="Open Claimed Points Ledger"
                 >
@@ -3984,6 +4129,7 @@ function MiningPage({
                 </button>
               ) : (
                 <button
+                  ref={claimBtnRef}
                   key="claim-mining-btn"
                   type="button"
                   className={is20PercentReached ? 'claim-btn-active-colorful' : 'claim-btn-plane'}
@@ -4025,6 +4171,17 @@ function MiningPage({
           </div>
         </div>
       </main>
+
+      {flyingTokens.length > 0 && (
+        <div
+          className="fixed inset-0 pointer-events-none z-[140] overflow-hidden"
+          aria-hidden="true"
+        >
+          {flyingTokens.map((particle) => (
+            <FlyingBitsToken key={particle.id} particle={particle} />
+          ))}
+        </div>
+      )}
 
       {/* MODALS */}
       <ConnectWalletModal open={connectModalOpen} onClose={() => setConnectModalOpen(false)} />
