@@ -7193,3 +7193,109 @@ a {
   user-select: none !important;
   -webkit-user-drag: none !important;
 }
+
+/* ==========================================================================
+   SOLANA WALLET KIT MODAL (BITNOIR OBSIDIAN + AMBER THEME)
+   ========================================================================== */
+.wallet-adapter-modal-overlay {
+  background: rgba(0, 0, 0, 0.8) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.wallet-adapter-modal-wrapper {
+  background: #121212 !important;
+  border: 1px solid rgba(255, 255, 255, 0.085) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.9) !important;
+  font-family: var(--app-font-sans) !important;
+  max-width: 420px !important;
+}
+
+.wallet-adapter-modal-title {
+  color: #ffffff !important;
+  font-family: var(--app-font-sans) !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.015em !important;
+  padding: 28px 48px 18px 24px !important;
+  text-align: left !important;
+}
+
+.wallet-adapter-modal-button-close {
+  background: #181818 !important;
+  border: 1px solid rgba(255, 255, 255, 0.085) !important;
+  top: 20px !important;
+  right: 20px !important;
+  padding: 8px !important;
+}
+
+.wallet-adapter-modal-button-close svg {
+  fill: #a1a1aa !important;
+}
+
+.wallet-adapter-modal-button-close:hover svg {
+  fill: #ffffff !important;
+}
+
+.wallet-adapter-modal-list {
+  margin: 0 0 10px 0 !important;
+  padding: 0 18px 16px 18px !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button {
+  background: #181818 !important;
+  border: 1px solid rgba(255, 255, 255, 0.075) !important;
+  border-radius: 12px !important;
+  color: #f4f4f5 !important;
+  font-family: var(--app-font-sans) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  height: 50px !important;
+  margin-bottom: 8px !important;
+  padding: 0 16px !important;
+  transition: border-color 0.14s ease, background-color 0.14s ease !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button:hover {
+  background: #1d1d1d !important;
+  border-color: rgba(247, 147, 26, 0.5) !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button span {
+  color: #f59e0b !important;
+  font-family: var(--app-font-mono) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+
+.wallet-adapter-modal-list-more {
+  color: #a1a1aa !important;
+  font-family: var(--app-font-sans) !important;
+  font-size: 12px !important;
+  padding: 8px 24px 18px 24px !important;
+}
+
+.wallet-adapter-modal-list-more svg {
+  fill: #f59e0b !important;
+}
+
+.wallet-adapter-modal-middle {
+  padding: 12px 24px 24px 24px !important;
+}
+
+.wallet-adapter-modal-middle-button {
+  background: transparent !important;
+  border: 1px solid rgba(245, 158, 11, 0.82) !important;
+  color: #f59e0b !important;
+  border-radius: 10px !important;
+  font-family: var(--app-font-sans) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+
+.wallet-adapter-modal-middle-button:hover {
+  background: rgba(245, 158, 11, 0.1) !important;
+  border-color: #fbbf24 !important;
+  color: #fbbf24 !important;
+}
+

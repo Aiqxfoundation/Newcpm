@@ -1,23 +1,35 @@
-import { createContext, memo, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
+  ConnectionProvider,
+  WalletProvider,
+  useConnection,
+  useWallet,
+} from '@solana/wallet-adapter-react';
+import { WalletModalProvider, useWalletModal } from '@solana/wallet-adapter-react-ui';
+import { WalletAdapterNetwork, type WalletError } from '@solana/wallet-adapter-base';
+import { PhantomWalletAdapter } from '@solana/wallet-adapter-phantom';
+import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare';
+import { CoinbaseWalletAdapter } from '@solana/wallet-adapter-coinbase';
+import { TrustWalletAdapter } from '@solana/wallet-adapter-trust';
+import {
   AlertTriangle, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight,
-  Copy, ExternalLink, Lock, RefreshCw,
-  ScrollText, Send, ShieldCheck, Sparkles, Wallet, X, Zap
+  Copy, Lock, RefreshCw,
+  ScrollText, Send, ShieldCheck, Wallet, X, Zap
 } from 'lucide-react';
 import {
   getGetMyAccountQueryKey, getGetMyActivityQueryKey, useGetMyAccount,
 } from '@workspace/api-client-react';
-import { Route, Switch, Router as WouterRouter } from 'wouter';
+import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { toast } from '@/hooks/use-toast';
 import {
+  bytesToBase64,
   calculateSolPowerBoost,
   claimLocalUniqueUid,
-  generateDemoSolanaAddress,
+  classifyWalletError,
   getLocalWalletActivities,
-  getPhantomSolanaProvider,
   getWalletMiningState,
   isValidSolanaAddress,
   isValidUidFormat,
@@ -32,6 +44,7 @@ import {
   sendSolanaTransactionOnchain,
   SOL_POWER_MAX_RATE_PER_HOUR,
   SOL_POWER_MAX_SOL,
+  SOLANA_RPC_ENDPOINT,
   VERIFICATION_FEE_SOL,
 } from './lib/solana';
 import {
@@ -85,6 +98,11 @@ const basePath = import.meta.env.BASE_PATH ? import.meta.env.BASE_PATH.replace(/
 function readableError(error: unknown, fallback: string): string {
   if (!error) return fallback;
 
+  const classified = classifyWalletError(error, 'Request');
+  if (classified?.message) {
+    return classified.message;
+  }
+
   const rawMsg =
     error instanceof Error
       ? error.message
@@ -104,20 +122,18 @@ function readableError(error: unknown, fallback: string): string {
   if (/failed to fetch|networkerror|load failed|network request failed/i.test(trimmed)) {
     return 'Network connection lost. Please check your internet and try again.';
   }
-  if (anyErr?.code === 4001 || /user rejected|rejected the request|cancelled in phantom/i.test(trimmed)) {
-    return 'Wallet request was cancelled.';
-  }
-  if (anyErr?.code === -32002 || /already pending/i.test(trimmed)) {
-    return 'A wallet request is already pending in Phantom.';
-  }
-  if (anyErr?.code === 4100) {
-    return 'Please unlock Phantom and try again.';
-  }
   // Never expose raw HTML error pages or stack traces in user-facing alerts
   if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.length > 220) {
     return fallback;
   }
   return trimmed;
+}
+
+// Strictly in-memory session token (never persisted to localStorage/sessionStorage)
+let activeAuthBearerToken = '';
+
+function setInMemoryAuthToken(token: string) {
+  activeAuthBearerToken = token || '';
 }
 
 async function apiFetchJson<T = any>(
@@ -128,8 +144,13 @@ async function apiFetchJson<T = any>(
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers = new Headers(options.headers || undefined);
+    if (activeAuthBearerToken && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${activeAuthBearerToken}`);
+    }
     const res = await fetch(url, {
       ...options,
+      headers,
       signal: options.signal ?? controller.signal,
     });
     const text = await res.text();
@@ -142,9 +163,15 @@ async function apiFetchJson<T = any>(
       }
     }
     if (!res.ok) {
+      if (res.status === 401 && activeAuthBearerToken && !url.includes('/api/auth/verify')) {
+        activeAuthBearerToken = '';
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('bitnoir-auth-cleared'));
+        }
+      }
       const statusFallback =
         res.status === 401
-          ? 'Please connect your Solana wallet first.'
+          ? 'Please sign in with your Solana wallet signature first.'
           : res.status === 403
             ? 'Verification required for this action.'
             : res.status === 404
@@ -456,8 +483,48 @@ function shortSolanaAddress(addr: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// AUTH & WALLET CONTEXT (SOLANA PHANTOM + SEAMLESS MINER IDENTITY)
+// SOLANA WALLET KIT PROVIDER & AUTH CONTEXT (WALLET STANDARD + ADAPTERS)
 // ---------------------------------------------------------------------------
+function SolanaWalletKitProvider({ children }: { children: ReactNode }) {
+  const endpoint = SOLANA_RPC_ENDPOINT;
+  const wallets = useMemo(
+    () => [
+      new PhantomWalletAdapter(),
+      new SolflareWalletAdapter({ network: WalletAdapterNetwork.Testnet }),
+      new TrustWalletAdapter(),
+      new CoinbaseWalletAdapter(),
+    ],
+    [],
+  );
+
+  const handleWalletError = useCallback((error: WalletError) => {
+    const name = String(error?.name || '');
+    const msg = String(error?.message || '');
+    // Ignore background autoConnect noise and transaction errors already surfaced by modal handlers
+    if (
+      name === 'WalletNotReadyError' ||
+      name === 'WalletWindowClosedError' ||
+      name === 'WalletSendTransactionError' ||
+      name === 'WalletSignTransactionError' ||
+      /not installed|not detected/i.test(msg)
+    ) {
+      return;
+    }
+    toast({
+      description: readableError(error, 'Unable to connect Solana wallet.'),
+      variant: 'destructive',
+    });
+  }, []);
+
+  return (
+    <ConnectionProvider endpoint={endpoint} config={{ commitment: 'confirmed' }}>
+      <WalletProvider wallets={wallets} autoConnect onError={handleWalletError}>
+        <WalletModalProvider>{children}</WalletModalProvider>
+      </WalletProvider>
+    </ConnectionProvider>
+  );
+}
+
 type AuthUser = {
   id: string;
   solanaAddress: string;
@@ -472,36 +539,46 @@ type AuthUser = {
 const AuthContext = createContext<{
   user: AuthUser | null;
   ready: boolean;
-  connectWallet: (customAddress?: string) => Promise<string>;
+  connecting: boolean;
+  isSignedIn: boolean;
+  signingIn: boolean;
+  walletName: string;
+  openWalletModal: () => void;
+  connectWallet: () => Promise<string>;
+  signInWallet: () => Promise<boolean>;
+  ensureSignedIn: () => Promise<boolean>;
   disconnectWallet: () => Promise<void>;
   verifyWalletOnchain: () => Promise<{ signature: string; uid: string }>;
 }>({
   user: null,
   ready: false,
+  connecting: false,
+  isSignedIn: false,
+  signingIn: false,
+  walletName: '',
+  openWalletModal: () => undefined,
   connectWallet: async () => '',
+  signInWallet: async () => false,
+  ensureSignedIn: async () => false,
   disconnectWallet: async () => undefined,
   verifyWalletOnchain: async () => ({ signature: '', uid: '' }),
 });
 
-function readSavedAuthUser(): AuthUser | null {
-  const saved = safeStorageGet('bitnoir-solana-address');
-  const legacyUser = safeStorageGet('bitnoir-username');
-  if (!saved || saved === PROTOCOL_TREASURY_SOLANA || legacyUser === 'satoshinode') {
-    return null;
-  }
-  if (!isValidSolanaAddress(saved)) return null;
-  const isVer = safeStorageGet(`bitnoir-verified-${saved}`) === 'true';
-  const verTx = safeStorageGet(`bitnoir-verified-tx-${saved}`) || undefined;
+function buildAuthUserFromAddress(address: string, legacyUsername?: string): AuthUser {
+  const isVer = safeStorageGet(`bitnoir-verified-${address}`) === 'true';
+  const verTx = safeStorageGet(`bitnoir-verified-tx-${address}`) || undefined;
   let uid = '';
   if (isVer) {
-    const savedUid = safeStorageGet(`bitnoir-uid-${saved}`) || '';
-    uid = claimLocalUniqueUid(saved, isValidUidFormat(savedUid) ? savedUid : undefined);
-    safeStorageSet(`bitnoir-uid-${saved}`, uid);
-    registerVerifiedUid(uid, saved);
+    const savedUid = safeStorageGet(`bitnoir-uid-${address}`) || '';
+    uid = claimLocalUniqueUid(address, isValidUidFormat(savedUid) ? savedUid : undefined);
+    safeStorageSet(`bitnoir-uid-${address}`, uid);
+    registerVerifiedUid(uid, address);
+    unlockSpiderCardOnVerifiedUid(address);
   }
+  void legacyUsername;
   return {
-    id: saved,
-    solanaAddress: saved,
+    id: address,
+    solanaAddress: address,
     uid,
     name: uid ? `UID ${uid}` : 'Wallet',
     email: uid ? `${uid}@bitnoir.io` : '',
@@ -511,11 +588,67 @@ function readSavedAuthUser(): AuthUser | null {
   };
 }
 
-function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => readSavedAuthUser());
-  const [ready, setReady] = useState<boolean>(() => Boolean(readSavedAuthUser()));
+function readSavedAuthUser(): AuthUser | null {
+  const walletAdapterName = safeStorageGet('walletName');
+  const saved = safeStorageGet('bitnoir-solana-address');
+  const legacyUser = safeStorageGet('bitnoir-username');
+  if (!walletAdapterName || !saved || saved === PROTOCOL_TREASURY_SOLANA || legacyUser === 'satoshinode') {
+    return null;
+  }
+  if (!isValidSolanaAddress(saved)) return null;
+  return buildAuthUserFromAddress(saved, legacyUser || undefined);
+}
 
-  const syncBackendSession = async (payload: {
+function AuthProvider({ children }: { children: ReactNode }) {
+  const { connection } = useConnection();
+  const {
+    publicKey,
+    connected,
+    connecting,
+    wallet,
+    connect: adapterConnect,
+    disconnect: adapterDisconnect,
+    signTransaction,
+    sendTransaction,
+    signMessage,
+    signIn: adapterSignIn,
+  } = useWallet();
+  const { setVisible } = useWalletModal();
+
+  const [user, setUser] = useState<AuthUser | null>(() => readSavedAuthUser());
+  const [ready, setReady] = useState<boolean>(false);
+  const [signedInAddress, setSignedInAddress] = useState<string>('');
+  const [signingIn, setSigningIn] = useState<boolean>(false);
+
+  const wasConnectedRef = useRef(false);
+  const userInitiatedRef = useRef(false);
+  const lastSyncedAddrRef = useRef<string>('');
+  const signedAddressRef = useRef<string>('');
+  const signInPromiseRef = useRef<{ address: string; promise: Promise<boolean> } | null>(null);
+
+  const clearSignedSession = useCallback((notifyBackend = false) => {
+    const oldToken = activeAuthBearerToken;
+    setInMemoryAuthToken('');
+    signedAddressRef.current = '';
+    setSignedInAddress('');
+    if (notifyBackend && oldToken) {
+      void fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${oldToken}` },
+      }).catch(() => undefined);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onAuthCleared = () => {
+      signedAddressRef.current = '';
+      setSignedInAddress('');
+    };
+    window.addEventListener('bitnoir-auth-cleared', onAuthCleared);
+    return () => window.removeEventListener('bitnoir-auth-cleared', onAuthCleared);
+  }, []);
+
+  const syncBackendSession = useCallback(async (payload: {
     solanaAddress?: string;
     isVerified?: boolean;
     verifiedTx?: string;
@@ -545,6 +678,21 @@ function AuthProvider({ children }: { children: ReactNode }) {
               : prev,
           );
         }
+      } else if (payload.solanaAddress && res?.account && !res.account.isVerified && payload.isVerified) {
+        safeStorageRemove(`bitnoir-verified-${payload.solanaAddress}`);
+        safeStorageRemove(`bitnoir-verified-tx-${payload.solanaAddress}`);
+        safeStorageRemove(`bitnoir-uid-${payload.solanaAddress}`);
+        setUser((prev) =>
+          prev && prev.solanaAddress === payload.solanaAddress
+            ? {
+                ...prev,
+                isVerified: false,
+                verifiedTx: undefined,
+                uid: '',
+                name: shortSolanaAddress(payload.solanaAddress),
+              }
+            : prev,
+        );
       }
     } catch (err) {
       console.warn('Session sync warning:', err);
@@ -552,10 +700,113 @@ function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('bitnoir-session-synced'));
     }
-  };
+  }, []);
 
+  const signInWallet = useCallback(async (): Promise<boolean> => {
+    const addr = publicKey?.toBase58() || '';
+    if (!connected || !addr || !isValidSolanaAddress(addr)) {
+      throw new Error('Please connect your Solana wallet first.');
+    }
+    if (activeAuthBearerToken && signedAddressRef.current === addr) {
+      return true;
+    }
+    if (signInPromiseRef.current && signInPromiseRef.current.address === addr) {
+      return signInPromiseRef.current.promise;
+    }
+
+    const run = (async () => {
+      setSigningIn(true);
+      try {
+        const challenge = await apiFetchJson<{
+          nonce: string;
+          message: string;
+          domain: string;
+          issuedAt: string;
+        }>('/api/auth/nonce', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ solanaAddress: addr }),
+        });
+
+        let signatureBytes: Uint8Array;
+        let signedMessageBytes: Uint8Array;
+
+        if (signMessage) {
+          const messageBytes = new TextEncoder().encode(challenge.message);
+          signatureBytes = await signMessage(messageBytes);
+          signedMessageBytes = messageBytes;
+        } else if (adapterSignIn) {
+          const siwsOut = await adapterSignIn({
+            domain: challenge.domain,
+            address: addr,
+            statement: 'Sign in to verify wallet ownership on Bitnoir (Solana Testnet).',
+            nonce: challenge.nonce,
+            issuedAt: challenge.issuedAt,
+            chainId: 'solana:testnet',
+          });
+          signatureBytes = siwsOut.signature;
+          signedMessageBytes = siwsOut.signedMessage;
+        } else {
+          throw new Error(
+            'This wallet does not support message signature verification. Please use Phantom or Solflare.',
+          );
+        }
+
+        const verified = await apiFetchJson<{
+          success: boolean;
+          token: string;
+          address: string;
+        }>('/api/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            solanaAddress: addr,
+            nonce: challenge.nonce,
+            signatureBase64: bytesToBase64(signatureBytes),
+            signedMessageBase64: bytesToBase64(signedMessageBytes),
+          }),
+        });
+
+        if (!verified?.token) {
+          throw new Error('Wallet signature verification did not return a valid session.');
+        }
+
+        setInMemoryAuthToken(verified.token);
+        signedAddressRef.current = addr;
+        setSignedInAddress(addr);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('bitnoir-session-synced'));
+        }
+        toast({
+          description: 'Wallet ownership verified.',
+          variant: 'success',
+        });
+        return true;
+      } finally {
+        setSigningIn(false);
+        if (signInPromiseRef.current?.address === addr) {
+          signInPromiseRef.current = null;
+        }
+      }
+    })();
+
+    signInPromiseRef.current = { address: addr, promise: run };
+    return run;
+  }, [connected, publicKey, signMessage, adapterSignIn]);
+
+  const ensureSignedIn = useCallback(async (): Promise<boolean> => {
+    const addr = publicKey?.toBase58() || '';
+    if (!connected || !addr) {
+      throw new Error('Please connect your Solana wallet first.');
+    }
+    if (activeAuthBearerToken && signedAddressRef.current === addr) {
+      return true;
+    }
+    return signInWallet();
+  }, [connected, publicKey, signInWallet]);
+
+  // Capture ?ref=<uid> referral attribution if present
   useEffect(() => {
-    // Capture ?ref=<uid> referral attribution if present
     if (typeof window !== 'undefined') {
       const refParam = new URLSearchParams(window.location.search).get('ref');
       const cleanRef = normalizeUidInput(refParam || '');
@@ -563,167 +814,107 @@ function AuthProvider({ children }: { children: ReactNode }) {
         safeStorageSet('bitnoir-pending-ref', cleanRef);
       }
     }
-
-    // 1. Check existing saved Solana public address from localStorage
-    const saved = safeStorageGet('bitnoir-solana-address');
-    const legacyUser = safeStorageGet('bitnoir-username');
-
-    // Clear legacy mock satoshinode / treasury account
-    if (saved === PROTOCOL_TREASURY_SOLANA || legacyUser === 'satoshinode') {
-      safeStorageRemove('bitnoir-solana-address');
-      safeStorageRemove('bitnoir-username');
-      setUser(null);
-      void syncBackendSession({ reset: true });
-      setReady(true);
-      return;
-    }
-
-    if (saved && isValidSolanaAddress(saved)) {
-      const isVer = safeStorageGet(`bitnoir-verified-${saved}`) === 'true';
-      const verTx = safeStorageGet(`bitnoir-verified-tx-${saved}`) || undefined;
-      const legacyForWallet = safeStorageGet(`bitnoir-username-${saved}`) || legacyUser || undefined;
-      let uid = '';
-      if (isVer) {
-        const savedUid = safeStorageGet(`bitnoir-uid-${saved}`) || '';
-        uid = claimLocalUniqueUid(saved, isValidUidFormat(savedUid) ? savedUid : undefined);
-        safeStorageSet(`bitnoir-uid-${saved}`, uid);
-        registerVerifiedUid(uid, saved);
-        unlockSpiderCardOnVerifiedUid(saved);
-      }
-      setUser({
-        id: saved,
-        solanaAddress: saved,
-        uid,
-        name: uid ? `UID ${uid}` : 'Wallet',
-        email: uid ? `${uid}@bitnoir.io` : '',
-        isAdmin: false,
-        isVerified: isVer,
-        verifiedTx: verTx,
-      });
-      void syncBackendSession({
-        solanaAddress: saved,
-        isVerified: isVer,
-        verifiedTx: verTx,
-        uid,
-        legacyUsername: legacyForWallet,
-      });
-      setReady(true);
-      return;
-    }
-
-    // 2. Try silent auto-connect if Phantom is available
-    const provider = getPhantomSolanaProvider();
-    if (provider && provider.connect) {
-      provider
-        .connect({ onlyIfTrusted: true })
-        .then((resp: any) => {
-          const address = resp?.publicKey?.toString?.() || '';
-          if (!isValidSolanaAddress(address)) {
-            setUser(null);
-            void syncBackendSession({ reset: true });
-            return;
-          }
-          safeStorageSet('bitnoir-solana-address', address);
-          const isVer = safeStorageGet(`bitnoir-verified-${address}`) === 'true';
-          const verTx = safeStorageGet(`bitnoir-verified-tx-${address}`) || undefined;
-          const legacyForWallet = safeStorageGet(`bitnoir-username-${address}`) || undefined;
-          let uid = '';
-          if (isVer) {
-            const savedUid = safeStorageGet(`bitnoir-uid-${address}`) || '';
-            uid = claimLocalUniqueUid(address, isValidUidFormat(savedUid) ? savedUid : undefined);
-            safeStorageSet(`bitnoir-uid-${address}`, uid);
-            registerVerifiedUid(uid, address);
-            unlockSpiderCardOnVerifiedUid(address);
-          }
-          setUser({
-            id: address,
-            solanaAddress: address,
-            uid,
-            name: uid ? `UID ${uid}` : 'Wallet',
-            email: uid ? `${uid}@bitnoir.io` : '',
-            isAdmin: false,
-            isVerified: isVer,
-            verifiedTx: verTx,
-          });
-          void syncBackendSession({
-            solanaAddress: address,
-            isVerified: isVer,
-            verifiedTx: verTx,
-            uid,
-            legacyUsername: legacyForWallet,
-          });
-        })
-        .catch(() => {
-          setUser(null);
-          void syncBackendSession({ reset: true });
-        })
-        .finally(() => {
-          setReady(true);
-        });
-    } else {
-      setUser(null);
-      void syncBackendSession({ reset: true });
-      setReady(true);
-    }
   }, []);
 
-  const connectWallet = async (customAddress?: string): Promise<string> => {
-    let address: string = customAddress?.trim() || '';
-    if (!address) {
-      const provider = getPhantomSolanaProvider();
-      if (!provider) {
-        throw new Error('PHANTOM_NOT_INSTALLED');
+  // Sync real Solana Wallet Kit state into AuthUser & backend session
+  useEffect(() => {
+    const activeAddress = connected && publicKey ? publicKey.toBase58() : '';
+
+    if (activeAddress && isValidSolanaAddress(activeAddress)) {
+      const justJoined = lastSyncedAddrRef.current !== activeAddress;
+      if (signedAddressRef.current && signedAddressRef.current !== activeAddress) {
+        clearSignedSession(true);
       }
-      const resp = await provider.connect();
-      if (!resp?.publicKey) {
-        throw new Error('Failed to retrieve Solana public address from wallet.');
+      wasConnectedRef.current = true;
+      lastSyncedAddrRef.current = activeAddress;
+
+      safeStorageSet('bitnoir-solana-address', activeAddress);
+      const legacyUser = safeStorageGet('bitnoir-username');
+      const legacyForWallet = safeStorageGet(`bitnoir-username-${activeAddress}`) || legacyUser || undefined;
+      const authUser = buildAuthUserFromAddress(activeAddress, legacyForWallet);
+
+      setUser(authUser);
+      void syncBackendSession({
+        solanaAddress: activeAddress,
+        isVerified: authUser.isVerified,
+        verifiedTx: authUser.verifiedTx,
+        uid: authUser.uid,
+        legacyUsername: legacyForWallet,
+      });
+
+      if (justJoined && userInitiatedRef.current) {
+        userInitiatedRef.current = false;
+        const autoTimer = window.setTimeout(() => {
+          if (!activeAuthBearerToken || signedAddressRef.current !== activeAddress) {
+            void signInWallet().catch((err) => {
+              toast({
+                description: readableError(
+                  err,
+                  'Please sign the message in your wallet to verify ownership.',
+                ),
+                variant: 'warning',
+              });
+            });
+          }
+        }, 250);
+        setReady(true);
+        return () => window.clearTimeout(autoTimer);
       }
-      address = resp.publicKey.toString();
+      setReady(true);
+      return undefined;
     }
 
-    if (!isValidSolanaAddress(address)) {
-      throw new Error('Please provide a valid Solana public address (32-44 base58 characters).');
+    if (!connecting) {
+      const hasSavedWalletAdapter = Boolean(safeStorageGet('walletName'));
+      // Clear state if user disconnected or no real Wallet Kit adapter is active
+      if (wasConnectedRef.current || !hasSavedWalletAdapter) {
+        wasConnectedRef.current = false;
+        lastSyncedAddrRef.current = '';
+        clearSignedSession(true);
+        safeStorageRemove('bitnoir-solana-address');
+        safeStorageRemove('bitnoir-username');
+        setUser(null);
+        void syncBackendSession({ reset: true });
+      }
+      setReady(true);
     }
+    return undefined;
+  }, [connected, connecting, publicKey, syncBackendSession, clearSignedSession, signInWallet]);
 
-    safeStorageSet('bitnoir-solana-address', address);
-    const isVer = safeStorageGet(`bitnoir-verified-${address}`) === 'true';
-    const verTx = safeStorageGet(`bitnoir-verified-tx-${address}`) || undefined;
-    const legacyForWallet = safeStorageGet(`bitnoir-username-${address}`) || undefined;
-    let uid = '';
-    if (isVer) {
-      const savedUid = safeStorageGet(`bitnoir-uid-${address}`) || '';
-      uid = claimLocalUniqueUid(address, isValidUidFormat(savedUid) ? savedUid : undefined);
-      safeStorageSet(`bitnoir-uid-${address}`, uid);
-      registerVerifiedUid(uid, address);
-      unlockSpiderCardOnVerifiedUid(address);
+  const openWalletModal = useCallback(() => {
+    userInitiatedRef.current = true;
+    setVisible(true);
+  }, [setVisible]);
+
+  const connectWallet = useCallback(async (): Promise<string> => {
+    if (connected && publicKey) {
+      return publicKey.toBase58();
     }
-    const authUser: AuthUser = {
-      id: address,
-      solanaAddress: address,
-      uid,
-      name: uid ? `UID ${uid}` : 'Wallet',
-      email: uid ? `${uid}@bitnoir.io` : '',
-      isAdmin: false,
-      isVerified: isVer,
-      verifiedTx: verTx,
-    };
-    setUser(authUser);
-    await syncBackendSession({
-      solanaAddress: address,
-      isVerified: isVer,
-      verifiedTx: verTx,
-      uid,
-      legacyUsername: legacyForWallet,
-    });
-    return address;
-  };
+    userInitiatedRef.current = true;
+    if (wallet) {
+      try {
+        await adapterConnect();
+        return wallet.adapter.publicKey?.toBase58() || '';
+      } catch {
+        setVisible(true);
+        return '';
+      }
+    }
+    setVisible(true);
+    return '';
+  }, [connected, publicKey, wallet, adapterConnect, setVisible]);
 
   const verifyWalletOnchain = async (): Promise<{ signature: string; uid: string }> => {
-    if (!user?.solanaAddress) {
+    if (!user?.solanaAddress || !connected) {
       throw new Error('Please connect your Solana wallet first.');
     }
     if (user.isVerified && user.verifiedTx && user.uid) {
       return { signature: user.verifiedTx, uid: user.uid };
+    }
+
+    const signed = await ensureSignedIn();
+    if (!signed) {
+      throw new Error('Please sign the ownership message in your wallet before verifying.');
     }
 
     const result = await sendSolanaTransactionOnchain({
@@ -731,6 +922,11 @@ function AuthProvider({ children }: { children: ReactNode }) {
       toAddress: PROTOCOL_TREASURY_SOLANA,
       amountSol: VERIFICATION_FEE_SOL,
       memo: 'Bitnoir One-Time Node Verification',
+      connection,
+      walletAdapterName: wallet?.adapter?.name,
+      supportedTransactionVersions: wallet?.adapter?.supportedTransactionVersions,
+      signTransaction,
+      sendTransaction,
     });
 
     const sig = result.signature;
@@ -783,27 +979,40 @@ function AuthProvider({ children }: { children: ReactNode }) {
     return { signature: sig, uid: assignedUid };
   };
 
-  const disconnectWallet = async () => {
+  const disconnectWallet = useCallback(async () => {
+    userInitiatedRef.current = false;
+    wasConnectedRef.current = false;
+    lastSyncedAddrRef.current = '';
+    clearSignedSession(true);
     try {
-      const provider = getPhantomSolanaProvider();
-      if (provider && provider.disconnect) {
-        await provider.disconnect();
-      }
+      await adapterDisconnect();
     } catch {
-      // Ignore provider disconnect errors
+      // Ignore adapter disconnect errors
     }
     safeStorageRemove('bitnoir-solana-address');
     safeStorageRemove('bitnoir-username');
+    safeStorageRemove('walletName');
     setUser(null);
     await syncBackendSession({ reset: true });
-  };
+  }, [adapterDisconnect, syncBackendSession, clearSignedSession]);
+
+  const isSignedIn = Boolean(
+    user?.solanaAddress && signedInAddress === user.solanaAddress && activeAuthBearerToken,
+  );
 
   return (
     <AuthContext.Provider
       value={{
         user,
         ready,
+        connecting,
+        isSignedIn,
+        signingIn,
+        walletName: wallet?.adapter?.name || '',
+        openWalletModal,
         connectWallet,
+        signInWallet,
+        ensureSignedIn,
         disconnectWallet,
         verifyWalletOnchain,
       }}
@@ -818,187 +1027,19 @@ function useAuth() {
 }
 
 // ---------------------------------------------------------------------------
-// CONNECT WALLET MODAL (PHANTOM + PREVIEW ADDRESS FALLBACK)
+// CONNECT WALLET TRIGGER (DELEGATES TO SOLANA WALLET KIT MODAL)
 // ---------------------------------------------------------------------------
 function ConnectWalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { connectWallet } = useAuth();
-  const [customAddr, setCustomAddr] = useState('');
-  const [connecting, setConnecting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const { openWalletModal } = useAuth();
 
   useEffect(() => {
-    if (!open) {
-      setFormError(null);
-    }
-  }, [open]);
-
-  if (!open) return null;
-
-  const hasPhantom = Boolean(getPhantomSolanaProvider());
-
-  const handlePhantom = async () => {
-    setFormError(null);
-    setConnecting(true);
-    try {
-      await connectWallet();
-      toast({
-        description: 'Solana wallet connected.',
-        variant: 'success',
-      });
+    if (open) {
+      openWalletModal();
       onClose();
-    } catch (err: any) {
-      if (err?.message === 'PHANTOM_NOT_INSTALLED') {
-        const msg = 'Phantom wallet was not detected. Connect with a Solana address below.';
-        setFormError(msg);
-        toast({
-          description: msg,
-          variant: 'destructive',
-        });
-      } else {
-        const msg = readableError(err, 'Unable to connect Phantom wallet.');
-        setFormError(msg);
-        toast({
-          description: msg,
-          variant: 'destructive',
-        });
-      }
-    } finally {
-      setConnecting(false);
     }
-  };
+  }, [open, openWalletModal, onClose]);
 
-  const handleAddressConnect = async (addrToUse?: string) => {
-    setFormError(null);
-    const target = (addrToUse || customAddr).trim();
-    if (!isValidSolanaAddress(target)) {
-      const msg = 'Please enter a valid Solana wallet address.';
-      setFormError(msg);
-      toast({
-        description: msg,
-        variant: 'destructive',
-      });
-      return;
-    }
-    setConnecting(true);
-    try {
-      await connectWallet(target);
-      toast({
-        description: 'Solana wallet connected.',
-        variant: 'success',
-      });
-      setCustomAddr('');
-      onClose();
-    } catch (err) {
-      const msg = readableError(err, 'Unable to connect wallet.');
-      setFormError(msg);
-      toast({
-        description: msg,
-        variant: 'destructive',
-      });
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: 440,
-          padding: 24,
-          background: '#121212',
-          borderColor: 'rgba(255, 255, 255, 0.085)',
-          borderRadius: 18,
-        }}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-[#181818] border border-white/[0.08] flex items-center justify-center text-[#f7931a]">
-              <PhantomLogo size={18} />
-            </div>
-            <div>
-              <h3 className="m-0 text-base font-bold text-white">Connect Solana Wallet</h3>
-              <p className="m-0 text-[11px] font-mono text-zinc-400">Step 1 of 3 · Wallet Identity</p>
-            </div>
-          </div>
-          <button type="button" className="modal-close-btn" onClick={onClose} aria-label="Close"><X size={16} /></button>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <InlineErrorBanner message={formError} />
-
-          {hasPhantom ? (
-            <button
-              type="button"
-              disabled={connecting}
-              onClick={handlePhantom}
-              className="clean-stake-confirm-btn !w-full !min-h-[44px] !text-xs !font-bold"
-            >
-              <PhantomLogo size={15} />
-              <span>{connecting ? 'Connecting Phantom…' : 'Connect Phantom Wallet'}</span>
-            </button>
-          ) : (
-            <a
-              href="https://phantom.app/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="clean-action-btn-soft !justify-between !px-4 !py-2.5 !w-full"
-            >
-              <span className="flex items-center gap-2 text-xs font-semibold text-white">
-                <PhantomLogo size={15} className="text-[#f7931a]" />
-                Phantom Extension Not Detected — Get Phantom
-              </span>
-              <ExternalLink size={13} className="text-zinc-400" />
-            </a>
-          )}
-
-          <div className="flex items-center gap-2 my-1">
-            <div className="flex-1 h-px bg-white/10" />
-            <span className="text-[10px] font-mono uppercase text-zinc-500">Or Solana Address</span>
-            <div className="flex-1 h-px bg-white/10" />
-          </div>
-
-          <input
-            type="text"
-            placeholder="Paste Solana wallet address (base58)"
-            value={customAddr}
-            onChange={(e) => {
-              setCustomAddr(e.target.value);
-              if (formError) setFormError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && customAddr.trim() && !connecting) {
-                void handleAddressConnect();
-              }
-            }}
-            className="assets-input-field font-mono text-xs"
-          />
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={connecting || !customAddr.trim()}
-              onClick={() => void handleAddressConnect()}
-              className="clean-stake-confirm-btn !flex-1 !min-h-[40px] !text-xs !bg-none !bg-white/10 hover:!bg-white/15 !border-white/15 !text-white !shadow-none !font-bold"
-            >
-              Connect Address
-            </button>
-            <button
-              type="button"
-              disabled={connecting}
-              onClick={() => void handleAddressConnect(generateDemoSolanaAddress())}
-              className="clean-action-btn-soft !min-h-[40px] !text-xs !border-[#f7931a]/35 !text-[#fbbf24]"
-            >
-              <Sparkles size={13} />
-              <span>Quick Test Wallet</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1014,7 +1055,7 @@ function VerifyAndUsernameModal({
   onOpenConnect: () => void;
 }) {
   const client = useQueryClient();
-  const { user, verifyWalletOnchain } = useAuth();
+  const { user, isSignedIn, signingIn, signInWallet, verifyWalletOnchain } = useAuth();
   const [verifying, setVerifying] = useState(false);
   const [copiedUid, setCopiedUid] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -1032,6 +1073,20 @@ function VerifyAndUsernameModal({
   const isVerified = Boolean(user?.isVerified);
   const hasUid = Boolean(user?.uid);
   const isComplete = isConnected && isVerified && hasUid;
+
+  const handleSignInOwnership = async () => {
+    setModalError(null);
+    try {
+      await signInWallet();
+    } catch (err) {
+      const msg = readableError(err, 'Unable to verify wallet ownership signature.');
+      setModalError(msg);
+      toast({
+        description: msg,
+        variant: 'destructive',
+      });
+    }
+  };
 
   const handleVerifyTx = async () => {
     setModalError(null);
@@ -1100,16 +1155,19 @@ function VerifyAndUsernameModal({
         {!isComplete && (
           <>
             <p className="text-xs text-zinc-300 m-0 leading-relaxed mb-4">
-              Base mining (<strong className="text-white">0.01/h · 3h</strong>) is already available. Verify your wallet once (requires a <strong className="text-[#fbbf24]">small one-time onchain fee</strong> to permanently prevent cloning, bots, and farming) to receive your <strong className="text-white">UID</strong> and unlock <strong className="text-[#34d399]">24-hour mining</strong>, <strong className="text-[#fbbf24]">0.1/hr base rate</strong>, and your UID referral link.
+              Base mining (<strong className="text-white">0.01/h · 3h</strong>) is already available. Sign a free ownership message, then verify your wallet once (requires a <strong className="text-[#fbbf24]">small one-time onchain fee</strong> to permanently prevent cloning, bots, and farming) to receive your <strong className="text-white">UID</strong> and unlock <strong className="text-[#34d399]">24-hour mining</strong>, <strong className="text-[#fbbf24]">0.1/hr base rate</strong>, and your UID referral link.
             </p>
 
-            {/* 2-STEP PROGRESS */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4 text-[11px] font-mono">
+            {/* 3-STEP PROGRESS: CONNECT -> SIGN OWNERSHIP (FREE) -> VERIFY ON-CHAIN */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4 text-[11px] font-mono">
               <div className={`px-2.5 py-2 rounded-lg border ${isConnected ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]' : 'bg-white/5 border-white/15 text-white'}`}>
-                1. Connect Wallet {isConnected ? '✓' : ''}
+                1. Connect {isConnected ? '✓' : ''}
               </div>
-              <div className={`px-2.5 py-2 rounded-lg border ${isComplete ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]' : isConnected ? 'bg-[#f7931a]/15 border-[#f7931a]/45 text-[#fbbf24]' : 'bg-white/[0.02] border-white/10 text-zinc-500'}`}>
-                2. Verify → Get UID {isComplete ? '✓' : ''}
+              <div className={`px-2.5 py-2 rounded-lg border ${isSignedIn ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]' : isConnected ? 'bg-[#f7931a]/15 border-[#f7931a]/45 text-[#fbbf24]' : 'bg-white/[0.02] border-white/10 text-zinc-500'}`}>
+                2. Sign Ownership {isSignedIn ? '✓' : ''}
+              </div>
+              <div className={`px-2.5 py-2 rounded-lg border ${isComplete ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]' : isConnected && isSignedIn ? 'bg-[#f7931a]/15 border-[#f7931a]/45 text-[#fbbf24]' : 'bg-white/[0.02] border-white/10 text-zinc-500'}`}>
+                3. Verify Fee {isComplete ? '✓' : ''}
               </div>
             </div>
           </>
@@ -1135,12 +1193,57 @@ function VerifyAndUsernameModal({
               <span>Connect Solana Wallet</span>
             </button>
           </div>
+        ) : !isComplete && !isSignedIn ? (
+          <div className="flex flex-col gap-4">
+            <div className="p-4 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col gap-2 text-xs">
+              <div className="flex items-center justify-between font-mono">
+                <span className="text-zinc-400 font-sans">Connected Address</span>
+                <span className="text-white font-semibold">{shortSolanaAddress(user?.solanaAddress || '')}</span>
+              </div>
+              <div className="flex items-center justify-between font-mono">
+                <span className="text-zinc-400 font-sans">Signature Fee</span>
+                <span className="text-[#34d399] font-semibold">Free (Off-chain)</span>
+              </div>
+              <p className="text-[11px] text-zinc-400 m-0 pt-2 border-t border-white/[0.06] leading-relaxed">
+                Approve the signature request in your wallet to cryptographically prove ownership of this public address before sending the Testnet verification transaction.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={signingIn}
+              onClick={handleSignInOwnership}
+              className="clean-stake-confirm-btn !w-full !min-h-[44px] !text-xs !font-bold"
+            >
+              {signingIn ? (
+                <span className="flex items-center gap-2 justify-center">
+                  <RefreshCw size={14} className="animate-spin" /> Waiting for Wallet Signature…
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 justify-center">
+                  <Lock size={15} /> Sign In With Wallet (Free)
+                </span>
+              )}
+            </button>
+          </div>
         ) : !isComplete ? (
           <div className="flex flex-col gap-4">
             <div className="p-4 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col gap-2.5 text-xs font-mono">
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400 font-sans">Wallet Status</span>
-                <span className="text-[#34d399]">Connected</span>
+                <span className="text-zinc-400 font-sans">Ownership</span>
+                <span className="text-[#34d399] font-semibold">Signed In ✓</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400 font-sans">Network</span>
+                <span className="text-[#fbbf24] font-semibold">Solana Testnet</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400 font-sans">Verification Fee</span>
+                <span className="text-white font-semibold tabular-nums">{VERIFICATION_FEE_SOL} SOL</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400 font-sans">Treasury</span>
+                <span className="text-zinc-300 tabular-nums">{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
                 <span className="text-zinc-400 font-sans">Unlocks</span>
@@ -1218,18 +1321,16 @@ function VerifyAndUsernameModal({
 }
 
 // ---------------------------------------------------------------------------
-// TOP WALLET CONNECT (PURE PHANTOM + SOL BALANCE + VERIFICATION TRIGGER)
+// TOP WALLET CONNECT (SOLANA WALLET KIT + VERIFICATION TRIGGER)
 // ---------------------------------------------------------------------------
 function TopWalletConnect({
   onOpenVerify,
-  onOpenConnect,
 }: {
   onOpenVerify?: () => void;
   onOpenConnect?: () => void;
 }) {
-  const { user, connectWallet, disconnectWallet } = useAuth();
+  const { user, connecting, isSignedIn, signingIn, walletName, openWalletModal, signInWallet, disconnectWallet } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [connecting, setConnecting] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1242,30 +1343,14 @@ function TopWalletConnect({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const handleConnect = async () => {
-    const provider = getPhantomSolanaProvider();
-    if (!provider && onOpenConnect) {
-      onOpenConnect();
-      return;
-    }
-    setConnecting(true);
+  const handleSignInClick = async () => {
     try {
-      await connectWallet();
+      await signInWallet();
+    } catch (err) {
       toast({
-        description: 'Solana wallet connected.',
-        variant: 'success',
+        description: readableError(err, 'Unable to verify wallet ownership signature.'),
+        variant: 'destructive',
       });
-    } catch (err: any) {
-      if (err?.message === 'PHANTOM_NOT_INSTALLED' && onOpenConnect) {
-        onOpenConnect();
-      } else {
-        toast({
-          description: readableError(err, 'Unable to connect wallet.'),
-          variant: 'destructive',
-        });
-      }
-    } finally {
-      setConnecting(false);
     }
   };
 
@@ -1273,7 +1358,7 @@ function TopWalletConnect({
     return (
       <button
         type="button"
-        onClick={handleConnect}
+        onClick={openWalletModal}
         disabled={connecting}
         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-transparent hover:bg-[#f59e0b]/10 border border-[#f59e0b]/80 hover:border-[#fbbf24] text-[#f59e0b] hover:text-[#fbbf24] text-xs font-semibold transition-colors duration-150 cursor-pointer"
       >
@@ -1285,6 +1370,17 @@ function TopWalletConnect({
 
   return (
     <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8 }} ref={dropdownRef}>
+      {!isSignedIn && (
+        <button
+          type="button"
+          disabled={signingIn}
+          onClick={() => void handleSignInClick()}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[10px] bg-[#f7931a]/15 hover:bg-[#f7931a]/25 border border-[#f7931a]/45 text-[#fbbf24] text-[11px] font-semibold transition-colors cursor-pointer"
+        >
+          {signingIn ? <RefreshCw size={12} className="animate-spin" /> : <Lock size={12} />}
+          <span>{signingIn ? 'Signing…' : 'Sign In'}</span>
+        </button>
+      )}
       <button
         type="button"
         onClick={() => setMenuOpen(!menuOpen)}
@@ -1294,7 +1390,7 @@ function TopWalletConnect({
           <Wallet size={13} strokeWidth={2.2} />
         </div>
         <span className="truncate max-w-[140px]">
-          {user.uid ? `UID ${user.uid}` : 'Wallet'}
+          {user.uid ? `UID ${user.uid}` : shortSolanaAddress(user.solanaAddress)}
         </span>
         <ChevronDown size={12} className={`text-zinc-400 transition-transform flex-shrink-0 ${menuOpen ? 'rotate-180' : ''}`} />
       </button>
@@ -1315,6 +1411,39 @@ function TopWalletConnect({
             textAlign: 'left',
           }}
         >
+          {!isSignedIn && (
+            <button
+              type="button"
+              disabled={signingIn}
+              onClick={() => {
+                setMenuOpen(false);
+                void handleSignInClick();
+              }}
+              style={{
+                width: '100%',
+                marginBottom: 10,
+                padding: '9px 11px',
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                cursor: 'pointer',
+                background: 'rgba(247, 147, 26, 0.14)',
+                border: '1px solid rgba(247, 147, 26, 0.4)',
+                color: '#fbbf24',
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <Lock size={14} />
+                <span>{signingIn ? 'Signing Ownership…' : 'Sign In With Wallet (Free)'}</span>
+              </span>
+              <ChevronRight size={13} />
+            </button>
+          )}
+
           {onOpenVerify && (
             <button
               type="button"
@@ -1355,7 +1484,17 @@ function TopWalletConnect({
             </button>
           )}
 
-          <div style={{ padding: '9px 11px', background: '#181818', border: '1px solid rgba(255, 255, 255, 0.065)', borderRadius: 10, marginBottom: 12, fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ padding: '9px 11px', background: '#181818', border: '1px solid rgba(255, 255, 255, 0.065)', borderRadius: 10, marginBottom: 12, fontSize: 11, display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a1a1aa' }}>
+              <span>Wallet</span>
+              <strong style={{ color: '#fff' }}>{walletName || 'Solana'} · {shortSolanaAddress(user.solanaAddress)}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a1a1aa' }}>
+              <span>Ownership</span>
+              <strong style={{ color: isSignedIn ? '#34d399' : '#f7931a' }}>
+                {isSignedIn ? 'Signed In ✓' : 'Signature Required'}
+              </strong>
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a1a1aa' }}>
               <span>Verification</span>
               <strong style={{ color: user.isVerified ? '#34d399' : '#f7931a' }}>
@@ -1368,17 +1507,30 @@ function TopWalletConnect({
             </div>
           </div>
 
-          <button
-            type="button"
-            className="button button-danger"
-            style={{ width: '100%', minHeight: 32, fontSize: 12 }}
-            onClick={() => {
-              setMenuOpen(false);
-              void disconnectWallet();
-            }}
-          >
-            Disconnect Wallet
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              type="button"
+              className="clean-action-btn-soft !w-full !min-h-[34px] !text-xs"
+              onClick={() => {
+                setMenuOpen(false);
+                openWalletModal();
+              }}
+            >
+              <Wallet size={13} />
+              <span>Change Wallet</span>
+            </button>
+            <button
+              type="button"
+              className="button button-danger"
+              style={{ width: '100%', minHeight: 32, fontSize: 12 }}
+              onClick={() => {
+                setMenuOpen(false);
+                void disconnectWallet();
+              }}
+            >
+              Disconnect Wallet
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -1760,6 +1912,14 @@ function SolPowerModal({
 
               <div className="pob-panel-body flex flex-col gap-2.5 bg-[#181818] p-3.5 rounded-xl border border-white/[0.075] font-mono text-xs">
                 <div className="flex justify-between items-center text-zinc-300">
+                  <span className="text-zinc-400 font-sans">Network:</span>
+                  <span className="font-semibold text-[#fbbf24]">Solana Testnet</span>
+                </div>
+                <div className="flex justify-between items-center text-zinc-300">
+                  <span className="text-zinc-400 font-sans">Treasury:</span>
+                  <span className="text-zinc-300 tabular-nums">{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
+                </div>
+                <div className="flex justify-between items-center text-zinc-300">
                   <span className="text-zinc-400 font-sans">Acquire With SOL:</span>
                   <span className="font-bold text-white tabular-nums">{clampedSol.toFixed(1)} SOL</span>
                 </div>
@@ -1849,13 +2009,8 @@ function LedgerPage({ onBack }: { onBack: () => void }) {
           <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5 border-b border-white/[0.07]">
             <div className="flex items-center gap-3.5">
               <BitsMark size={40} className="flex-shrink-0" />
-              <div>
-                <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold mb-1">
-                  Claimed Points Ledger
-                </div>
-                <div className="text-3xl sm:text-4xl font-black font-mono text-[#34d399] tabular-nums tracking-tight">
-                  {claimedTotalBits.toFixed(4)} <span className="text-xs text-zinc-400 font-normal">BITS</span>
-                </div>
+              <div className="text-3xl sm:text-4xl font-black font-mono text-[#34d399] tabular-nums tracking-tight">
+                {claimedTotalBits.toFixed(4)} <span className="text-xs text-zinc-400 font-normal">BITS</span>
               </div>
             </div>
 
@@ -3112,7 +3267,7 @@ function computeInitialMiningSnapshot(address: string | undefined, isVerifiedNod
   let sessionElapsedSec = saved.sessionElapsedSec;
   let isMiningSessionActive = false;
 
-  const oneTimeCompleteKey = 'bitnoir-cycle-complete-test-v2';
+  const oneTimeCompleteKey = 'bitnoir-cycle-complete-test-v3';
   if (!safeStorageGet(oneTimeCompleteKey)) {
     safeStorageSet(oneTimeCompleteKey, address);
     alreadyStarted = true;
@@ -3178,33 +3333,33 @@ const FlyingBitsToken = memo(function FlyingBitsToken({ particle }: { particle: 
     const anim = el.animate(
       [
         {
-          transform: `translate3d(${particle.startX}px, ${particle.startY}px, 0) scale(0.45) rotate(0deg)`,
+          transform: `translate3d(${particle.startX}px, ${particle.startY}px, 0) scale(0.55) rotate(0deg)`,
           opacity: 0,
         },
         {
-          transform: `translate3d(${particle.startX}px, ${particle.startY - 14}px, 0) scale(1.12) rotate(${Math.round(particle.spinDeg * 0.18)}deg)`,
+          transform: `translate3d(${particle.startX}px, ${particle.startY - 18}px, 0) scale(1.06) rotate(${Math.round(particle.spinDeg * 0.18)}deg)`,
           opacity: 1,
-          offset: 0.16,
+          offset: 0.14,
         },
         {
-          transform: `translate3d(${particle.midX}px, ${particle.midY}px, 0) scale(1.0) rotate(${Math.round(particle.spinDeg * 0.58)}deg)`,
-          opacity: 1,
-          offset: 0.58,
+          transform: `translate3d(${particle.midX}px, ${particle.midY}px, 0) scale(1.0) rotate(${Math.round(particle.spinDeg * 0.55)}deg)`,
+          opacity: 0.98,
+          offset: 0.55,
         },
         {
-          transform: `translate3d(${particle.endX}px, ${particle.endY}px, 0) scale(0.62) rotate(${particle.spinDeg}deg)`,
-          opacity: 0.95,
+          transform: `translate3d(${particle.endX}px, ${particle.endY}px, 0) scale(0.68) rotate(${particle.spinDeg}deg)`,
+          opacity: 0.9,
           offset: 0.9,
         },
         {
-          transform: `translate3d(${particle.endX}px, ${particle.endY}px, 0) scale(0.2) rotate(${particle.spinDeg}deg)`,
+          transform: `translate3d(${particle.endX}px, ${particle.endY}px, 0) scale(0.25) rotate(${particle.spinDeg}deg)`,
           opacity: 0,
         },
       ],
       {
         duration: particle.duration,
         delay: particle.delay,
-        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        easing: 'cubic-bezier(0.37, 0, 0.63, 1)',
         fill: 'forwards',
       },
     );
@@ -3246,7 +3401,9 @@ function MiningPage({
   onOpenCards?: () => void;
 }) {
   const client = useQueryClient();
-  const { user, connectWallet } = useAuth();
+  const { connection } = useConnection();
+  const { wallet, signTransaction, sendTransaction } = useWallet();
+  const { user, openWalletModal, ensureSignedIn } = useAuth();
 
   const [solPowerModalOpen, setSolPowerModalOpen] = useState(false);
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
@@ -3260,6 +3417,7 @@ function MiningPage({
   const claimBtnRef = useRef<HTMLButtonElement>(null);
   const ledgerBtnRef = useRef<HTMLButtonElement>(null);
   const claimAnimTimersRef = useRef<number[]>([]);
+  const pendingStartAfterJoinRef = useRef(false);
 
   const isConnected = Boolean(user?.solanaAddress);
   const isVerified = Boolean(user?.solanaAddress && user?.isVerified);
@@ -3588,58 +3746,11 @@ function MiningPage({
   const remS = Math.floor(remainingSeconds % 60);
   const countdownTimer = `${remH.toString().padStart(2, '0')}:${remM.toString().padStart(2, '0')}:${remS.toString().padStart(2, '0')}`;
 
-  // Start Mining handler (available to any connected Solana wallet at Base 0.01/h 3h, or Verified 0.1/h 24h)
+  // Start Mining handler (opens Solana Wallet Kit if disconnected, requires SIWS ownership signature, then auto-starts)
   const handleStartMining = async () => {
     if (!isConnected || !user?.solanaAddress) {
-      const provider = getPhantomSolanaProvider();
-      if (!provider) {
-        setConnectModalOpen(true);
-        return;
-      }
-      try {
-        const addr = await connectWallet();
-        await apiFetchJson('/api/accounts/me/start-mining', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        baseBitsRef.current = 0;
-        baseElapsedRef.current = 0;
-        baseTimeRef.current = Date.now();
-        setHasStartedMiningOnce(true);
-        setUnclaimedBits(0);
-        setSessionElapsedSec(0);
-        setIsMiningSessionActive(true);
-        saveWalletMiningState(addr, {
-          unclaimedBits: 0,
-          claimedTotalBits: 0,
-          contributedSol: 0,
-          lastTickAt: Date.now(),
-          isMiningSessionActive: true,
-          sessionElapsedSec: 0,
-          claimHistory: [],
-          hasStartedMiningOnce: true,
-        });
-        const connectedCards = unlockGenesisAntCardOnStartMining(addr);
-        setReceivedCards(connectedCards);
-        const connectedHas24h = hasActiveAntCard(connectedCards);
-        const startBoost = getCardPowerBoostPerHour(connectedCards);
-        const startRate = (0.01 + startBoost).toFixed(4);
-        toast({
-          description: connectedHas24h
-            ? `Mining started at ${startRate} Bits/hr for 24 hours.`
-            : 'Mining started at 0.0100 Bits/hr for 3 hours.',
-          variant: 'gold',
-        });
-      } catch (err: any) {
-        if (err?.message === 'PHANTOM_NOT_INSTALLED') {
-          setConnectModalOpen(true);
-        } else {
-          toast({
-            description: readableError(err, 'Unable to start mining. Please try again.'),
-            variant: 'destructive',
-          });
-        }
-      }
+      pendingStartAfterJoinRef.current = true;
+      openWalletModal();
       return;
     }
 
@@ -3648,6 +3759,9 @@ function MiningPage({
     const startElapsed = resetCycle ? 0 : sessionElapsedSec;
 
     try {
+      const signed = await ensureSignedIn();
+      if (!signed) return;
+
       await apiFetchJson('/api/accounts/me/start-mining', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3690,6 +3804,57 @@ function MiningPage({
   };
 
   useEffect(() => {
+    if (!pendingStartAfterJoinRef.current || !user?.solanaAddress) return;
+    pendingStartAfterJoinRef.current = false;
+    const addr = user.solanaAddress;
+    void (async () => {
+      try {
+        const signed = await ensureSignedIn();
+        if (!signed) return;
+
+        await apiFetchJson('/api/accounts/me/start-mining', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const saved = getWalletMiningState(addr);
+        const startBits = saved.sessionElapsedSec >= cycleTotalSeconds ? 0 : saved.unclaimedBits;
+        const startElapsed = saved.sessionElapsedSec >= cycleTotalSeconds ? 0 : saved.sessionElapsedSec;
+        baseBitsRef.current = startBits;
+        baseElapsedRef.current = startElapsed;
+        baseTimeRef.current = Date.now();
+        setHasStartedMiningOnce(true);
+        setUnclaimedBits(startBits);
+        setSessionElapsedSec(startElapsed);
+        setIsMiningSessionActive(true);
+        saveWalletMiningState(addr, {
+          ...saved,
+          unclaimedBits: startBits,
+          lastTickAt: Date.now(),
+          isMiningSessionActive: true,
+          sessionElapsedSec: startElapsed,
+          hasStartedMiningOnce: true,
+        });
+        const connectedCards = unlockGenesisAntCardOnStartMining(addr);
+        setReceivedCards(connectedCards);
+        const connectedHas24h = hasActiveAntCard(connectedCards) || isVerified;
+        const startBoost = getCardPowerBoostPerHour(connectedCards);
+        const startRate = ((isVerified ? 0.1 : 0.01) + startBoost).toFixed(4);
+        toast({
+          description: connectedHas24h
+            ? `Mining started at ${startRate} Bits/hr for 24 hours.`
+            : `Mining started at ${startRate} Bits/hr for 3 hours.`,
+          variant: 'gold',
+        });
+      } catch (err) {
+        toast({
+          description: readableError(err, 'Unable to start mining. Please try again.'),
+          variant: 'destructive',
+        });
+      }
+    })();
+  }, [user?.solanaAddress, ensureSignedIn]);
+
+  useEffect(() => {
     return () => {
       claimAnimTimersRef.current.forEach((t) => window.clearTimeout(t));
       claimAnimTimersRef.current = [];
@@ -3712,15 +3877,15 @@ function MiningPage({
       const endX = ledgerRect.left + ledgerRect.width * 0.42;
       const endY = ledgerRect.top + ledgerRect.height * 0.5;
       const batchBase = Date.now();
-      const particles: FlyingBitsParticle[] = Array.from({ length: 10 }, (_, idx) => {
+      const particles: FlyingBitsParticle[] = Array.from({ length: 12 }, (_, idx) => {
         const useCounterOrigin = counterRect && idx % 2 === 0;
         const originRect = useCounterOrigin ? counterRect : (claimRect || counterRect)!;
         const startX =
           originRect.left +
-          originRect.width * (useCounterOrigin ? 0.28 + (idx / 10) * 0.35 : 0.35 + (idx / 10) * 0.3);
-        const startY = originRect.top + originRect.height * 0.48 + ((idx % 3) - 1) * 8;
-        const arcOffsetX = (idx % 2 === 0 ? -1 : 1) * (18 + (idx % 4) * 14);
-        const arcLiftY = 48 + (idx % 3) * 24;
+          originRect.width * (useCounterOrigin ? 0.24 + (idx / 12) * 0.38 : 0.32 + (idx / 12) * 0.34);
+        const startY = originRect.top + originRect.height * 0.5 + ((idx % 3) - 1) * 8;
+        const arcOffsetX = (idx % 2 === 0 ? -1 : 1) * (28 + (idx % 4) * 16);
+        const arcLiftY = 74 + (idx % 4) * 26;
         const midX = (startX + endX) / 2 + arcOffsetX;
         const midY = Math.min(startY, endY) - arcLiftY;
         return {
@@ -3731,17 +3896,17 @@ function MiningPage({
           midY,
           endX: endX + ((idx % 3) - 1) * 4,
           endY: endY + ((idx % 2 === 0 ? -1 : 1) * 2),
-          delay: idx * 36,
-          duration: 700 + (idx % 3) * 85,
+          delay: idx * 95,
+          duration: 1650 + (idx % 3) * 180,
           size: idx % 3 === 0 ? 22 : 18,
-          spinDeg: (idx % 2 === 0 ? 1 : -1) * (180 + idx * 24),
+          spinDeg: (idx % 2 === 0 ? 1 : -1) * (120 + idx * 14),
         };
       });
       setFlyingTokens(particles);
 
-      const pulseStart = window.setTimeout(() => setLedgerPulse(true), 460);
-      const pulseEnd = window.setTimeout(() => setLedgerPulse(false), 1120);
-      const clearParticles = window.setTimeout(() => setFlyingTokens([]), 1450);
+      const pulseStart = window.setTimeout(() => setLedgerPulse(true), 1250);
+      const pulseEnd = window.setTimeout(() => setLedgerPulse(false), 2850);
+      const clearParticles = window.setTimeout(() => setFlyingTokens([]), 3300);
       claimAnimTimersRef.current.push(pulseStart, pulseEnd, clearParticles);
     } else {
       setLedgerPulse(true);
@@ -3766,6 +3931,9 @@ function MiningPage({
     setIsClaiming(true);
     const claimedAmount = unclaimedBits;
     try {
+      const signed = await ensureSignedIn();
+      if (!signed) return;
+
       await apiFetchJson('/api/accounts/me/claim-mined-bits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3823,11 +3991,21 @@ function MiningPage({
     }
     setIsContributing(true);
     try {
+      const signed = await ensureSignedIn();
+      if (!signed) {
+        throw new Error('Please sign in with your wallet signature before acquiring SOL Power.');
+      }
+
       const tx = await sendSolanaTransactionOnchain({
         fromAddress: user.solanaAddress,
         toAddress: PROTOCOL_TREASURY_SOLANA,
         amountSol: solAmount,
         memo: `Bitnoir SOL Power Boost: ${solAmount} SOL`,
+        connection,
+        walletAdapterName: wallet?.adapter?.name,
+        supportedTransactionVersions: wallet?.adapter?.supportedTransactionVersions,
+        signTransaction,
+        sendTransaction,
       });
       await apiFetchJson('/api/accounts/me/contribute-sol', {
         method: 'POST',
@@ -3931,13 +4109,9 @@ function MiningPage({
                   </span>
                 </span>
               )}
-              {isLiveMining ? (
+              {isLiveMining && (
                 <span className={`w-2 h-2 rounded-full ${hasActiveCard ? 'bg-[#fbbf24]' : 'bg-[#10b981]'}`} title="Mining Live" />
-              ) : isConnected && unclaimedBits > 0 ? (
-                <span className="px-2.5 py-0.5 rounded-full bg-[#f7931a]/15 border border-[#f7931a]/35 text-[#fbbf24] text-[10px] font-mono font-bold uppercase tracking-wider">
-                  {has24hCycle ? '24h Cap · Claim' : '3h Stopped · Claim'}
-                </span>
-              ) : null}
+              )}
             </div>
 
             {/* HARDCODED BTC ICON ON RIGHT SIDE ABOVE SOL POWER BUTTON (NO BOX, NO COUNT) */}
@@ -4102,7 +4276,7 @@ function MiningPage({
                 <button
                   ref={ledgerBtnRef}
                   type="button"
-                  className={`claimed-points-top-btn transition-all duration-200 ${
+                  className={`claimed-points-top-btn transition-all duration-500 ${
                     ledgerPulse
                       ? '!border-[#34d399]/75 !bg-[#10b981]/20 shadow-[0_0_20px_rgba(52,211,153,0.45)] scale-[1.05]'
                       : ''
@@ -4208,9 +4382,15 @@ function MiningPage({
 // ---------------------------------------------------------------------------
 // CLEAN PREMIUM ASSETS PAGE (DEPOSIT OFF, WITHDRAW COMING SOON, TRANSFER USERNAME-TO-USERNAME)
 // ---------------------------------------------------------------------------
-function AssetsPage({ onBack }: { onBack: () => void }) {
+function AssetsPage({
+  onBack,
+  onOpenWithdraw,
+}: {
+  onBack: () => void;
+  onOpenWithdraw?: () => void;
+}) {
   const client = useQueryClient();
-  const { user } = useAuth();
+  const { user, ensureSignedIn } = useAuth();
   const accountQuery = useGetMyAccount({ query: { queryKey: getGetMyAccountQueryKey() } });
   const account = accountQuery.data;
 
@@ -4220,9 +4400,8 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
 
-  // In-app Username-to-Username Transfer Modal, Withdraw Coming Soon Modal & Receipt Detail state
+  // In-app UID-to-UID Transfer Modal & Receipt Detail state
   const [transferModalOpen, setTransferModalOpen] = useState(false);
-  const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
 
   // In-app Transfer state
@@ -4248,7 +4427,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
   const isTransferReceipt = (item: any): boolean => {
     const kind = String(item?.kind || '').toLowerCase();
     const title = String(item?.title || '');
-    if (kind !== 'send' && kind !== 'receive') return false;
+    if (kind !== 'send' && kind !== 'receive' && kind !== 'withdraw') return false;
     if (/activated|verification|signup|allocation/i.test(title)) return false;
     return true;
   };
@@ -4393,6 +4572,12 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
 
     setIsSending(true);
     try {
+      const signed = await ensureSignedIn();
+      if (!signed) {
+        setSendError('Please sign in with your wallet signature first.');
+        return;
+      }
+
       const targetLabel = `UID ${resolvedRecipientUid}`;
       await apiFetchJson('/api/wallet/send-inapp', {
         method: 'POST',
@@ -4490,7 +4675,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
             </button>
             <button
               type="button"
-              onClick={() => setWithdrawModalOpen(true)}
+              onClick={() => onOpenWithdraw?.()}
               className="h-10 rounded-lg border border-[#f59e0b]/80 bg-transparent text-[#f59e0b] hover:bg-[#f59e0b]/10 hover:border-[#fbbf24] hover:text-[#fbbf24] transition-colors duration-150 text-xs sm:text-sm font-medium flex items-center justify-center cursor-pointer"
             >
               Withdraw
@@ -4542,11 +4727,13 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
               <div className="divide-y divide-white/[0.06]">
                 {activities.map((act) => {
                   const isSend = act.kind === 'send';
+                  const isWithdraw = act.kind === 'withdraw';
+                  const isOutgoing = isSend || isWithdraw;
                   const parsedAmt =
                     typeof act.amount === 'number' && Number.isFinite(act.amount)
                       ? act.amount
                       : (() => {
-                          const m = String(act.title || '').match(/(?:Sent|Received)\s+([\d,.]+)/i);
+                          const m = String(act.title || '').match(/(?:Sent|Received|Withdrew)\s+([\d,.]+)/i);
                           return m ? Number(m[1].replace(/,/g, '')) : 0;
                         })();
                   const d = new Date(act.createdAt);
@@ -4555,7 +4742,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
                     ? '--:-- --/--'
                     : `${pad2(d.getHours())}:${pad2(d.getMinutes())} ${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
 
-                  const rowLabel = isSend ? 'Transfer' : 'Received';
+                  const rowLabel = isWithdraw ? 'Withdraw' : isSend ? 'Transfer' : 'Received';
 
                   return (
                     <button
@@ -4573,7 +4760,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
                         <div>
                           <div className="text-[11px] text-zinc-500 mb-1">Amount</div>
                           <div className="text-xs sm:text-sm font-semibold font-mono text-white tabular-nums">
-                            {isSend ? '-' : '+'}
+                            {isOutgoing ? '-' : '+'}
                             {parsedAmt.toFixed(4)}
                           </div>
                         </div>
@@ -4598,39 +4785,7 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        {/* MODAL: WITHDRAW COMING SOON */}
-        {withdrawModalOpen && (
-          <div className="modal-backdrop" onClick={() => setWithdrawModalOpen(false)}>
-            <div
-              className="modal-dialog"
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                maxWidth: 340,
-                padding: '22px 24px 18px',
-                background: '#1e1e1e',
-                borderColor: 'rgba(255, 255, 255, 0.08)',
-                boxShadow: '0 20px 56px rgba(0, 0, 0, 0.85)',
-                borderRadius: 12,
-              }}
-            >
-              <p className="text-[15px] text-zinc-100 leading-relaxed m-0 mb-6">
-                Bits withdrawals are coming soon.
-              </p>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setWithdrawModalOpen(false)}
-                  className="text-sm font-semibold text-[#f59e0b] hover:text-[#fbbf24] bg-transparent border-0 px-2 py-1 cursor-pointer transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL: TRANSFER RECEIPT DETAILS */}
+        {/* MODAL: TRANSACTION RECEIPT DETAILS */}
         {selectedReceipt && (
           <div className="modal-backdrop" onClick={() => setSelectedReceipt(null)}>
             <div
@@ -4646,7 +4801,9 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
               }}
             >
               <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-bold text-white m-0">Transfer Receipt</h2>
+                <h2 className="text-lg font-bold text-white m-0">
+                  {selectedReceipt.kind === 'withdraw' ? 'Withdrawal Receipt' : 'Transfer Receipt'}
+                </h2>
                 <button type="button" className="modal-close-btn" onClick={() => setSelectedReceipt(null)}>
                   <X size={16} />
                 </button>
@@ -4656,7 +4813,11 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
                 <div className="p-3.5 rounded-xl bg-[#181818] border border-white/[0.07] flex items-center justify-between">
                   <span className="text-zinc-400">Type</span>
                   <span className="text-white font-semibold">
-                    {selectedReceipt.kind === 'send' ? 'Sent Transfer' : 'Received Transfer'}
+                    {selectedReceipt.kind === 'withdraw'
+                      ? 'Onchain Withdrawal'
+                      : selectedReceipt.kind === 'send'
+                        ? 'Sent Transfer'
+                        : 'Received Transfer'}
                   </span>
                 </div>
                 <div className="p-3.5 rounded-xl bg-[#181818] border border-white/[0.07] flex items-center justify-between">
@@ -4843,46 +5004,174 @@ function AssetsPage({ onBack }: { onBack: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// APPLICATION ROUTER (EXACT CLEAN ROUTES: MINING, MINERS, GUIDE, LEDGER, CARDS & ASSETS)
+// STANDALONE WITHDRAW PAGE (CLEAN MINIMAL TRANSFER-STYLE · NOT OPENED YET)
 // ---------------------------------------------------------------------------
-function App() {
-  const [currentView, setCurrentView] = useState<'mining' | 'assets' | 'miners' | 'guide' | 'ledger' | 'cards'>('mining');
+function WithdrawPage({ onBack }: { onBack: () => void }) {
+  const { user } = useAuth();
+  const accountQuery = useGetMyAccount({ query: { queryKey: getGetMyAccountQueryKey() } });
+  const account = accountQuery.data;
+
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false);
+
+  const isConnected = Boolean(user?.solanaAddress);
+  const bitsAvailable = isConnected ? (account?.balances?.purchased ?? 0) : 0;
 
   return (
-    <AuthProvider>
-      <QueryClientProvider client={queryClient}>
-        <FeedbackMonitor />
-        <ErrorBoundary resetKey={currentView}>
-          <WouterRouter base={basePath}>
-            <Switch>
-              <Route path="/assets">
-                {() => <AssetsPage onBack={() => setCurrentView('mining')} />}
-              </Route>
-              <Route path="/miners">
-                {() => <MinersPage onBack={() => setCurrentView('mining')} />}
-              </Route>
-              <Route path="/guide">
-                {() => <GuidePage onBack={() => setCurrentView('mining')} />}
-              </Route>
-              <Route path="/ledger">
-                {() => <LedgerPage onBack={() => setCurrentView('mining')} />}
-              </Route>
-              <Route path="/cards">
-                {() => <PowerCardsPage onBack={() => setCurrentView('mining')} />}
-              </Route>
-              <Route path="/mining">
-                {() => (
-                  <MiningPage
-                    onOpenAssets={() => setCurrentView('assets')}
-                    onOpenMiners={() => setCurrentView('miners')}
-                    onOpenGuide={() => setCurrentView('guide')}
-                    onOpenLedger={() => setCurrentView('ledger')}
-                    onOpenCards={() => setCurrentView('cards')}
-                  />
-                )}
-              </Route>
-              <Route path="/">
-                {() => (
+    <div className="min-h-screen bg-[#070707] text-zinc-100 flex flex-col font-sans">
+      {/* HEADER */}
+      <header className="border-b border-white/[0.07] bg-[#070707]/90 backdrop-blur-xl sticky top-0 z-40">
+        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          <Brand size="md" />
+          <div className="flex items-center gap-3">
+            <TopWalletConnect
+              onOpenVerify={() => setVerifyModalOpen(true)}
+              onOpenConnect={() => setConnectModalOpen(true)}
+            />
+          </div>
+        </div>
+      </header>
+
+      {/* MAIN CONTAINER */}
+      <main className="flex-1 w-full max-w-[460px] mx-auto px-4 py-10 flex items-center justify-center">
+        <div
+          className="w-full rounded-[18px] bg-[#121212] border border-white/[0.085] p-6"
+          style={{ boxShadow: '0 24px 64px rgba(0, 0, 0, 0.88)' }}
+        >
+          {/* Card Header — matches Transfer */}
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-[#181818] border border-white/[0.08] flex items-center justify-center text-[#f7931a]">
+                <ArrowUpRight size={18} />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-white m-0">Withdraw</h1>
+                <p className="text-[11px] font-mono text-zinc-400 m-0">Coming Soon</p>
+              </div>
+            </div>
+            <button type="button" className="modal-close-btn" onClick={onBack} aria-label="Back to Assets">
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-3.5">
+            <div className="p-4 rounded-xl bg-[#f7931a]/[0.08] border border-[#f7931a]/30 text-xs text-zinc-200 leading-relaxed">
+              <strong className="text-white block mb-1">Not Opened Yet</strong>
+              On-chain Bits withdrawals are not opened yet and will be available on Solana soon.
+            </div>
+
+            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-between text-xs font-mono">
+              <span className="text-zinc-400">Available Bits</span>
+              <span className="text-white font-bold tabular-nums">
+                {bitsAvailable.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={onBack}
+              className="clean-stake-confirm-btn !w-full !min-h-[42px] !text-xs !font-bold"
+            >
+              Back to Assets
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <ConnectWalletModal open={connectModalOpen} onClose={() => setConnectModalOpen(false)} />
+      <VerifyAndUsernameModal
+        open={verifyModalOpen}
+        onClose={() => setVerifyModalOpen(false)}
+        onOpenConnect={() => setConnectModalOpen(true)}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// APPLICATION ROUTER (EXACT CLEAN ROUTES: MINING, MINERS, GUIDE, LEDGER, CARDS, ASSETS & WITHDRAW)
+// ---------------------------------------------------------------------------
+function DirectAssetsRoute() {
+  const [, setLocation] = useLocation();
+  return (
+    <AssetsPage
+      onBack={() => setLocation('/')}
+      onOpenWithdraw={() => setLocation('/withdraw')}
+    />
+  );
+}
+
+function DirectWithdrawRoute() {
+  const [, setLocation] = useLocation();
+  return <WithdrawPage onBack={() => setLocation('/assets')} />;
+}
+
+function App() {
+  const [currentView, setCurrentView] = useState<'mining' | 'assets' | 'withdraw' | 'miners' | 'guide' | 'ledger' | 'cards'>('mining');
+
+  return (
+    <SolanaWalletKitProvider>
+      <AuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <FeedbackMonitor />
+          <ErrorBoundary resetKey={currentView}>
+            <WouterRouter base={basePath}>
+              <Switch>
+                <Route path="/assets" component={DirectAssetsRoute} />
+                <Route path="/withdraw" component={DirectWithdrawRoute} />
+                <Route path="/miners">
+                  {() => <MinersPage onBack={() => setCurrentView('mining')} />}
+                </Route>
+                <Route path="/guide">
+                  {() => <GuidePage onBack={() => setCurrentView('mining')} />}
+                </Route>
+                <Route path="/ledger">
+                  {() => <LedgerPage onBack={() => setCurrentView('mining')} />}
+                </Route>
+                <Route path="/cards">
+                  {() => <PowerCardsPage onBack={() => setCurrentView('mining')} />}
+                </Route>
+                <Route path="/mining">
+                  {() => (
+                    <MiningPage
+                      onOpenAssets={() => setCurrentView('assets')}
+                      onOpenMiners={() => setCurrentView('miners')}
+                      onOpenGuide={() => setCurrentView('guide')}
+                      onOpenLedger={() => setCurrentView('ledger')}
+                      onOpenCards={() => setCurrentView('cards')}
+                    />
+                  )}
+                </Route>
+                <Route path="/">
+                  {() => (
+                    <>
+                      <div className={currentView === 'mining' ? 'block' : 'hidden'}>
+                        <MiningPage
+                          isVisible={currentView === 'mining'}
+                          onOpenAssets={() => setCurrentView('assets')}
+                          onOpenMiners={() => setCurrentView('miners')}
+                          onOpenGuide={() => setCurrentView('guide')}
+                          onOpenLedger={() => setCurrentView('ledger')}
+                          onOpenCards={() => setCurrentView('cards')}
+                        />
+                      </div>
+                      {currentView === 'assets' && (
+                        <AssetsPage
+                          onBack={() => setCurrentView('mining')}
+                          onOpenWithdraw={() => setCurrentView('withdraw')}
+                        />
+                      )}
+                      {currentView === 'withdraw' && (
+                        <WithdrawPage onBack={() => setCurrentView('assets')} />
+                      )}
+                      {currentView === 'miners' && <MinersPage onBack={() => setCurrentView('mining')} />}
+                      {currentView === 'guide' && <GuidePage onBack={() => setCurrentView('mining')} />}
+                      {currentView === 'ledger' && <LedgerPage onBack={() => setCurrentView('mining')} />}
+                      {currentView === 'cards' && <PowerCardsPage onBack={() => setCurrentView('mining')} />}
+                    </>
+                  )}
+                </Route>
+                <Route component={() => (
                   <>
                     <div className={currentView === 'mining' ? 'block' : 'hidden'}>
                       <MiningPage
@@ -4894,38 +5183,27 @@ function App() {
                         onOpenCards={() => setCurrentView('cards')}
                       />
                     </div>
-                    {currentView === 'assets' && <AssetsPage onBack={() => setCurrentView('mining')} />}
+                    {currentView === 'assets' && (
+                      <AssetsPage
+                        onBack={() => setCurrentView('mining')}
+                        onOpenWithdraw={() => setCurrentView('withdraw')}
+                      />
+                    )}
+                    {currentView === 'withdraw' && (
+                      <WithdrawPage onBack={() => setCurrentView('assets')} />
+                    )}
                     {currentView === 'miners' && <MinersPage onBack={() => setCurrentView('mining')} />}
                     {currentView === 'guide' && <GuidePage onBack={() => setCurrentView('mining')} />}
                     {currentView === 'ledger' && <LedgerPage onBack={() => setCurrentView('mining')} />}
                     {currentView === 'cards' && <PowerCardsPage onBack={() => setCurrentView('mining')} />}
                   </>
-                )}
-              </Route>
-              <Route component={() => (
-                <>
-                  <div className={currentView === 'mining' ? 'block' : 'hidden'}>
-                    <MiningPage
-                      isVisible={currentView === 'mining'}
-                      onOpenAssets={() => setCurrentView('assets')}
-                      onOpenMiners={() => setCurrentView('miners')}
-                      onOpenGuide={() => setCurrentView('guide')}
-                      onOpenLedger={() => setCurrentView('ledger')}
-                      onOpenCards={() => setCurrentView('cards')}
-                    />
-                  </div>
-                  {currentView === 'assets' && <AssetsPage onBack={() => setCurrentView('mining')} />}
-                  {currentView === 'miners' && <MinersPage onBack={() => setCurrentView('mining')} />}
-                  {currentView === 'guide' && <GuidePage onBack={() => setCurrentView('mining')} />}
-                  {currentView === 'ledger' && <LedgerPage onBack={() => setCurrentView('mining')} />}
-                  {currentView === 'cards' && <PowerCardsPage onBack={() => setCurrentView('mining')} />}
-                </>
-              )} />
-            </Switch>
-          </WouterRouter>
-        </ErrorBoundary>
-      </QueryClientProvider>
-    </AuthProvider>
+                )} />
+              </Switch>
+            </WouterRouter>
+          </ErrorBoundary>
+        </QueryClientProvider>
+      </AuthProvider>
+    </SolanaWalletKitProvider>
   );
 }
 
