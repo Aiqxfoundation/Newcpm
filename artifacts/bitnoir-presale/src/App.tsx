@@ -7,18 +7,22 @@ import {
   useWallet,
 } from '@solana/wallet-adapter-react';
 import { WalletModalProvider, useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { WalletAdapterNetwork, type WalletError } from '@solana/wallet-adapter-base';
+import {
+  WalletAdapterNetwork,
+  WalletReadyState,
+  type Adapter,
+  type WalletError,
+} from '@solana/wallet-adapter-base';
 import { PhantomWalletAdapter } from '@solana/wallet-adapter-phantom';
 import { SolflareWalletAdapter } from '@solana/wallet-adapter-solflare';
 import { CoinbaseWalletAdapter } from '@solana/wallet-adapter-coinbase';
-import { TrustWalletAdapter } from '@solana/wallet-adapter-trust';
 import {
   AlertTriangle, ArrowUpRight, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight,
-  Copy, Lock, RefreshCw,
-  ScrollText, Send, ShieldCheck, Wallet, X, Zap
+  Copy, ExternalLink, Lock, RefreshCw,
+  ScrollText, Send, ShieldCheck, Smartphone, Wallet, X, Zap
 } from 'lucide-react';
 import {
-  getGetMyAccountQueryKey, getGetMyActivityQueryKey, useGetMyAccount,
+  getGetMyAccountQueryKey, getGetMyActivityQueryKey, setAuthTokenGetter, useGetMyAccount,
 } from '@workspace/api-client-react';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -30,9 +34,16 @@ import {
   claimLocalUniqueUid,
   classifyWalletError,
   extractSignatureBytes,
+  fetchSolanaDevnetBalanceSol,
   getLocalWalletActivities,
   getPhantomSolanaProvider,
+  getPhantomWalletDeepLink,
+  getSafeCurrentAppUrl,
+  getTrustSolanaProvider,
+  getTrustWalletDeepLink,
   getWalletMiningState,
+  isInIframe,
+  isMobileBrowser,
   isUserRejectionError,
   isValidSolanaAddress,
   isValidUidFormat,
@@ -51,6 +62,7 @@ import {
   SOLANA_RPC_ENDPOINT,
   VERIFICATION_FEE_SOL,
 } from './lib/solana';
+import { ResilientTrustWalletAdapter } from './lib/trustAdapter';
 import {
   activatePowerCard,
   ANT_CARD_ID,
@@ -133,12 +145,14 @@ function readableError(error: unknown, fallback: string): string {
   return trimmed;
 }
 
-// Strictly in-memory session token (never persisted to localStorage/sessionStorage)
+// Keep any transient Bearer token strictly in memory; persistent sessions live in HttpOnly cookies.
 let activeAuthBearerToken = '';
 
 function setInMemoryAuthToken(token: string) {
   activeAuthBearerToken = token || '';
 }
+
+setAuthTokenGetter(() => activeAuthBearerToken || null);
 
 async function apiFetchJson<T = any>(
   url: string,
@@ -154,6 +168,7 @@ async function apiFetchJson<T = any>(
     }
     const res = await fetch(url, {
       ...options,
+      credentials: options.credentials ?? 'include',
       headers,
       signal: options.signal ?? controller.signal,
     });
@@ -167,7 +182,7 @@ async function apiFetchJson<T = any>(
       }
     }
     if (!res.ok) {
-      if (res.status === 401 && activeAuthBearerToken && !url.includes('/api/auth/verify')) {
+      if (res.status === 401 && !url.includes('/api/auth/verify')) {
         activeAuthBearerToken = '';
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('bitnoir-auth-cleared'));
@@ -494,26 +509,37 @@ function SolanaWalletKitProvider({ children }: { children: ReactNode }) {
   const wallets = useMemo(
     () => [
       new PhantomWalletAdapter(),
-      new SolflareWalletAdapter({ network: WalletAdapterNetwork.Testnet }),
-      new TrustWalletAdapter(),
+      new SolflareWalletAdapter({ network: WalletAdapterNetwork.Devnet }),
+      new ResilientTrustWalletAdapter(),
       new CoinbaseWalletAdapter(),
     ],
     [],
   );
 
-  const handleWalletError = useCallback((error: WalletError) => {
+  const handleWalletError = useCallback((error: WalletError, adapter?: Adapter) => {
     const name = String(error?.name || '');
     const msg = String(error?.message || '');
-    // Ignore background autoConnect noise and signing/tx errors already surfaced by modal handlers
+    if (name === 'WalletNotReadyError' || /not installed|not detected/i.test(msg)) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('bitnoir-wallet-not-ready', {
+            detail: {
+              name: adapter?.name || 'Trust',
+              url: adapter?.url || '',
+            },
+          }),
+        );
+      }
+      return;
+    }
+    // Ignore window closed and signing/tx errors already surfaced by modal handlers
     if (
-      name === 'WalletNotReadyError' ||
       name === 'WalletWindowClosedError' ||
       name === 'WalletSendTransactionError' ||
       name === 'WalletSignTransactionError' ||
       name === 'WalletSignMessageError' ||
       name === 'WalletSignInError' ||
-      isUserRejectionError(error) ||
-      /not installed|not detected/i.test(msg)
+      isUserRejectionError(error)
     ) {
       return;
     }
@@ -531,6 +557,18 @@ function SolanaWalletKitProvider({ children }: { children: ReactNode }) {
     </ConnectionProvider>
   );
 }
+
+type ServerMiningSnapshot = {
+  baseRatePerHour: number;
+  burnedSol: number;
+  solBurnBoostPerHour: number;
+  referralBoostPerHour: number;
+  totalMiningRatePerHour: number;
+  minedBitsUnclaimed: number;
+  minedBitsTotalClaimed: number;
+  sessionStartedAt: string;
+  sessionEndsAt: string;
+};
 
 type AuthUser = {
   id: string;
@@ -550,6 +588,8 @@ const AuthContext = createContext<{
   isSignedIn: boolean;
   signingIn: boolean;
   walletName: string;
+  serverMining: ServerMiningSnapshot | null;
+  initialTeam: DirectMinerMember[];
   openWalletModal: () => void;
   connectWallet: () => Promise<string>;
   signInWallet: () => Promise<boolean>;
@@ -563,6 +603,8 @@ const AuthContext = createContext<{
   isSignedIn: false,
   signingIn: false,
   walletName: '',
+  serverMining: null,
+  initialTeam: [],
   openWalletModal: () => undefined,
   connectWallet: async () => '',
   signInWallet: async () => false,
@@ -572,26 +614,33 @@ const AuthContext = createContext<{
 });
 
 function buildAuthUserFromAddress(address: string, legacyUsername?: string): AuthUser {
-  const isVer = safeStorageGet(`bitnoir-verified-${address}`) === 'true';
-  const verTx = safeStorageGet(`bitnoir-verified-tx-${address}`) || undefined;
-  let uid = '';
-  if (isVer) {
-    const savedUid = safeStorageGet(`bitnoir-uid-${address}`) || '';
-    uid = claimLocalUniqueUid(address, isValidUidFormat(savedUid) ? savedUid : undefined);
-    safeStorageSet(`bitnoir-uid-${address}`, uid);
-    registerVerifiedUid(uid, address);
-    unlockSpiderCardOnVerifiedUid(address);
+  if (address === PROTOCOL_TREASURY_SOLANA) {
+    safeStorageRemove(`bitnoir-verified-${address}`);
+    safeStorageRemove(`bitnoir-verified-tx-${address}`);
+    safeStorageRemove(`bitnoir-uid-${address}`);
+    safeStorageRemove(`bitnoir-mining-state-${address}`);
+    return {
+      id: address,
+      solanaAddress: address,
+      uid: '',
+      name: 'Treasury Wallet',
+      email: '',
+      isAdmin: false,
+      isVerified: false,
+      verifiedTx: undefined,
+    };
   }
   void legacyUsername;
+  // Never trust localStorage for verification or UID; authoritative status comes only from signed server session.
   return {
     id: address,
     solanaAddress: address,
-    uid,
-    name: uid ? `UID ${uid}` : 'Wallet',
-    email: uid ? `${uid}@bitnoir.io` : '',
+    uid: '',
+    name: shortSolanaAddress(address),
+    email: '',
     isAdmin: false,
-    isVerified: isVer,
-    verifiedTx: verTx,
+    isVerified: false,
+    verifiedTx: undefined,
   };
 }
 
@@ -606,6 +655,213 @@ function readSavedAuthUser(): AuthUser | null {
   return buildAuthUserFromAddress(saved, legacyUser || undefined);
 }
 
+function WalletConnectHelperModal({
+  walletInfo,
+  onClose,
+  onChooseAnother,
+  onRetryDirect,
+}: {
+  walletInfo: { name: string; url?: string } | null;
+  onClose: () => void;
+  onChooseAnother: () => void;
+  onRetryDirect: () => void;
+}) {
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  if (!walletInfo) return null;
+
+  const isTrust = /trust/i.test(walletInfo.name);
+  const isPhantom = /phantom/i.test(walletInfo.name);
+  const inIframe = isInIframe();
+  const mobile = isMobileBrowser();
+  const appUrl = getSafeCurrentAppUrl();
+  const trustDeepLink = getTrustWalletDeepLink(appUrl);
+  const phantomDeepLink = getPhantomWalletDeepLink(appUrl);
+  const hasInjectedTrust = isTrust && Boolean(getTrustSolanaProvider());
+
+  const handleCopyUrl = async () => {
+    if (!appUrl) return;
+    try {
+      await navigator.clipboard.writeText(appUrl);
+      setCopiedUrl(true);
+      window.setTimeout(() => setCopiedUrl(false), 2000);
+    } catch {
+      toast({
+        description: 'Unable to copy link automatically. Copy the URL from your browser bar.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wallet-helper-title"
+      className="fixed inset-0 z-[1200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-[420px] rounded-2xl bg-[#0f0f10] border border-white/[0.1] shadow-2xl p-6 text-left">
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#f7931a]/12 border border-[#f7931a]/30 flex items-center justify-center text-[#f7931a]">
+              {mobile ? <Smartphone size={18} /> : <Wallet size={18} />}
+            </div>
+            <div>
+              <h3 id="wallet-helper-title" className="text-base font-bold text-white leading-tight">
+                Connect {isTrust ? 'Trust Wallet' : walletInfo.name}
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                {mobile
+                  ? 'Open inside your wallet app browser'
+                  : inIframe
+                    ? 'Embedded preview blocks wallet extensions'
+                    : `${isTrust ? 'Trust Wallet' : walletInfo.name} provider not detected`}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close wallet helper"
+            className="w-8 h-8 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        <div className="rounded-xl bg-[#161618] border border-white/[0.06] p-3.5 text-xs text-zinc-300 leading-relaxed mb-4">
+          {isTrust ? (
+            mobile ? (
+              <span>
+                External mobile browsers cannot talk directly to the Trust Wallet app. Tap{' '}
+                <strong className="text-white">Open in Trust Wallet App</strong> below (or copy the
+                app link and paste it inside Trust Wallet &rarr; Browser) on Solana Devnet.
+              </span>
+            ) : inIframe ? (
+              <span>
+                The Trust Wallet extension does not inject inside embedded preview frames. Open
+                Bitnoir in a <strong className="text-white">New Tab</strong> to use the Trust
+                Wallet browser extension, or launch it directly in the{' '}
+                <strong className="text-white">Trust Wallet mobile app</strong>.
+              </span>
+            ) : (
+              <span>
+                Trust Wallet was not detected in this browser tab. Make sure the Trust Wallet
+                extension is unlocked with Solana enabled, or open Bitnoir directly in the Trust
+                Wallet mobile app.
+              </span>
+            )
+          ) : inIframe ? (
+            <span>
+              Browser wallet extensions cannot inject inside an embedded preview frame. Open
+              Bitnoir in a standalone browser tab to connect {walletInfo.name}.
+            </span>
+          ) : (
+            <span>
+              {walletInfo.name} was not detected in this browser. Install or unlock {walletInfo.name}
+              , or open Bitnoir inside your mobile wallet browser.
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2.5">
+          {hasInjectedTrust && (
+            <button
+              type="button"
+              onClick={onRetryDirect}
+              className="w-full py-2.5 px-4 rounded-xl bg-[#f7931a] hover:bg-[#fbbf24] text-black font-bold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <RefreshCw size={15} />
+              <span>Connect Trust Wallet Now</span>
+            </button>
+          )}
+
+          {inIframe && !mobile && appUrl && (
+            <a
+              href={appUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-2.5 px-4 rounded-xl bg-[#f7931a] hover:bg-[#fbbf24] text-black font-bold text-sm flex items-center justify-center gap-2 transition-colors no-underline"
+            >
+              <ExternalLink size={15} />
+              <span>Open App in New Tab</span>
+            </a>
+          )}
+
+          {isTrust && (
+            <a
+              href={trustDeepLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`w-full py-2.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors no-underline ${
+                inIframe && !mobile
+                  ? 'bg-[#1c1c1f] hover:bg-[#252529] text-white border border-white/[0.12]'
+                  : 'bg-[#f7931a] hover:bg-[#fbbf24] text-black'
+              }`}
+            >
+              <Smartphone size={15} />
+              <span>Open in Trust Wallet App</span>
+              <ArrowUpRight size={14} />
+            </a>
+          )}
+
+          {isPhantom && (
+            <a
+              href={phantomDeepLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`w-full py-2.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors no-underline ${
+                inIframe && !mobile
+                  ? 'bg-[#1c1c1f] hover:bg-[#252529] text-white border border-white/[0.12]'
+                  : 'bg-[#f7931a] hover:bg-[#fbbf24] text-black'
+              }`}
+            >
+              <Smartphone size={15} />
+              <span>Open in Phantom App</span>
+              <ArrowUpRight size={14} />
+            </a>
+          )}
+
+          {!isTrust && !isPhantom && walletInfo.url && (
+            <a
+              href={walletInfo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-2.5 px-4 rounded-xl bg-[#1c1c1f] hover:bg-[#252529] text-white border border-white/[0.12] font-semibold text-sm flex items-center justify-center gap-2 transition-colors no-underline"
+            >
+              <ExternalLink size={15} />
+              <span>Get {walletInfo.name}</span>
+            </a>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => void handleCopyUrl()}
+              disabled={!appUrl}
+              className="py-2 px-3 rounded-xl bg-[#18181b] hover:bg-[#222226] border border-white/[0.08] text-xs font-semibold text-zinc-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              {copiedUrl ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+              <span>{copiedUrl ? 'Link Copied' : 'Copy App Link'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onChooseAnother}
+              className="py-2 px-3 rounded-xl bg-[#18181b] hover:bg-[#222226] border border-white/[0.08] text-xs font-semibold text-zinc-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Wallet size={13} />
+              <span>Other Wallets</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuthProvider({ children }: { children: ReactNode }) {
   const { connection } = useConnection();
   const {
@@ -613,6 +869,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
     connected,
     connecting,
     wallet,
+    select,
     connect: adapterConnect,
     disconnect: adapterDisconnect,
     signTransaction,
@@ -622,26 +879,58 @@ function AuthProvider({ children }: { children: ReactNode }) {
   } = useWallet();
   const { setVisible } = useWalletModal();
 
+  const [initialSessionHint] = useState<string>(() => {
+    const walletAdapterName = safeStorageGet('walletName');
+    const savedAddr = safeStorageGet('bitnoir-solana-address');
+    if (
+      walletAdapterName &&
+      savedAddr &&
+      savedAddr !== PROTOCOL_TREASURY_SOLANA &&
+      isValidSolanaAddress(savedAddr)
+    ) {
+      return savedAddr;
+    }
+    return '';
+  });
+  const [hasSavedWalletFlag] = useState<boolean>(() => Boolean(safeStorageGet('walletName')));
+
   const [user, setUser] = useState<AuthUser | null>(() => readSavedAuthUser());
-  const [ready, setReady] = useState<boolean>(false);
+  const [ready, setReady] = useState<boolean>(() => !initialSessionHint && !hasSavedWalletFlag);
   const [signedInAddress, setSignedInAddress] = useState<string>('');
   const [signingIn, setSigningIn] = useState<boolean>(false);
+  const [helperWallet, setHelperWallet] = useState<{ name: string; url?: string } | null>(null);
+  const [serverMining, setServerMining] = useState<ServerMiningSnapshot | null>(null);
+  const [initialTeam, setInitialTeam] = useState<DirectMinerMember[]>([]);
 
   const wasConnectedRef = useRef(false);
+  const wasConnectingRef = useRef(false);
   const userInitiatedRef = useRef(false);
   const lastSyncedAddrRef = useRef<string>('');
   const signedAddressRef = useRef<string>('');
   const signInPromiseRef = useRef<{ address: string; promise: Promise<boolean> } | null>(null);
+  const autoPromptedSignRef = useRef<Set<string>>(new Set());
+  const initialBackendHydratedRef = useRef<boolean>(!initialSessionHint);
+  const autoConnectSettledRef = useRef<boolean>(!initialSessionHint && !hasSavedWalletFlag);
+  const initialSyncPromiseRef = useRef<Promise<boolean> | null>(null);
+
+  const maybeMarkReady = useCallback(() => {
+    if (initialBackendHydratedRef.current && autoConnectSettledRef.current) {
+      setReady(true);
+    }
+  }, []);
 
   const clearSignedSession = useCallback((notifyBackend = false) => {
     const oldToken = activeAuthBearerToken;
     setInMemoryAuthToken('');
     signedAddressRef.current = '';
     setSignedInAddress('');
-    if (notifyBackend && oldToken) {
+    setServerMining(null);
+    setInitialTeam([]);
+    if (notifyBackend) {
       void fetch('/api/auth/logout', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${oldToken}` },
+        credentials: 'include',
+        headers: oldToken ? { Authorization: `Bearer ${oldToken}` } : undefined,
       }).catch(() => undefined);
     }
   }, []);
@@ -650,71 +939,226 @@ function AuthProvider({ children }: { children: ReactNode }) {
     const onAuthCleared = () => {
       signedAddressRef.current = '';
       setSignedInAddress('');
+      setServerMining(null);
+      setInitialTeam([]);
     };
     window.addEventListener('bitnoir-auth-cleared', onAuthCleared);
     return () => window.removeEventListener('bitnoir-auth-cleared', onAuthCleared);
   }, []);
 
-  const syncBackendSession = useCallback(async (payload: {
-    solanaAddress?: string;
-    isVerified?: boolean;
-    verifiedTx?: string;
-    uid?: string;
-    legacyUsername?: string;
-    reset?: boolean;
-  }) => {
-    try {
-      const pendingRef = payload.reset ? undefined : safeStorageGet('bitnoir-pending-ref') || undefined;
-      const res = await apiFetchJson<{ account?: { uid?: string; isVerified?: boolean } }>(
-        '/api/accounts/me/sync-session',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(pendingRef ? { ...payload, referredBy: pendingRef } : payload),
-        },
-      );
-      if (payload.solanaAddress && res?.account?.isVerified && res.account.uid) {
-        const syncedUid = normalizeUidInput(res.account.uid);
-        if (isValidUidFormat(syncedUid)) {
-          safeStorageSet(`bitnoir-uid-${payload.solanaAddress}`, syncedUid);
-          registerVerifiedUid(syncedUid, payload.solanaAddress);
-          unlockSpiderCardOnVerifiedUid(payload.solanaAddress);
-          setUser((prev) =>
-            prev && prev.solanaAddress === payload.solanaAddress && prev.uid !== syncedUid
-              ? { ...prev, uid: syncedUid, name: `UID ${syncedUid}`, isVerified: true }
-              : prev,
-          );
-        }
-      } else if (payload.solanaAddress && res?.account && !res.account.isVerified && payload.isVerified) {
-        safeStorageRemove(`bitnoir-verified-${payload.solanaAddress}`);
-        safeStorageRemove(`bitnoir-verified-tx-${payload.solanaAddress}`);
-        safeStorageRemove(`bitnoir-uid-${payload.solanaAddress}`);
-        setUser((prev) =>
-          prev && prev.solanaAddress === payload.solanaAddress
-            ? {
-                ...prev,
-                isVerified: false,
-                verifiedTx: undefined,
-                uid: '',
-                name: shortSolanaAddress(payload.solanaAddress),
-              }
-            : prev,
-        );
+  const normalizeServerMining = useCallback(
+    (raw?: Partial<ServerMiningSnapshot> | null): ServerMiningSnapshot | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      return {
+        baseRatePerHour: Number(raw.baseRatePerHour || 0.01) || 0.01,
+        burnedSol: Math.max(0, Math.min(SOL_POWER_MAX_SOL, Number(raw.burnedSol || 0) || 0)),
+        solBurnBoostPerHour: Number(raw.solBurnBoostPerHour || 0) || 0,
+        referralBoostPerHour: Number(raw.referralBoostPerHour || 0) || 0,
+        totalMiningRatePerHour: Number(raw.totalMiningRatePerHour || 0) || 0,
+        minedBitsUnclaimed: Number(raw.minedBitsUnclaimed || 0) || 0,
+        minedBitsTotalClaimed: Math.max(0, Number(raw.minedBitsTotalClaimed || 0) || 0),
+        sessionStartedAt: typeof raw.sessionStartedAt === 'string' ? raw.sessionStartedAt : '',
+        sessionEndsAt: typeof raw.sessionEndsAt === 'string' ? raw.sessionEndsAt : '',
+      };
+    },
+    [],
+  );
+
+  const applyServerAccountState = useCallback(
+    (
+      addr: string,
+      serverAccount?: {
+        uid?: string;
+        isVerified?: boolean;
+        verifiedTx?: string;
+        mining?: Partial<ServerMiningSnapshot>;
+      },
+    ) => {
+      if (!addr || addr === PROTOCOL_TREASURY_SOLANA) {
+        setServerMining(null);
+        return;
       }
-    } catch (err) {
-      console.warn('Session sync warning:', err);
-    }
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('bitnoir-session-synced'));
-    }
-  }, []);
+
+      const normalizedMining = normalizeServerMining(serverAccount?.mining);
+      setServerMining(normalizedMining);
+
+      if (normalizedMining) {
+        const syncedBurned = Math.min(SOL_POWER_MAX_SOL, Number(normalizedMining.burnedSol.toFixed(4)));
+        const existingLocal = getWalletMiningState(addr);
+        const serverClaimed = Math.max(0, Number(normalizedMining.minedBitsTotalClaimed.toFixed(4)));
+        const serverStarted = Boolean(normalizedMining.sessionStartedAt);
+        const shouldResetUnstarted = !serverStarted && serverClaimed === 0;
+        const nextClaimed = Math.max(existingLocal.claimedTotalBits, serverClaimed);
+        if (
+          syncedBurned !== existingLocal.contributedSol ||
+          nextClaimed !== existingLocal.claimedTotalBits ||
+          (shouldResetUnstarted && (existingLocal.hasStartedMiningOnce || existingLocal.isMiningSessionActive || existingLocal.unclaimedBits > 0))
+        ) {
+          saveWalletMiningState(addr, {
+            ...existingLocal,
+            contributedSol: syncedBurned,
+            claimedTotalBits: nextClaimed,
+            ...(shouldResetUnstarted
+              ? {
+                  unclaimedBits: 0,
+                  isMiningSessionActive: false,
+                  sessionElapsedSec: 0,
+                  hasStartedMiningOnce: false,
+                }
+              : {}),
+          });
+        }
+        if (syncedBurned > 0) {
+          const boost = calculateSolPowerBoost(syncedBurned);
+          if (boost >= 2.0) {
+            unlockDragonCardOnSolPower(addr, boost);
+          }
+        }
+      }
+
+      if (serverAccount?.isVerified && serverAccount.uid) {
+        const syncedUid = normalizeUidInput(serverAccount.uid);
+        if (isValidUidFormat(syncedUid)) {
+          registerVerifiedUid(syncedUid, addr);
+          unlockSpiderCardOnVerifiedUid(addr);
+          setUser((prev) =>
+            prev && prev.solanaAddress === addr
+              ? {
+                  ...prev,
+                  uid: syncedUid,
+                  name: `UID ${syncedUid}`,
+                  email: `${syncedUid}@bitnoir.io`,
+                  isVerified: true,
+                  verifiedTx: serverAccount.verifiedTx || prev.verifiedTx,
+                }
+              : {
+                  ...buildAuthUserFromAddress(addr),
+                  uid: syncedUid,
+                  name: `UID ${syncedUid}`,
+                  email: `${syncedUid}@bitnoir.io`,
+                  isVerified: true,
+                  verifiedTx: serverAccount.verifiedTx,
+                },
+          );
+          return;
+        }
+      }
+
+      // Strictly clear any stale local verification caches when backend confirms unverified
+      safeStorageRemove(`bitnoir-verified-${addr}`);
+      safeStorageRemove(`bitnoir-verified-tx-${addr}`);
+      safeStorageRemove(`bitnoir-uid-${addr}`);
+      const existingLocal = getWalletMiningState(addr);
+      if (existingLocal.contributedSol !== 0) {
+        saveWalletMiningState(addr, {
+          ...existingLocal,
+          contributedSol: 0,
+        });
+      }
+      setUser((prev) =>
+        prev && prev.solanaAddress === addr
+          ? {
+              ...prev,
+              isVerified: false,
+              verifiedTx: undefined,
+              uid: '',
+              name: shortSolanaAddress(addr),
+              email: '',
+            }
+          : prev,
+      );
+    },
+    [normalizeServerMining],
+  );
+
+  const syncBackendSession = useCallback(
+    async (payload: { solanaAddress?: string; reset?: boolean }): Promise<boolean> => {
+      let isBackendSignedIn = false;
+      try {
+        if (payload.reset || !payload.solanaAddress) {
+          setServerMining(null);
+          setInitialTeam([]);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('bitnoir-session-synced'));
+          }
+          return false;
+        }
+
+        const addr = payload.solanaAddress;
+        const sessionRes = await apiFetchJson<{
+          signedIn?: boolean;
+          address?: string;
+          account?: {
+            uid?: string;
+            isVerified?: boolean;
+            verifiedTx?: string;
+            mining?: Partial<ServerMiningSnapshot>;
+          };
+        }>(`/api/auth/session?address=${encodeURIComponent(addr)}`, {}, 15_000);
+
+        isBackendSignedIn = Boolean(sessionRes?.signedIn && sessionRes.address === addr);
+        if (isBackendSignedIn) {
+          signedAddressRef.current = addr;
+          setSignedInAddress(addr);
+
+          const pendingRef = safeStorageGet('bitnoir-pending-ref') || undefined;
+          let authoritativeAcc = sessionRes.account;
+          if (pendingRef) {
+            const syncRes = await apiFetchJson<{
+              signedIn?: boolean;
+              account?: {
+                uid?: string;
+                isVerified?: boolean;
+                verifiedTx?: string;
+                mining?: Partial<ServerMiningSnapshot>;
+              };
+            }>(
+              '/api/accounts/me/sync-session',
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ referredBy: pendingRef }),
+              },
+              15_000,
+            ).catch(() => null);
+            if (syncRes?.account) {
+              authoritativeAcc = syncRes.account;
+            }
+          }
+          applyServerAccountState(addr, authoritativeAcc);
+
+          if (authoritativeAcc?.isVerified && authoritativeAcc?.uid) {
+            const teamData = await apiFetchJson<any[]>('/api/accounts/me/team', {}, 10_000).catch(() => null);
+            if (Array.isArray(teamData)) {
+              setInitialTeam(teamData.map(normalizeDirectMiner));
+            }
+          } else {
+            setInitialTeam([]);
+          }
+        } else {
+          setInMemoryAuthToken('');
+          signedAddressRef.current = '';
+          setSignedInAddress('');
+          setInitialTeam([]);
+          applyServerAccountState(addr, undefined);
+        }
+      } catch (err) {
+        console.warn('Session sync warning:', err);
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('bitnoir-session-synced'));
+      }
+      return isBackendSignedIn;
+    },
+    [applyServerAccountState],
+  );
 
   const signInWallet = useCallback(async (): Promise<boolean> => {
     const addr = publicKey?.toBase58() || '';
     if (!connected || !addr || !isValidSolanaAddress(addr)) {
       throw new Error('Please connect your Solana wallet first.');
     }
-    if (activeAuthBearerToken && signedAddressRef.current === addr) {
+    if (signedAddressRef.current === addr) {
       return true;
     }
     if (signInPromiseRef.current && signInPromiseRef.current.address === addr) {
@@ -747,24 +1191,36 @@ function AuthProvider({ children }: { children: ReactNode }) {
             signedMessageBytes = messageBytes;
           } else {
             const phantomProvider = getPhantomSolanaProvider();
+            const trustProvider = getTrustSolanaProvider();
             const canUsePhantomProvider =
               Boolean(phantomProvider) &&
               (!wallet?.adapter?.name || wallet.adapter.name === 'Phantom') &&
               phantomProvider.publicKey?.toBase58?.() === addr &&
               typeof phantomProvider.signMessage === 'function';
+            const canUseTrustProvider =
+              Boolean(trustProvider) &&
+              (!wallet?.adapter?.name ||
+                wallet.adapter.name === 'Trust' ||
+                wallet.adapter.name === 'Trust Wallet') &&
+              trustProvider.publicKey?.toBase58?.() === addr &&
+              typeof trustProvider.signMessage === 'function';
 
             if (canUsePhantomProvider) {
               const rawSig = await phantomProvider.signMessage(messageBytes, 'utf8');
+              signatureBytes = extractSignatureBytes(rawSig);
+              signedMessageBytes = messageBytes;
+            } else if (canUseTrustProvider) {
+              const rawSig = await trustProvider.signMessage(messageBytes);
               signatureBytes = extractSignatureBytes(rawSig);
               signedMessageBytes = messageBytes;
             } else if (adapterSignIn) {
               const siwsOut = await adapterSignIn({
                 domain: (typeof window !== 'undefined' && window.location.host) || challenge.domain,
                 address: addr,
-                statement: 'Sign in to verify wallet ownership on Bitnoir (Solana Testnet).',
+                statement: 'Sign in to verify wallet ownership on Bitnoir (Solana Devnet).',
                 uri: typeof window !== 'undefined' ? window.location.origin : undefined,
                 version: '1',
-                chainId: 'solana:testnet',
+                chainId: 'solana:devnet',
                 nonce: challenge.nonce,
                 issuedAt: challenge.issuedAt,
               });
@@ -772,7 +1228,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
               signedMessageBytes = siwsOut?.signedMessage;
             } else {
               throw new Error(
-                'This wallet does not support message signature verification. Please use Phantom or Solflare.',
+                'This wallet does not support message signature verification. Please use Phantom, Trust Wallet, or Solflare.',
               );
             }
           }
@@ -791,6 +1247,12 @@ function AuthProvider({ children }: { children: ReactNode }) {
           success: boolean;
           token: string;
           address: string;
+          account?: {
+            uid?: string;
+            isVerified?: boolean;
+            verifiedTx?: string;
+            mining?: Partial<ServerMiningSnapshot>;
+          };
         }>('/api/auth/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -809,6 +1271,34 @@ function AuthProvider({ children }: { children: ReactNode }) {
         setInMemoryAuthToken(verified.token);
         signedAddressRef.current = addr;
         setSignedInAddress(addr);
+
+        let accountToApply = verified.account;
+        const pendingRef = safeStorageGet('bitnoir-pending-ref') || undefined;
+        if (pendingRef) {
+          const synced = await apiFetchJson<{
+            account?: {
+              uid?: string;
+              isVerified?: boolean;
+              verifiedTx?: string;
+              mining?: Partial<ServerMiningSnapshot>;
+            };
+          }>('/api/accounts/me/sync-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ referredBy: pendingRef }),
+          }).catch(() => null);
+          if (synced?.account) {
+            accountToApply = synced.account;
+          }
+        }
+        applyServerAccountState(addr, accountToApply);
+        if (accountToApply?.isVerified && accountToApply?.uid) {
+          const teamData = await apiFetchJson<any[]>('/api/accounts/me/team', {}, 10_000).catch(() => null);
+          if (Array.isArray(teamData)) {
+            setInitialTeam(teamData.map(normalizeDirectMiner));
+          }
+        }
+
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('bitnoir-session-synced'));
         }
@@ -827,18 +1317,22 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
     signInPromiseRef.current = { address: addr, promise: run };
     return run;
-  }, [connected, publicKey, wallet, signMessage, adapterSignIn]);
+  }, [connected, publicKey, wallet, signMessage, adapterSignIn, applyServerAccountState]);
 
   const ensureSignedIn = useCallback(async (): Promise<boolean> => {
     const addr = publicKey?.toBase58() || '';
     if (!connected || !addr) {
       throw new Error('Please connect your Solana wallet first.');
     }
-    if (activeAuthBearerToken && signedAddressRef.current === addr) {
+    if (signedAddressRef.current === addr) {
+      return true;
+    }
+    const valid = await syncBackendSession({ solanaAddress: addr });
+    if (valid) {
       return true;
     }
     return signInWallet();
-  }, [connected, publicKey, signInWallet]);
+  }, [connected, publicKey, signInWallet, syncBackendSession]);
 
   // Capture ?ref=<uid> referral attribution if present
   useEffect(() => {
@@ -851,82 +1345,193 @@ function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Sync real Solana Wallet Kit state into AuthUser & backend session
+  // Immediately hydrate backend session in parallel with wallet autoConnect on page reload
   useEffect(() => {
+    let cancelled = false;
+    if (initialSessionHint) {
+      const p = syncBackendSession({ solanaAddress: initialSessionHint }).finally(() => {
+        if (cancelled) return;
+        initialBackendHydratedRef.current = true;
+        maybeMarkReady();
+      });
+      initialSyncPromiseRef.current = p;
+    }
+
+    if (initialSessionHint || hasSavedWalletFlag) {
+      const fallbackTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        autoConnectSettledRef.current = true;
+        initialBackendHydratedRef.current = true;
+        maybeMarkReady();
+      }, 900);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(fallbackTimer);
+      };
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialSessionHint, hasSavedWalletFlag, syncBackendSession, maybeMarkReady]);
+
+  // Sync real Solana Wallet Kit state into AuthUser & HttpOnly backend session
+  useEffect(() => {
+    if (connecting) {
+      wasConnectingRef.current = true;
+    }
+
     const activeAddress = connected && publicKey ? publicKey.toBase58() : '';
 
     if (activeAddress && isValidSolanaAddress(activeAddress)) {
       const justJoined = lastSyncedAddrRef.current !== activeAddress;
       if (signedAddressRef.current && signedAddressRef.current !== activeAddress) {
-        clearSignedSession(true);
+        clearSignedSession(false);
       }
+
       wasConnectedRef.current = true;
+      wasConnectingRef.current = false;
+      autoConnectSettledRef.current = true;
       lastSyncedAddrRef.current = activeAddress;
 
       safeStorageSet('bitnoir-solana-address', activeAddress);
-      const legacyUser = safeStorageGet('bitnoir-username');
-      const legacyForWallet = safeStorageGet(`bitnoir-username-${activeAddress}`) || legacyUser || undefined;
-      const authUser = buildAuthUserFromAddress(activeAddress, legacyForWallet);
+      setUser((prev) =>
+        prev && prev.solanaAddress === activeAddress
+          ? prev
+          : buildAuthUserFromAddress(activeAddress),
+      );
 
-      setUser(authUser);
-      void syncBackendSession({
-        solanaAddress: activeAddress,
-        isVerified: authUser.isVerified,
-        verifiedTx: authUser.verifiedTx,
-        uid: authUser.uid,
-        legacyUsername: legacyForWallet,
-      });
+      let cancelled = false;
+      const syncPromise =
+        initialSyncPromiseRef.current && initialSessionHint === activeAddress
+          ? initialSyncPromiseRef.current
+          : syncBackendSession({ solanaAddress: activeAddress });
+      initialSyncPromiseRef.current = null;
 
-      if (justJoined && userInitiatedRef.current) {
-        userInitiatedRef.current = false;
-        const autoTimer = window.setTimeout(() => {
-          if (!activeAuthBearerToken || signedAddressRef.current !== activeAddress) {
-            void signInWallet().catch((err) => {
-              toast({
-                description: readableError(
-                  err,
-                  'Please sign the message in your wallet to verify ownership.',
-                ),
-                variant: 'warning',
+      void syncPromise.then((alreadySignedIn) => {
+        if (cancelled) return;
+        initialBackendHydratedRef.current = true;
+        maybeMarkReady();
+        if (
+          justJoined &&
+          userInitiatedRef.current &&
+          !alreadySignedIn &&
+          !autoPromptedSignRef.current.has(activeAddress)
+        ) {
+          userInitiatedRef.current = false;
+          autoPromptedSignRef.current.add(activeAddress);
+          window.setTimeout(() => {
+            if (cancelled) return;
+            if (signedAddressRef.current !== activeAddress) {
+              void signInWallet().catch((err) => {
+                toast({
+                  description: readableError(
+                    err,
+                    'Please sign the message in your wallet to verify ownership.',
+                  ),
+                  variant: 'warning',
+                });
               });
-            });
-          }
-        }, 250);
-        setReady(true);
-        return () => window.clearTimeout(autoTimer);
-      }
-      setReady(true);
-      return undefined;
+            }
+          }, 250);
+        } else if (alreadySignedIn) {
+          userInitiatedRef.current = false;
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
     }
 
     if (!connecting) {
       const hasSavedWalletAdapter = Boolean(safeStorageGet('walletName'));
-      // Clear state if user disconnected or no real Wallet Kit adapter is active
-      if (wasConnectedRef.current || !hasSavedWalletAdapter) {
+      if (wasConnectingRef.current) {
+        wasConnectingRef.current = false;
+        autoConnectSettledRef.current = true;
+      }
+      // Clear state if user disconnected, autoConnect failed, or no real Wallet Kit adapter is active
+      if (wasConnectedRef.current || !hasSavedWalletAdapter || autoConnectSettledRef.current) {
         wasConnectedRef.current = false;
         lastSyncedAddrRef.current = '';
-        clearSignedSession(true);
+        autoConnectSettledRef.current = true;
+        initialBackendHydratedRef.current = true;
+        clearSignedSession(false);
         safeStorageRemove('bitnoir-solana-address');
         safeStorageRemove('bitnoir-username');
         setUser(null);
         void syncBackendSession({ reset: true });
+        maybeMarkReady();
       }
-      setReady(true);
     }
     return undefined;
-  }, [connected, connecting, publicKey, syncBackendSession, clearSignedSession, signInWallet]);
+  }, [
+    connected,
+    connecting,
+    publicKey,
+    initialSessionHint,
+    syncBackendSession,
+    clearSignedSession,
+    signInWallet,
+    maybeMarkReady,
+  ]);
+
+  // Surface WalletConnectHelperModal whenever a user clicks a wallet that isn't injected in this browser context
+  useEffect(() => {
+    const onNotReady = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ name?: string; url?: string }>).detail;
+      if (!userInitiatedRef.current) return;
+      userInitiatedRef.current = false;
+      select(null);
+      setHelperWallet({
+        name: detail?.name || 'Trust',
+        url: detail?.url || '',
+      });
+    };
+    window.addEventListener('bitnoir-wallet-not-ready', onNotReady);
+    return () => window.removeEventListener('bitnoir-wallet-not-ready', onNotReady);
+  }, [select]);
+
+  useEffect(() => {
+    if (!wallet || connected || connecting || !userInitiatedRef.current) return;
+    const readyState = wallet.readyState;
+    if (readyState === WalletReadyState.Installed || readyState === WalletReadyState.Loadable) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (!userInitiatedRef.current) return;
+      userInitiatedRef.current = false;
+      const selectedName = wallet.adapter.name;
+      const selectedUrl = wallet.adapter.url;
+      select(null);
+      setHelperWallet({ name: selectedName, url: selectedUrl });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [wallet, connected, connecting, select]);
 
   const openWalletModal = useCallback(() => {
     userInitiatedRef.current = true;
+    setHelperWallet(null);
+    if (
+      !connected &&
+      wallet &&
+      wallet.readyState !== WalletReadyState.Installed &&
+      wallet.readyState !== WalletReadyState.Loadable
+    ) {
+      select(null);
+    }
     setVisible(true);
-  }, [setVisible]);
+  }, [connected, wallet, select, setVisible]);
 
   const connectWallet = useCallback(async (): Promise<string> => {
     if (connected && publicKey) {
       return publicKey.toBase58();
     }
     userInitiatedRef.current = true;
-    if (wallet) {
+    if (
+      wallet &&
+      (wallet.readyState === WalletReadyState.Installed ||
+        wallet.readyState === WalletReadyState.Loadable)
+    ) {
       try {
         await adapterConnect();
         return wallet.adapter.publicKey?.toBase58() || '';
@@ -935,13 +1540,21 @@ function AuthProvider({ children }: { children: ReactNode }) {
         return '';
       }
     }
+    if (wallet) {
+      select(null);
+    }
     setVisible(true);
     return '';
-  }, [connected, publicKey, wallet, adapterConnect, setVisible]);
+  }, [connected, publicKey, wallet, adapterConnect, select, setVisible]);
 
   const verifyWalletOnchain = async (): Promise<{ signature: string; uid: string }> => {
     if (!user?.solanaAddress || !connected) {
       throw new Error('Please connect your Solana wallet first.');
+    }
+    if (user.solanaAddress === PROTOCOL_TREASURY_SOLANA) {
+      throw new Error(
+        'Connected wallet is the Protocol Treasury address. Switch to a different Solana Devnet wallet to pay the verification fee.',
+      );
     }
     if (user.isVerified && user.verifiedTx && user.uid) {
       return { signature: user.verifiedTx, uid: user.uid };
@@ -965,23 +1578,45 @@ function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const sig = result.signature;
-    const verifyRes = await apiFetchJson<{ uid?: string; signature?: string }>(
-      '/api/accounts/me/verify-wallet',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signature: sig }),
-      },
-    );
+    let verifyRes: { uid?: string; signature?: string } = {};
+    try {
+      verifyRes = await apiFetchJson<{ uid?: string; signature?: string }>(
+        '/api/accounts/me/verify-wallet',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signature: sig }),
+        },
+        45_000,
+      );
+    } catch (verifyErr) {
+      // If request timed out after broadcast, attempt immediate Devnet treasury reconciliation
+      const syncRes = await apiFetchJson<{
+        account?: { isVerified?: boolean; uid?: string; verifiedTx?: string };
+      }>(
+        '/api/accounts/me/sync-sol-power',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ solanaAddress: user.solanaAddress }),
+        },
+        30_000,
+      ).catch(() => null);
+      if (syncRes?.account?.isVerified && syncRes.account.uid) {
+        verifyRes = {
+          uid: syncRes.account.uid,
+          signature: syncRes.account.verifiedTx || sig,
+        };
+      } else {
+        throw verifyErr;
+      }
+    }
 
-    const assignedUid = claimLocalUniqueUid(
-      user.solanaAddress,
-      verifyRes?.uid && isValidUidFormat(verifyRes.uid) ? verifyRes.uid : undefined,
-    );
-
-    safeStorageSet(`bitnoir-verified-${user.solanaAddress}`, 'true');
-    safeStorageSet(`bitnoir-verified-tx-${user.solanaAddress}`, sig);
-    safeStorageSet(`bitnoir-uid-${user.solanaAddress}`, assignedUid);
+    const serverUid = normalizeUidInput(verifyRes?.uid || '');
+    if (!isValidUidFormat(serverUid)) {
+      throw new Error('Server did not confirm wallet verification yet. Please sync and retry.');
+    }
+    const assignedUid = serverUid;
     registerVerifiedUid(assignedUid, user.solanaAddress);
     unlockSpiderCardOnVerifiedUid(user.solanaAddress);
 
@@ -999,7 +1634,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
         ? {
             ...prev,
             isVerified: true,
-            verifiedTx: sig,
+            verifiedTx: verifyRes?.signature || sig,
             uid: assignedUid,
             name: `UID ${assignedUid}`,
             email: `${assignedUid}@bitnoir.io`,
@@ -1011,7 +1646,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
       window.dispatchEvent(new Event('bitnoir-session-synced'));
     }
 
-    return { signature: sig, uid: assignedUid };
+    return { signature: verifyRes?.signature || sig, uid: assignedUid };
   };
 
   const disconnectWallet = useCallback(async () => {
@@ -1031,9 +1666,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
     await syncBackendSession({ reset: true });
   }, [adapterDisconnect, syncBackendSession, clearSignedSession]);
 
-  const isSignedIn = Boolean(
-    user?.solanaAddress && signedInAddress === user.solanaAddress && activeAuthBearerToken,
-  );
+  const isSignedIn = Boolean(user?.solanaAddress && signedInAddress === user.solanaAddress);
 
   return (
     <AuthContext.Provider
@@ -1044,6 +1677,8 @@ function AuthProvider({ children }: { children: ReactNode }) {
         isSignedIn,
         signingIn,
         walletName: wallet?.adapter?.name || '',
+        serverMining,
+        initialTeam,
         openWalletModal,
         connectWallet,
         signInWallet,
@@ -1052,7 +1687,22 @@ function AuthProvider({ children }: { children: ReactNode }) {
         verifyWalletOnchain,
       }}
     >
-      {children}
+      {ready ? children : <div className="min-h-screen bg-[#070707]" />}
+      {ready && (
+        <WalletConnectHelperModal
+          walletInfo={helperWallet}
+          onClose={() => setHelperWallet(null)}
+          onChooseAnother={() => {
+            setHelperWallet(null);
+            openWalletModal();
+          }}
+          onRetryDirect={() => {
+            setHelperWallet(null);
+            userInitiatedRef.current = true;
+            select('Trust' as any);
+          }}
+        />
+      )}
     </AuthContext.Provider>
   );
 }
@@ -1105,8 +1755,9 @@ function VerifyAndUsernameModal({
   if (!open) return null;
 
   const isConnected = Boolean(user?.solanaAddress);
-  const isVerified = Boolean(user?.isVerified);
-  const hasUid = Boolean(user?.uid);
+  const isTreasuryWallet = user?.solanaAddress === PROTOCOL_TREASURY_SOLANA;
+  const isVerified = Boolean(user?.isVerified) && !isTreasuryWallet;
+  const hasUid = Boolean(user?.uid) && !isTreasuryWallet;
   const isComplete = isConnected && isVerified && hasUid;
 
   const handleSignInOwnership = async () => {
@@ -1240,7 +1891,7 @@ function VerifyAndUsernameModal({
                 <span className="text-[#34d399] font-semibold">Free (Off-chain)</span>
               </div>
               <p className="text-[11px] text-zinc-400 m-0 pt-2 border-t border-white/[0.06] leading-relaxed">
-                Approve the signature request in your wallet to cryptographically prove ownership of this public address before sending the Testnet verification transaction.
+                Approve the signature request in your wallet to cryptographically prove ownership of this public address before sending the Devnet verification transaction.
               </p>
             </div>
 
@@ -1266,19 +1917,15 @@ function VerifyAndUsernameModal({
             <div className="p-4 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col gap-2.5 text-xs font-mono">
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400 font-sans">Ownership</span>
-                <span className="text-[#34d399] font-semibold">Signed In ✓</span>
+                <span className="text-[#34d399] font-semibold">✓Signed</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400 font-sans">Network</span>
-                <span className="text-[#fbbf24] font-semibold">Solana Testnet</span>
+                <span className="text-[#fbbf24] font-semibold">Solana Devnet</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400 font-sans">Verification Fee</span>
                 <span className="text-white font-semibold tabular-nums">{VERIFICATION_FEE_SOL} SOL</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400 font-sans">Treasury</span>
-                <span className="text-zinc-300 tabular-nums" title={PROTOCOL_TREASURY_SOLANA}>{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
                 <span className="text-zinc-400 font-sans">Unlocks</span>
@@ -1286,9 +1933,13 @@ function VerifyAndUsernameModal({
               </div>
             </div>
 
+            {isTreasuryWallet && (
+              <InlineErrorBanner message="You are connected with the Protocol Treasury wallet. Switch to a different Solana Devnet account in your wallet extension to pay verification fees." />
+            )}
+
             <button
               type="button"
-              disabled={verifying}
+              disabled={verifying || isTreasuryWallet}
               onClick={handleVerifyTx}
               className="clean-stake-confirm-btn !w-full !min-h-[44px] !text-xs !font-bold"
             >
@@ -1364,7 +2015,7 @@ function TopWalletConnect({
   onOpenVerify?: () => void;
   onOpenConnect?: () => void;
 }) {
-  const { user, connecting, isSignedIn, signingIn, walletName, openWalletModal, signInWallet, disconnectWallet } = useAuth();
+  const { user, ready, connecting, isSignedIn, signingIn, walletName, openWalletModal, signInWallet } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -1388,6 +2039,10 @@ function TopWalletConnect({
       });
     }
   };
+
+  if (!ready) {
+    return null;
+  }
 
   if (!user || !user.solanaAddress) {
     return (
@@ -1519,15 +2174,19 @@ function TopWalletConnect({
             </button>
           )}
 
-          <div style={{ padding: '9px 11px', background: '#181818', border: '1px solid rgba(255, 255, 255, 0.065)', borderRadius: 10, marginBottom: 12, fontSize: 11, display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div style={{ padding: '9px 11px', background: '#181818', border: '1px solid rgba(255, 255, 255, 0.065)', borderRadius: 10, fontSize: 11, display: 'flex', flexDirection: 'column', gap: 5 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a1a1aa' }}>
               <span>Wallet</span>
-              <strong style={{ color: '#fff' }}>{walletName || 'Solana'} · {shortSolanaAddress(user.solanaAddress)}</strong>
+              <strong style={{ color: '#fff' }}>
+                {walletName && walletName !== 'Mobile Wallet Adapter'
+                  ? `${walletName} · ${shortSolanaAddress(user.solanaAddress)}`
+                  : shortSolanaAddress(user.solanaAddress)}
+              </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a1a1aa' }}>
               <span>Ownership</span>
               <strong style={{ color: isSignedIn ? '#34d399' : '#f7931a' }}>
-                {isSignedIn ? 'Signed In ✓' : 'Signature Required'}
+                {isSignedIn ? '✓Signed' : 'Signature Required'}
               </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a1a1aa' }}>
@@ -1540,31 +2199,6 @@ function TopWalletConnect({
               <span>UID</span>
               <strong style={{ color: '#fff' }}>{user.uid ? user.uid : 'Not assigned'}</strong>
             </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              type="button"
-              className="clean-action-btn-soft !w-full !min-h-[34px] !text-xs"
-              onClick={() => {
-                setMenuOpen(false);
-                openWalletModal();
-              }}
-            >
-              <Wallet size={13} />
-              <span>Change Wallet</span>
-            </button>
-            <button
-              type="button"
-              className="button button-danger"
-              style={{ width: '100%', minHeight: 32, fontSize: 12 }}
-              onClick={() => {
-                setMenuOpen(false);
-                void disconnectWallet();
-              }}
-            >
-              Disconnect Wallet
-            </button>
           </div>
         </div>
       )}
@@ -1777,15 +2411,19 @@ function SolPowerModal({
   open,
   onClose,
   onCommitContribution,
+  onSyncPower,
   currentContributed = 0,
   isPending = false,
 }: {
   open: boolean;
   onClose: () => void;
   onCommitContribution: (solAmount: number) => Promise<void>;
+  onSyncPower?: () => Promise<number>;
   currentContributed?: number;
   isPending?: boolean;
 }) {
+  const { connection } = useConnection();
+  const { user } = useAuth();
   const maxAccountSol = SOL_POWER_MAX_SOL;
   const remainingQuota = Math.max(0, Number((maxAccountSol - currentContributed).toFixed(2)));
   const isCapped = remainingQuota <= 0;
@@ -1793,26 +2431,75 @@ function SolPowerModal({
 
   const [solAmount, setSolAmount] = useState<number>(defaultSol);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [walletBalanceSol, setWalletBalanceSol] = useState<number | null>(null);
 
   useEffect(() => {
-    if (open) {
-      setSubmitError(null);
-      setSolAmount(Math.min(1.0, Math.max(0.1, remainingQuota > 0 ? remainingQuota : 0.1)));
+    if (!open) return undefined;
+    setSubmitError(null);
+    setSyncNotice(null);
+    setSolAmount(Math.min(1.0, Math.max(0.1, remainingQuota > 0 ? remainingQuota : 0.1)));
+    let cancelled = false;
+    if (user?.solanaAddress) {
+      void fetchSolanaDevnetBalanceSol(user.solanaAddress, connection).then((bal) => {
+        if (!cancelled) setWalletBalanceSol(bal);
+      });
+    } else {
+      setWalletBalanceSol(null);
     }
-  }, [open, remainingQuota]);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, remainingQuota, user?.solanaAddress, connection]);
 
   if (!open) return null;
 
+  const isTreasuryWallet = user?.solanaAddress === PROTOCOL_TREASURY_SOLANA;
   const clampedSol = Math.max(0.1, Math.min(remainingQuota > 0 ? remainingQuota : 0.1, solAmount));
+  const hasInsufficientBalance =
+    walletBalanceSol !== null && clampedSol + 0.00001 > walletBalanceSol;
   const rateBoost = Number(
     (calculateSolPowerBoost(currentContributed + clampedSol) - calculateSolPowerBoost(currentContributed)).toFixed(4),
   );
   const dailyOutput = rateBoost * 24;
 
+  const handleManualSync = async () => {
+    if (!onSyncPower || isSyncing || isPending) return;
+    setSubmitError(null);
+    setSyncNotice(null);
+    setIsSyncing(true);
+    try {
+      const nextSol = await onSyncPower();
+      if (nextSol > currentContributed) {
+        setSyncNotice(`Synced ${nextSol.toFixed(2)} SOL total onchain power.`);
+      } else {
+        setSyncNotice('Devnet treasury checked — your SOL Power is up to date.');
+      }
+    } catch (err) {
+      setSubmitError(readableError(err, 'Could not sync Devnet SOL Power.'));
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleSubmit = async () => {
     setSubmitError(null);
+    setSyncNotice(null);
+    if (isTreasuryWallet) {
+      setSubmitError(
+        'Connected wallet is the Protocol Treasury address. Switch to a different Solana Devnet wallet to purchase SOL Power.',
+      );
+      return;
+    }
     if (isCapped || !Number.isFinite(clampedSol) || clampedSol <= 0) {
       setSubmitError('Maximum SOL Power quota reached for this account.');
+      return;
+    }
+    if (hasInsufficientBalance && walletBalanceSol !== null) {
+      setSubmitError(
+        `Insufficient Devnet SOL balance (${walletBalanceSol.toFixed(4)} SOL available, ${clampedSol.toFixed(2)} SOL required).`,
+      );
       return;
     }
     try {
@@ -1839,8 +2526,16 @@ function SolPowerModal({
 
         <div className="flex flex-col gap-4">
           <InlineErrorBanner message={submitError} />
+          {syncNotice && !submitError && (
+            <div className="px-3 py-2 rounded-xl bg-[#10b981]/12 border border-[#10b981]/30 text-[#34d399] text-xs font-medium">
+              {syncNotice}
+            </div>
+          )}
+          {isTreasuryWallet && !submitError && (
+            <InlineErrorBanner message="Connected wallet is the Protocol Treasury address. Switch to another Solana Devnet wallet to pay the treasury." />
+          )}
 
-          <div className="p-3 rounded-xl bg-[#181818] border border-white/[0.075] flex items-center justify-between text-xs font-mono">
+          <div className="p-3 rounded-xl bg-[#181818] border border-white/[0.075] flex items-center justify-between gap-2 text-xs font-mono flex-wrap">
             <span className="text-zinc-400 font-sans">Account Limit:</span>
             <div className="flex items-center gap-2">
               <span className="text-white font-bold tabular-nums">
@@ -1851,6 +2546,18 @@ function SolPowerModal({
               }`}>
                 {isCapped ? 'MAX REACHED' : `${remainingQuota.toFixed(1)} SOL REMAINING`}
               </span>
+              {onSyncPower && !isTreasuryWallet && (
+                <button
+                  type="button"
+                  onClick={() => void handleManualSync()}
+                  disabled={isSyncing || isPending}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-[10px] font-sans font-semibold text-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Re-scan Solana Devnet treasury transfers for uncredited SOL Power"
+                >
+                  <RefreshCw size={10} className={isSyncing ? 'animate-spin' : ''} />
+                  <span>{isSyncing ? 'Syncing…' : 'Sync'}</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1948,12 +2655,16 @@ function SolPowerModal({
               <div className="pob-panel-body flex flex-col gap-2.5 bg-[#181818] p-3.5 rounded-xl border border-white/[0.075] font-mono text-xs">
                 <div className="flex justify-between items-center text-zinc-300">
                   <span className="text-zinc-400 font-sans">Network:</span>
-                  <span className="font-semibold text-[#fbbf24]">Solana Testnet</span>
+                  <span className="font-semibold text-[#fbbf24]">Solana Devnet</span>
                 </div>
-                <div className="flex justify-between items-center text-zinc-300">
-                  <span className="text-zinc-400 font-sans">Treasury:</span>
-                  <span className="text-zinc-300 tabular-nums" title={PROTOCOL_TREASURY_SOLANA}>{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
-                </div>
+                {walletBalanceSol !== null && (
+                  <div className="flex justify-between items-center text-zinc-300">
+                    <span className="text-zinc-400 font-sans">Wallet Balance:</span>
+                    <span className={`font-semibold tabular-nums ${hasInsufficientBalance ? 'text-red-400' : 'text-[#34d399]'}`}>
+                      {walletBalanceSol.toFixed(4)} SOL
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center text-zinc-300">
                   <span className="text-zinc-400 font-sans">Acquire With SOL:</span>
                   <span className="font-bold text-white tabular-nums">{clampedSol.toFixed(1)} SOL</span>
@@ -1968,10 +2679,16 @@ function SolPowerModal({
                 </div>
               </div>
 
+              {hasInsufficientBalance && walletBalanceSol !== null && (
+                <InlineErrorBanner
+                  message={`Insufficient Devnet SOL: ${clampedSol.toFixed(1)} SOL selected, but wallet holds ${walletBalanceSol.toFixed(4)} SOL.`}
+                />
+              )}
+
               <button
                 type="button"
                 className="clean-stake-confirm-btn !font-bold"
-                disabled={isPending}
+                disabled={isPending || isTreasuryWallet || hasInsufficientBalance}
                 onClick={() => void handleSubmit()}
               >
                 {isPending ? (
@@ -2165,7 +2882,7 @@ function formatCardCountdown(ms: number): string {
 }
 
 function PowerCardsPage({ onBack }: { onBack: () => void }) {
-  const { user } = useAuth();
+  const { user, isSignedIn } = useAuth();
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
   const [guideModalOpen, setGuideModalOpen] = useState(false);
@@ -2189,13 +2906,6 @@ function PowerCardsPage({ onBack }: { onBack: () => void }) {
       if (isVerifiedNode && !hasUnlockedSpiderCardBefore(user.solanaAddress)) {
         unlockSpiderCardOnVerifiedUid(user.solanaAddress);
       }
-      if (isVerifiedNode && !hasUnlockedDragonCardBefore(user.solanaAddress)) {
-        const savedSol = getWalletMiningState(user.solanaAddress).contributedSol;
-        const solBoost = calculateSolPowerBoost(savedSol);
-        if (solBoost >= 2.0) {
-          unlockDragonCardOnSolPower(user.solanaAddress, solBoost);
-        }
-      }
       const list = getWalletPowerCards(user.solanaAddress);
       setReceivedCards(list);
       setNowMs(Date.now());
@@ -2206,6 +2916,7 @@ function PowerCardsPage({ onBack }: { onBack: () => void }) {
     // Check referral milestones to unlock PHOENIX CARD (3+ verified), SIREN CARD (>=0.5/h), and AURA CARD (10+ verified & active)
     if (
       user?.solanaAddress &&
+      isSignedIn &&
       (!hasUnlockedPhoenixCardBefore(user.solanaAddress) ||
         (isVerifiedNode &&
           (!hasUnlockedSirenCardBefore(user.solanaAddress) ||
@@ -2254,7 +2965,7 @@ function PowerCardsPage({ onBack }: { onBack: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [user?.solanaAddress, isVerifiedNode]);
+  }, [user?.solanaAddress, isSignedIn, isVerifiedNode]);
 
   useEffect(() => {
     return () => {
@@ -2685,7 +3396,7 @@ function PowerCardsPage({ onBack }: { onBack: () => void }) {
 // CLEAN INDEPENDENT MINERS PAGE (10% MINING POWER — GATED BY VERIFY + @USERNAME)
 // ---------------------------------------------------------------------------
 function MinersPage({ onBack }: { onBack: () => void }) {
-  const { user } = useAuth();
+  const { user, isSignedIn } = useAuth();
   const [copied, setCopied] = useState(false);
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
@@ -2699,7 +3410,7 @@ function MinersPage({ onBack }: { onBack: () => void }) {
   const isUnlocked = isConnected && isVerified && Boolean(uid);
 
   const loadTeam = async () => {
-    if (!user?.solanaAddress) {
+    if (!user?.solanaAddress || !isSignedIn) {
       setTeamList([]);
       setTeamError(null);
       return;
@@ -2737,7 +3448,7 @@ function MinersPage({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     void loadTeam();
-  }, [user?.solanaAddress, isUnlocked]);
+  }, [user?.solanaAddress, isSignedIn, isUnlocked]);
 
   const activeCount = isUnlocked ? teamList.filter((m) => m.isEligible).length : 0;
   const referralBoostPerHour = isUnlocked
@@ -2784,198 +3495,265 @@ function MinersPage({ onBack }: { onBack: () => void }) {
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
         {/* TOP NAVIGATION & HEADING */}
         <div className="flex items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">Miners</h1>
-          </div>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white m-0">
+            Miners
+          </h1>
 
           <button
             type="button"
             onClick={onBack}
-            className="clean-action-btn-soft !min-h-[32px] !px-3 !text-[11px]"
+            className="clean-action-btn-soft !min-h-[34px] !px-3.5 !text-xs whitespace-nowrap shrink-0"
           >
-            <ChevronLeft size={13} />
+            <ChevronLeft size={14} />
             <span>Back to Mining</span>
           </button>
         </div>
 
-        {/* 1. MINERS POWER SUMMARY COCKPIT */}
-        <div className="pob-cockpit mb-6 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-          <div>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold mb-1">
-              Miners Power (10%)
-            </div>
-            <div className="text-3xl sm:text-4xl font-black font-mono text-[#fbbf24] tabular-nums tracking-tight">
-              +{referralBoostPerHour.toFixed(4)} <span className="text-xs text-zinc-400 font-normal">/h</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-6 text-xs font-mono">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-0.5">Verified Active</div>
-              <div className="text-lg font-bold text-[#34d399] tabular-nums">{activeCount}</div>
-            </div>
-            <div className="h-8 w-px bg-white/10" />
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold mb-0.5">Total</div>
-              <div className="text-lg font-bold text-white tabular-nums">{teamList.length}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. INVITE LINK CARD */}
-        <div className="mb-6 p-5 rounded-2xl bg-[#121212] border border-white/[0.075]">
-          <div className="flex items-start gap-2.5 text-xs text-zinc-300 mb-4 leading-relaxed">
-            <MiningPickaxeIcon size={15} className="text-[#fbbf24] mt-0.5 flex-shrink-0" />
-            <div>
-              Only verified &amp; active direct miners contribute <strong className="text-[#fbbf24]">10% of their mining power</strong> to your velocity. Inactive or unverified miners (bot protection) share 0% until verified and actively mining.
-            </div>
-          </div>
-
-          {!isConnected ? (
-            <div className="p-4 rounded-xl bg-[#181818] border border-white/[0.075] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="text-xs text-zinc-300">
-                Connect your wallet to unlock your Miners network and referral link.
+        {/* SINGLE ATTACHED UNIFIED MINERS SURFACE */}
+        <section className="pob-cockpit overflow-hidden">
+          {/* 1. ATTACHED 3-COLUMN METRICS GRID */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-white/[0.07] bg-[#0d0d0d] border-b border-white/[0.07]">
+            <div className="px-5 py-4 sm:px-6 sm:py-5">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-[#f7931a] font-semibold">
+                Miners Power (+10%)
               </div>
-              <button
-                type="button"
-                onClick={() => setConnectModalOpen(true)}
-                className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[36px] !px-4 !text-xs !font-bold flex-shrink-0"
-              >
-                <Wallet size={14} />
-                <span>Connect Wallet</span>
-              </button>
+              <div className="mt-1.5 text-2xl sm:text-3xl font-extrabold font-mono text-[#fbbf24] tabular-nums tracking-tight">
+                +{referralBoostPerHour.toFixed(4)}{' '}
+                <span className="text-xs font-medium text-zinc-400">Bits/hr</span>
+              </div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Added from active verified referrals
+              </div>
             </div>
-          ) : !isUnlocked ? (
-            <div className="p-4 rounded-xl bg-[#181818] border border-[#f7931a]/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-start gap-2.5 text-xs text-zinc-200 leading-relaxed">
-                <Lock size={15} className="text-[#fbbf24] mt-0.5 flex-shrink-0" />
-                <div>
-                  <strong className="text-white block">Referral Link Locked</strong>
-                  Complete wallet verification (small one-time fee to prevent cloning, bots &amp; farming) to receive your <strong className="text-white">UID</strong> and generate your invite link.
+
+            <div className="px-5 py-4 sm:px-6 sm:py-5">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold">
+                Verified Active
+              </div>
+              <div className="mt-1.5 text-2xl sm:text-3xl font-extrabold font-mono text-[#34d399] tabular-nums tracking-tight">
+                {activeCount}
+              </div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Currently mining &amp; sharing 10%
+              </div>
+            </div>
+
+            <div className="px-5 py-4 sm:px-6 sm:py-5">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold">
+                Total Invited
+              </div>
+              <div className="mt-1.5 text-2xl sm:text-3xl font-extrabold font-mono text-white tabular-nums tracking-tight">
+                {teamList.length}
+              </div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Direct referrals linked to your UID
+              </div>
+            </div>
+          </div>
+
+          {/* 2. ATTACHED INVITE LINK & ELIGIBILITY BAND */}
+          <div className="px-5 py-4 sm:px-6 sm:py-5 border-b border-white/[0.07] bg-[#121212]">
+            {!isConnected ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white">
+                    Invite Link &amp; Miners Network
+                  </div>
+                  <p className="text-xs text-zinc-400 m-0 mt-1 leading-relaxed">
+                    Only verified, actively mining referrals share <strong className="text-[#fbbf24]">10%</strong> of their rate. Connect your wallet to view your network.
+                  </p>
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setVerifyModalOpen(true)}
-                className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[36px] !px-4 !text-xs !font-bold flex-shrink-0"
-              >
-                <ShieldCheck size={14} />
-                <span>Verify Wallet</span>
-              </button>
-            </div>
-          ) : (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-bold">
-                  Your Miner Invite Link
-                </span>
-                <span className="font-mono text-xs text-zinc-400">
-                  UID: <strong className="text-[#fbbf24]">{uid}</strong>
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#181818] border border-white/[0.075]">
-                <span className="font-mono text-xs text-zinc-200 truncate select-all">
-                  {referralUrl}
-                </span>
                 <button
                   type="button"
-                  onClick={handleCopy}
-                  className="clean-action-btn-soft !min-h-[32px] !px-3 !text-xs flex-shrink-0"
-                  style={{
-                    borderColor: copied ? 'rgba(16, 185, 129, 0.45)' : undefined,
-                    color: copied ? '#34d399' : undefined,
-                  }}
+                  onClick={() => setConnectModalOpen(true)}
+                  className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[38px] !px-4 !text-xs !font-bold whitespace-nowrap shrink-0"
                 >
-                  {copied ? (
-                    <>
-                      <Check size={13} strokeWidth={3} />
-                      <span>Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={13} />
-                      <span>Copy</span>
-                    </>
-                  )}
+                  <Wallet size={14} />
+                  <span>Connect Wallet</span>
                 </button>
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* 3. DIRECT MINERS LIST */}
-        <div className="p-5 rounded-2xl bg-[#121212] border border-white/[0.075]">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-bold text-white m-0">Direct Miners</h2>
-            <span className="text-[11px] font-mono text-zinc-400 tabular-nums">
-              {teamList.length} Miners
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-2.5">
-            {teamError ? (
-              <InlineErrorBanner message={teamError} onRetry={() => void loadTeam()} />
-            ) : teamLoading ? (
-              <div className="py-10 text-center text-zinc-400 text-xs font-mono flex items-center justify-center gap-2">
-                <RefreshCw size={14} className="animate-spin text-[#fbbf24]" />
-                <span>Loading direct miners…</span>
-              </div>
-            ) : teamList.length === 0 ? (
-              <div className="py-10 text-center text-zinc-500 text-xs font-mono">
-                No direct miners joined yet.
+            ) : !isUnlocked ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3 min-w-0">
+                  <Lock size={16} className="text-[#fbbf24] mt-0.5 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-white">
+                      Referral Link Locked
+                    </div>
+                    <p className="text-xs text-zinc-400 m-0 mt-1 leading-relaxed">
+                      Complete one-time wallet verification to receive your <strong className="text-white">UID</strong> and unlock your invite link. Unverified or paused miners share 0%.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setVerifyModalOpen(true)}
+                  className="clean-stake-confirm-btn !w-full sm:!w-auto !min-h-[38px] !px-4 !text-xs !font-bold whitespace-nowrap shrink-0"
+                >
+                  <ShieldCheck size={14} />
+                  <span>Verify Wallet</span>
+                </button>
               </div>
             ) : (
-              teamList.map((member, idx) => (
-                <div
-                  key={member.id || idx}
-                  className="flex items-center justify-between px-4 py-3 rounded-xl transition-colors"
-                  style={{
-                    background: member.isEligible ? 'rgba(247, 147, 26, 0.04)' : '#181818',
-                    border: member.isEligible ? '1px solid rgba(247, 147, 26, 0.2)' : '1px solid rgba(255, 255, 255, 0.065)',
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <div className="font-semibold text-white text-xs font-mono">
-                        {member.handle}
-                      </div>
-                      <div className="text-[10px] font-mono text-zinc-400 mt-0.5 tabular-nums">
-                        {member.isEligible
-                          ? `Mining: ${member.miningPower.toFixed(4)} /h · Sharing +${member.providedPower.toFixed(4)} /h`
-                          : !member.isVerified
-                            ? '0.0000 /h shared · Unverified (bot filter)'
-                            : '0.0000 /h shared · Inactive miner'}
-                      </div>
-                    </div>
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                  <div className="flex items-center gap-2 text-xs text-zinc-300">
+                    <MiningPickaxeIcon size={14} className="text-[#fbbf24] shrink-0" />
+                    <span className="font-semibold text-white">Your Invite Link</span>
+                    <span className="text-zinc-500 hidden sm:inline">
+                      · Verified active referrals share +10%
+                    </span>
                   </div>
-
-                  <span
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider"
-                    style={{
-                      background: member.isEligible
-                        ? 'rgba(16, 185, 129, 0.12)'
-                        : !member.isVerified
-                          ? 'rgba(239, 68, 68, 0.1)'
-                          : 'rgba(255, 255, 255, 0.04)',
-                      color: member.isEligible ? '#34d399' : !member.isVerified ? '#f87171' : '#71717a',
-                      border: member.isEligible
-                        ? '1px solid rgba(16, 185, 129, 0.28)'
-                        : !member.isVerified
-                          ? '1px solid rgba(239, 68, 68, 0.25)'
-                          : '1px solid rgba(255, 255, 255, 0.08)',
-                    }}
-                  >
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ backgroundColor: member.isEligible ? '#10b981' : !member.isVerified ? '#ef4444' : '#71717a' }}
-                    />
-                    {member.isEligible ? 'Active · +10%' : !member.isVerified ? 'Unverified · 0%' : 'Inactive · 0%'}
-                  </span>
+                  <div className="font-mono text-xs text-zinc-400 tabular-nums">
+                    UID <strong className="text-[#fbbf24]">{uid}</strong>
+                  </div>
                 </div>
-              ))
+
+                <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-lg bg-[#0b0b0b] border border-white/[0.08]">
+                  <span className="font-mono text-xs sm:text-[13px] text-zinc-200 truncate select-all">
+                    {referralUrl}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className={`clean-action-btn-soft !min-h-[32px] !px-3.5 !text-xs whitespace-nowrap shrink-0 ${
+                      copied ? '!border-emerald-500/45 !text-[#34d399]' : ''
+                    }`}
+                  >
+                    {copied ? (
+                      <>
+                        <Check size={13} strokeWidth={3} />
+                        <span>Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={13} />
+                        <span>Copy Link</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
-        </div>
+
+          {/* 3. ATTACHED DIRECT MINERS DATA GRID */}
+          <div>
+            <div className="px-5 py-3.5 sm:px-6 border-b border-white/[0.07] flex items-center justify-between gap-4 bg-[#121212]">
+              <h2 className="text-sm font-bold text-white m-0 tracking-tight">
+                Direct Miners
+              </h2>
+              <span className="text-xs font-mono text-zinc-400 tabular-nums">
+                {teamList.length} total · {activeCount} active
+              </span>
+            </div>
+
+            {teamError ? (
+              <div className="p-5 sm:p-6">
+                <InlineErrorBanner message={teamError} onRetry={() => void loadTeam()} />
+              </div>
+            ) : teamLoading ? (
+              <div className="divide-y divide-white/[0.06]">
+                {[0, 1, 2].map((row) => (
+                  <div
+                    key={row}
+                    className="grid grid-cols-2 sm:grid-cols-[minmax(140px,1.2fr)_minmax(130px,1fr)_minmax(140px,1fr)_115px] items-center gap-4 px-5 py-4 sm:px-6 animate-pulse"
+                  >
+                    <div className="h-4 w-28 rounded bg-white/[0.07]" />
+                    <div className="h-4 w-24 rounded bg-white/[0.05] justify-self-end" />
+                    <div className="h-4 w-24 rounded bg-white/[0.05] sm:justify-self-end" />
+                    <div className="h-4 w-20 rounded bg-white/[0.06] justify-self-end" />
+                  </div>
+                ))}
+              </div>
+            ) : teamList.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <div className="text-sm font-semibold text-zinc-200">
+                  No direct miners yet
+                </div>
+                <p className="text-xs text-zinc-400 m-0 mt-1.5 max-w-md mx-auto leading-relaxed">
+                  {isUnlocked
+                    ? 'Share your invite link above. When verified users mine, 10% of their rate appears here.'
+                    : 'Connect and verify your wallet to invite miners and track their 10% rate contribution.'}
+                </p>
+                {isUnlocked && (
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="clean-action-btn-soft !min-h-[34px] !px-4 !text-xs mt-4 whitespace-nowrap shrink-0"
+                  >
+                    <Copy size={13} />
+                    <span>Copy Invite Link</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div>
+                {/* DESKTOP COLUMN HEADERS */}
+                <div className="hidden sm:grid sm:grid-cols-[minmax(140px,1.2fr)_minmax(130px,1fr)_minmax(140px,1fr)_115px] items-center gap-4 px-6 py-2.5 bg-[#0d0d0d] border-b border-white/[0.06] text-[11px] font-mono uppercase tracking-wider text-zinc-500 font-semibold">
+                  <span>Miner</span>
+                  <span className="text-right">Mining Rate</span>
+                  <span className="text-right">Your Share (10%)</span>
+                  <span className="text-right">Status</span>
+                </div>
+
+                {/* CLEAN ALIGNED ROWS */}
+                <div className="divide-y divide-white/[0.06]">
+                  {teamList.map((member, idx) => (
+                    <div
+                      key={member.id || idx}
+                      className="grid grid-cols-2 sm:grid-cols-[minmax(140px,1.2fr)_minmax(130px,1fr)_minmax(140px,1fr)_115px] items-center gap-y-2.5 gap-x-4 px-5 py-3.5 sm:px-6 transition-colors hover:bg-white/[0.02]"
+                    >
+                      {/* Miner Identity */}
+                      <div className="order-1 font-mono font-semibold text-[13px] sm:text-sm text-white tracking-tight truncate">
+                        {member.handle}
+                      </div>
+
+                      {/* Mining Rate */}
+                      <div className="order-3 sm:order-2 sm:text-right">
+                        <div className="sm:hidden text-[10px] font-mono uppercase tracking-wider text-zinc-500 mb-0.5">
+                          Mining Rate
+                        </div>
+                        <div className="font-mono text-xs sm:text-[13px] text-zinc-300 tabular-nums">
+                          {member.miningPower.toFixed(4)}{' '}
+                          <span className="text-zinc-500">Bits/hr</span>
+                        </div>
+                      </div>
+
+                      {/* Your 10% Share */}
+                      <div className="order-4 sm:order-3 text-right">
+                        <div className="sm:hidden text-[10px] font-mono uppercase tracking-wider text-zinc-500 mb-0.5">
+                          Your Share (10%)
+                        </div>
+                        {member.isEligible ? (
+                          <div className="font-mono text-xs sm:text-[13px] font-bold text-[#fbbf24] tabular-nums">
+                            +{member.providedPower.toFixed(4)}{' '}
+                            <span className="font-normal text-[#fbbf24]/70">Bits/hr</span>
+                          </div>
+                        ) : (
+                          <div className="font-mono text-xs sm:text-[13px] text-zinc-500 tabular-nums">
+                            0.0000 <span className="text-zinc-600">Bits/hr</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Unboxed Status */}
+                      <div className="order-2 sm:order-4 text-right font-mono text-xs whitespace-nowrap">
+                        {member.isEligible ? (
+                          <span className="font-semibold text-[#34d399]">Active (+10%)</span>
+                        ) : !member.isVerified ? (
+                          <span className="font-medium text-[#f87171]">Unverified</span>
+                        ) : (
+                          <span className="font-medium text-zinc-500">Inactive</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
       </main>
 
       <ConnectWalletModal open={connectModalOpen} onClose={() => setConnectModalOpen(false)} />
@@ -3265,7 +4043,12 @@ function StopwatchPointsCounter({
 // ---------------------------------------------------------------------------
 // THE STANDALONE BITS MINING PAGE
 // ---------------------------------------------------------------------------
-function computeInitialMiningSnapshot(address: string | undefined, isVerifiedNode: boolean) {
+function computeInitialMiningSnapshot(
+  address: string | undefined,
+  isVerifiedNode: boolean,
+  serverMining?: ServerMiningSnapshot | null,
+  initialTeam?: DirectMinerMember[],
+) {
   if (!address) {
     return {
       loadedAddr: '',
@@ -3280,14 +4063,28 @@ function computeInitialMiningSnapshot(address: string | undefined, isVerifiedNod
     };
   }
   const saved = getWalletMiningState(address);
-  let alreadyStarted = Boolean(
-    saved.hasStartedMiningOnce ||
-      saved.isMiningSessionActive ||
-      saved.sessionElapsedSec > 0 ||
-      saved.claimedTotalBits > 0 ||
-      saved.claimHistory.length > 0 ||
-      hasUnlockedGenesisAntCardBefore(address),
-  );
+  const contributedSol = serverMining
+    ? Math.min(SOL_POWER_MAX_SOL, Number((serverMining.burnedSol || 0).toFixed(4)))
+    : 0;
+  const serverClaimed = serverMining
+    ? Math.max(0, Number((serverMining.minedBitsTotalClaimed || 0).toFixed(4)))
+    : 0;
+  const claimedTotalBits = Math.max(saved.claimedTotalBits, serverClaimed);
+  const serverStartedMs = serverMining?.sessionStartedAt ? Date.parse(serverMining.sessionStartedAt) : NaN;
+  const hasServerStarted = Number.isFinite(serverStartedMs) && serverStartedMs > 0;
+  const serverConfirmsUnstarted = Boolean(serverMining && !hasServerStarted && serverClaimed === 0);
+
+  let alreadyStarted = serverConfirmsUnstarted
+    ? false
+    : Boolean(
+        hasServerStarted ||
+          saved.hasStartedMiningOnce ||
+          saved.isMiningSessionActive ||
+          saved.sessionElapsedSec > 0 ||
+          claimedTotalBits > 0 ||
+          saved.claimHistory.length > 0 ||
+          hasUnlockedGenesisAntCardBefore(address),
+      );
   if (alreadyStarted && !hasUnlockedGenesisAntCardBefore(address)) {
     unlockGenesisAntCardOnStartMining(address);
   }
@@ -3295,30 +4092,28 @@ function computeInitialMiningSnapshot(address: string | undefined, isVerifiedNod
   const savedCardsBoost = getCardPowerBoostPerHour(savedCards);
   const initHas24h = isVerifiedNode || hasActiveAntCard(savedCards);
   const initCycleSec = initHas24h ? 24 * 3600 : 3 * 3600;
-  const initRate =
-    (isVerifiedNode ? 0.1 + calculateSolPowerBoost(saved.contributedSol) : 0.01) + savedCardsBoost;
+  const solBoost = isVerifiedNode ? calculateSolPowerBoost(contributedSol) : 0;
+  const referralBoost =
+    isVerifiedNode && Array.isArray(initialTeam) && initialTeam.length > 0
+      ? initialTeam.filter((m) => m.isEligible).reduce((sum, m) => sum + m.providedPower, 0)
+      : isVerifiedNode
+        ? Number(serverMining?.referralBoostPerHour || 0) || 0
+        : 0;
+  const initRate = (isVerifiedNode ? 0.1 : 0.01) + savedCardsBoost + solBoost + referralBoost;
 
   let unclaimedBits = saved.unclaimedBits;
   let sessionElapsedSec = saved.sessionElapsedSec;
   let isMiningSessionActive = false;
 
-  const oneTimeCompleteKey = 'bitnoir-cycle-complete-test-v3';
-  if (!safeStorageGet(oneTimeCompleteKey)) {
-    safeStorageSet(oneTimeCompleteKey, address);
-    alreadyStarted = true;
-    sessionElapsedSec = initCycleSec;
-    unclaimedBits = Number((initRate * (initCycleSec / 3600)).toFixed(4));
+  if (!alreadyStarted) {
+    unclaimedBits = 0;
+    sessionElapsedSec = 0;
     isMiningSessionActive = false;
-    saveWalletMiningState(address, {
-      unclaimedBits,
-      claimedTotalBits: saved.claimedTotalBits,
-      contributedSol: saved.contributedSol,
-      lastTickAt: Date.now(),
-      isMiningSessionActive: false,
-      sessionElapsedSec,
-      claimHistory: saved.claimHistory,
-      hasStartedMiningOnce: true,
-    });
+  } else if (hasServerStarted && (!saved.hasStartedMiningOnce || saved.lastTickAt < serverStartedMs - 2000)) {
+    const nextElapsed = Math.min(initCycleSec, Math.max(0, (Date.now() - serverStartedMs) / 1000));
+    unclaimedBits = (initRate / 3600) * nextElapsed;
+    sessionElapsedSec = nextElapsed;
+    isMiningSessionActive = nextElapsed < initCycleSec;
   } else if (saved.isMiningSessionActive) {
     const elapsedDelta = Math.max(0, (Date.now() - saved.lastTickAt) / 1000);
     const nextElapsed = Math.min(initCycleSec, saved.sessionElapsedSec + elapsedDelta);
@@ -3338,8 +4133,8 @@ function computeInitialMiningSnapshot(address: string | undefined, isVerifiedNod
     isMiningSessionActive,
     sessionElapsedSec,
     unclaimedBits,
-    claimedTotalBits: saved.claimedTotalBits,
-    contributedSol: saved.contributedSol,
+    claimedTotalBits,
+    contributedSol,
     claimHistory: saved.claimHistory,
     receivedCards: savedCards,
   };
@@ -3438,7 +4233,7 @@ function MiningPage({
   const client = useQueryClient();
   const { connection } = useConnection();
   const { wallet, signTransaction, sendTransaction } = useWallet();
-  const { user, openWalletModal, ensureSignedIn } = useAuth();
+  const { user, isSignedIn, serverMining, initialTeam, openWalletModal, ensureSignedIn } = useAuth();
 
   const [solPowerModalOpen, setSolPowerModalOpen] = useState(false);
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
@@ -3460,18 +4255,18 @@ function MiningPage({
   // Verified node gets 24h cycle, 0.1/h base rate, UID referral link & multipliers; Base connected wallet gets 3h cycle at 0.01/h (or 24h while Genesis ANT CARD is active)
   const isVerifiedNode = isConnected && isVerified && hasUid;
 
-  // Synchronous initial snapshot eliminates any frame-0 flash of Start Mining / 0.0000000
+  // Synchronous initial snapshot eliminates any frame-0 flash of Start Mining / Claim / 0.0000000
   const [initialSnap] = useState(() =>
-    computeInitialMiningSnapshot(user?.solanaAddress, isVerifiedNode),
+    computeInitialMiningSnapshot(user?.solanaAddress, isVerifiedNode, serverMining, initialTeam),
   );
 
-  // 2. Direct Referral Power (starts at zero — populated only from verified + active referrals)
+  // 2. Direct Referral Power (starts from hydrated initialTeam when signed in)
   const baseRatePerHour = isVerifiedNode ? 0.1000 : isConnected ? 0.0100 : 0.0000;
-  const [directTeam, setDirectTeam] = useState<DirectMinerMember[]>([]);
+  const [directTeam, setDirectTeam] = useState<DirectMinerMember[]>(() => initialTeam);
 
   useEffect(() => {
     const fetchDirectTeam = () => {
-      if (!user?.solanaAddress) {
+      if (!user?.solanaAddress || !isSignedIn) {
         setDirectTeam([]);
         return;
       }
@@ -3510,7 +4305,7 @@ function MiningPage({
       return () => window.removeEventListener('bitnoir-session-synced', fetchDirectTeam);
     }
     return undefined;
-  }, [user?.solanaAddress, isVerifiedNode]);
+  }, [user?.solanaAddress, isSignedIn, isVerifiedNode]);
 
   const referralBoostPerHour = isVerifiedNode
     ? directTeam.filter((m) => m.isEligible).reduce((sum, m) => sum + m.providedPower, 0)
@@ -3518,6 +4313,8 @@ function MiningPage({
 
   // 3. SOL Power Multiplier: Max 3 SOL per account (up to +10 Bits/hr max)
   const [contributedSol, setContributedSol] = useState<number>(initialSnap.contributedSol);
+  const contributedSolRef = useRef<number>(initialSnap.contributedSol);
+  contributedSolRef.current = contributedSol;
   const solPowerBoostPerHour = isVerifiedNode ? calculateSolPowerBoost(contributedSol) : 0;
   const hasAcquiredSolPower = isVerifiedNode && contributedSol > 0;
 
@@ -3531,13 +4328,6 @@ function MiningPage({
       }
       if (isVerifiedNode && !hasUnlockedSpiderCardBefore(user.solanaAddress)) {
         unlockSpiderCardOnVerifiedUid(user.solanaAddress);
-      }
-      if (isVerifiedNode && !hasUnlockedDragonCardBefore(user.solanaAddress)) {
-        const savedSol = getWalletMiningState(user.solanaAddress).contributedSol;
-        const solBoost = calculateSolPowerBoost(savedSol);
-        if (solBoost >= 2.0) {
-          unlockDragonCardOnSolPower(user.solanaAddress, solBoost);
-        }
       }
       setReceivedCards(getWalletPowerCards(user.solanaAddress));
     };
@@ -3587,12 +4377,103 @@ function MiningPage({
   const cycleSecRef = useRef<number>(cycleTotalSeconds);
   cycleSecRef.current = cycleTotalSeconds;
   const loadedAddrRef = useRef<string>(initialSnap.loadedAddr);
+  const syncedSnapKeyRef = useRef<string>(
+    initialSnap.loadedAddr && serverMining
+      ? `${initialSnap.loadedAddr}:${isVerifiedNode ? 1 : 0}:${serverMining.sessionStartedAt}:${serverMining.burnedSol}:${serverMining.minedBitsTotalClaimed}`
+      : '',
+  );
   const prevVerifiedRef = useRef<boolean>(isVerifiedNode);
+  const autoReconciledAddrRef = useRef<string>('');
+
+  const applyServerBurnedSol = useCallback(
+    (addr: string, rawBurnedSol: number, { notify = false }: { notify?: boolean } = {}) => {
+      if (!addr || addr === PROTOCOL_TREASURY_SOLANA || !Number.isFinite(rawBurnedSol)) {
+        return contributedSolRef.current;
+      }
+      const nextSol = Math.max(0, Math.min(SOL_POWER_MAX_SOL, Number(rawBurnedSol.toFixed(4))));
+      const prevSol = contributedSolRef.current;
+      if (nextSol !== prevSol) {
+        const dt = isMiningSessionActive ? Math.max(0, (Date.now() - baseTimeRef.current) / 1000) : 0;
+        const currentAccrued = baseBitsRef.current + (isMiningSessionActive ? (rateRef.current / 3600) * dt : 0);
+        const currentElapsed = Math.min(cycleSecRef.current, baseElapsedRef.current + dt);
+        baseBitsRef.current = currentAccrued;
+        baseElapsedRef.current = currentElapsed;
+        baseTimeRef.current = Date.now();
+        setSessionElapsedSec(currentElapsed);
+        setUnclaimedBits(currentAccrued);
+        setContributedSol(nextSol);
+        contributedSolRef.current = nextSol;
+        saveWalletMiningState(addr, {
+          unclaimedBits: currentAccrued,
+          claimedTotalBits,
+          contributedSol: nextSol,
+          lastTickAt: Date.now(),
+          isMiningSessionActive,
+          sessionElapsedSec: currentElapsed,
+          claimHistory: claimHistoryList,
+        });
+        if (nextSol > 0) {
+          const totalSolBoost = calculateSolPowerBoost(nextSol);
+          if (totalSolBoost >= 2.0) {
+            unlockDragonCardOnSolPower(addr, totalSolBoost);
+          }
+          safeStorageRemove(`bitnoir-pending-solpower-${addr}`);
+        }
+        if (notify && nextSol > prevSol) {
+          const addedBoost = Number((calculateSolPowerBoost(nextSol) - calculateSolPowerBoost(prevSol)).toFixed(4));
+          toast({
+            description: `Synced +${addedBoost.toFixed(4)} Bits/hr SOL Power (${nextSol.toFixed(2)} SOL) from Solana Devnet.`,
+            variant: 'gold',
+          });
+        }
+        void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
+        void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
+        return nextSol;
+      }
+      return prevSol;
+    },
+    [isMiningSessionActive, claimedTotalBits, claimHistoryList, client],
+  );
+
+  const syncSolPowerFromChain = useCallback(
+    async ({ notify = false }: { notify?: boolean } = {}): Promise<number> => {
+      const addr = user?.solanaAddress;
+      if (!addr || addr === PROTOCOL_TREASURY_SOLANA || !isSignedIn) {
+        return 0;
+      }
+      const res = await apiFetchJson<{
+        creditedSol?: number;
+        mining?: { burnedSol?: number };
+        account?: { isVerified?: boolean; uid?: string; verifiedTx?: string };
+      }>(
+        '/api/accounts/me/sync-sol-power',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+        30_000,
+      );
+      if (res?.account?.isVerified && res.account.uid && !user?.isVerified) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('bitnoir-session-synced'));
+        }
+      }
+      const serverBurnedSol = Number(res?.mining?.burnedSol);
+      if (Number.isFinite(serverBurnedSol)) {
+        return applyServerBurnedSol(addr, serverBurnedSol, { notify });
+      }
+      return contributedSolRef.current;
+    },
+    [user?.solanaAddress, user?.isVerified, isSignedIn, applyServerBurnedSol],
+  );
 
   // Load or reset per-wallet mining state on wallet connect / switch / disconnect
   useEffect(() => {
     if (!user?.solanaAddress) {
       loadedAddrRef.current = '';
+      syncedSnapKeyRef.current = '';
+      autoReconciledAddrRef.current = '';
       prevVerifiedRef.current = false;
       baseBitsRef.current = 0;
       baseElapsedRef.current = 0;
@@ -3602,16 +4483,49 @@ function MiningPage({
       setSessionElapsedSec(0);
       setUnclaimedBits(0);
       setContributedSol(0);
+      contributedSolRef.current = 0;
       setClaimedTotalBits(0);
       setClaimHistoryList([]);
       return;
     }
 
-    if (loadedAddrRef.current === user.solanaAddress) return;
+    const serverSyncKey = serverMining
+      ? `${user.solanaAddress}:${isVerifiedNode ? 1 : 0}:${serverMining.sessionStartedAt}:${serverMining.burnedSol}:${serverMining.minedBitsTotalClaimed}`
+      : '';
+    if (loadedAddrRef.current === user.solanaAddress) {
+      if (serverSyncKey && syncedSnapKeyRef.current !== serverSyncKey) {
+        syncedSnapKeyRef.current = serverSyncKey;
+        const snap = computeInitialMiningSnapshot(user.solanaAddress, isVerifiedNode, serverMining, initialTeam);
+        setContributedSol(snap.contributedSol);
+        contributedSolRef.current = snap.contributedSol;
+        setClaimedTotalBits((prev) => Math.max(prev, snap.claimedTotalBits));
+        if (!serverMining?.sessionStartedAt && (serverMining?.minedBitsTotalClaimed || 0) === 0) {
+          baseBitsRef.current = 0;
+          baseElapsedRef.current = 0;
+          baseTimeRef.current = Date.now();
+          setHasStartedMiningOnce(false);
+          setIsMiningSessionActive(false);
+          setSessionElapsedSec(0);
+          setUnclaimedBits(0);
+        } else if (snap.hasStartedMiningOnce && !hasStartedMiningOnce) {
+          baseBitsRef.current = snap.unclaimedBits;
+          baseElapsedRef.current = snap.sessionElapsedSec;
+          baseTimeRef.current = Date.now();
+          setHasStartedMiningOnce(true);
+          setUnclaimedBits(snap.unclaimedBits);
+          setSessionElapsedSec(snap.sessionElapsedSec);
+          setIsMiningSessionActive(snap.isMiningSessionActive);
+        }
+      }
+      return;
+    }
     loadedAddrRef.current = user.solanaAddress;
+    if (serverSyncKey) {
+      syncedSnapKeyRef.current = serverSyncKey;
+    }
     prevVerifiedRef.current = isVerifiedNode;
 
-    const snap = computeInitialMiningSnapshot(user.solanaAddress, isVerifiedNode);
+    const snap = computeInitialMiningSnapshot(user.solanaAddress, isVerifiedNode, serverMining, initialTeam);
     baseBitsRef.current = snap.unclaimedBits;
     baseElapsedRef.current = snap.sessionElapsedSec;
     baseTimeRef.current = Date.now();
@@ -3620,6 +4534,7 @@ function MiningPage({
     setSessionElapsedSec(snap.sessionElapsedSec);
     setIsMiningSessionActive(snap.isMiningSessionActive);
     setContributedSol(snap.contributedSol);
+    contributedSolRef.current = snap.contributedSol;
     setClaimedTotalBits(snap.claimedTotalBits);
     setClaimHistoryList(snap.claimHistory);
 
@@ -3635,7 +4550,34 @@ function MiningPage({
         hasStartedMiningOnce: true,
       });
     }
-  }, [user?.solanaAddress]);
+  }, [user?.solanaAddress, isVerifiedNode, serverMining, initialTeam, hasStartedMiningOnce]);
+
+  // Automatically reconcile Devnet SOL Power when wallet is signed in, verified, or has a pending tx
+  useEffect(() => {
+    const addr = user?.solanaAddress;
+    if (!addr || addr === PROTOCOL_TREASURY_SOLANA || !isSignedIn) return undefined;
+
+    const syncKey = `${addr}:signed`;
+    const hasPendingTx = Boolean(safeStorageGet(`bitnoir-pending-solpower-${addr}`));
+    if (autoReconciledAddrRef.current !== syncKey || hasPendingTx) {
+      autoReconciledAddrRef.current = syncKey;
+      void syncSolPowerFromChain({ notify: true }).catch(() => {
+        // Ignore transient Devnet RPC errors during background reconciliation
+      });
+    }
+
+    const onSessionSynced = () => {
+      const latestLocal = getWalletMiningState(addr);
+      if (latestLocal.contributedSol !== contributedSolRef.current) {
+        applyServerBurnedSol(addr, latestLocal.contributedSol, { notify: false });
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('bitnoir-session-synced', onSessionSynced);
+      return () => window.removeEventListener('bitnoir-session-synced', onSessionSynced);
+    }
+    return undefined;
+  }, [user?.solanaAddress, isSignedIn, isVerifiedNode, syncSolPowerFromChain, applyServerBurnedSol]);
 
   // Immediately upgrade & start 24h 0.1/h mining as soon as wallet completes 0.02 SOL verification + @username
   useEffect(() => {
@@ -4017,6 +4959,11 @@ function MiningPage({
       setVerifyModalOpen(true);
       return;
     }
+    if (user.solanaAddress === PROTOCOL_TREASURY_SOLANA) {
+      throw new Error(
+        'Connected wallet is the Protocol Treasury address. Switch to a different Solana Devnet wallet to purchase SOL Power.',
+      );
+    }
     if (!Number.isFinite(solAmount) || solAmount <= 0) {
       throw new Error('Enter a valid SOL amount.');
     }
@@ -4025,6 +4972,8 @@ function MiningPage({
       return;
     }
     setIsContributing(true);
+    let sentTxSig = '';
+    const pendingKey = `bitnoir-pending-solpower-${user.solanaAddress}`;
     try {
       const signed = await ensureSignedIn();
       if (!signed) {
@@ -4042,14 +4991,32 @@ function MiningPage({
         signTransaction,
         sendTransaction,
       });
-      const contributeRes = await apiFetchJson<{ solContributed?: number }>('/api/accounts/me/contribute-sol', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ solAmount, txSignature: tx.signature }),
-      });
+      sentTxSig = tx.signature;
+      safeStorageSet(
+        pendingKey,
+        JSON.stringify({ txSignature: sentTxSig, solAmount, createdAt: Date.now() }),
+      );
+
+      const contributeRes = await apiFetchJson<{
+        solContributed?: number;
+        mining?: { burnedSol?: number };
+      }>(
+        '/api/accounts/me/contribute-sol',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ solAmount, txSignature: sentTxSig }),
+        },
+        45_000,
+      );
+      safeStorageRemove(pendingKey);
+      const prevSol = contributedSolRef.current;
+      const serverBurnedSol = Number(contributeRes?.mining?.burnedSol);
       const verifiedSol = Number(contributeRes?.solContributed || solAmount);
-      const nextSol = Math.min(SOL_POWER_MAX_SOL, Number((contributedSol + verifiedSol).toFixed(2)));
-      const boost = Number((calculateSolPowerBoost(nextSol) - calculateSolPowerBoost(contributedSol)).toFixed(4));
+      const nextSol = Number.isFinite(serverBurnedSol)
+        ? Math.min(SOL_POWER_MAX_SOL, Number(serverBurnedSol.toFixed(4)))
+        : Math.min(SOL_POWER_MAX_SOL, Number((prevSol + verifiedSol).toFixed(4)));
+      const boost = Number((calculateSolPowerBoost(nextSol) - calculateSolPowerBoost(prevSol)).toFixed(4));
 
       // Lock in accrued bits and elapsed time before changing rate
       const currentDt = isMiningSessionActive ? Math.max(0, (Date.now() - baseTimeRef.current) / 1000) : 0;
@@ -4062,6 +5029,7 @@ function MiningPage({
       setUnclaimedBits(currentAccrued);
 
       setContributedSol(nextSol);
+      contributedSolRef.current = nextSol;
       saveWalletMiningState(user.solanaAddress, {
         unclaimedBits: currentAccrued,
         claimedTotalBits,
@@ -4083,6 +5051,25 @@ function MiningPage({
       void client.invalidateQueries({ queryKey: getGetMyAccountQueryKey() });
       void client.invalidateQueries({ queryKey: getGetMyActivityQueryKey() });
     } catch (err) {
+      if (sentTxSig) {
+        const beforeRecovery = contributedSolRef.current;
+        try {
+          const recoveredSol = await syncSolPowerFromChain({ notify: false });
+          if (recoveredSol > beforeRecovery) {
+            const recoveredBoost = Number(
+              (calculateSolPowerBoost(recoveredSol) - calculateSolPowerBoost(beforeRecovery)).toFixed(4),
+            );
+            setSolPowerModalOpen(false);
+            toast({
+              description: `Added +${recoveredBoost.toFixed(4)} Bits/hr SOL Power from Solana Devnet.`,
+              variant: 'gold',
+            });
+            return;
+          }
+        } catch {
+          // Fall through to error notice below if onchain reconciliation also failed
+        }
+      }
       toast({
         description: readableError(err, 'Unable to acquire SOL Power.'),
         variant: 'destructive',
@@ -4406,6 +5393,7 @@ function MiningPage({
         open={solPowerModalOpen}
         onClose={() => setSolPowerModalOpen(false)}
         onCommitContribution={handleCommitSolPower}
+        onSyncPower={() => syncSolPowerFromChain({ notify: true })}
         currentContributed={contributedSol}
         isPending={isContributing}
       />
@@ -4426,7 +5414,7 @@ function AssetsPage({
   onOpenWithdraw?: () => void;
 }) {
   const client = useQueryClient();
-  const { user, ensureSignedIn } = useAuth();
+  const { user, isSignedIn, ensureSignedIn } = useAuth();
   const accountQuery = useGetMyAccount({ query: { queryKey: getGetMyAccountQueryKey() } });
   const account = accountQuery.data;
 
@@ -4453,7 +5441,7 @@ function AssetsPage({
   const isConnected = Boolean(user?.solanaAddress);
   const isVerified = Boolean(user?.solanaAddress && user?.isVerified);
   const hasUid = Boolean(user?.uid);
-  const canUidTransfer = isConnected && isVerified && hasUid;
+  const canUidTransfer = isConnected && isSignedIn && isVerified && hasUid;
 
   const openTransferModal = () => {
     setSendError(null);
@@ -4469,7 +5457,7 @@ function AssetsPage({
   };
 
   const refreshActivity = async () => {
-    if (!user?.solanaAddress) {
+    if (!user?.solanaAddress || !isSignedIn) {
       setActivities([]);
       setActivitiesError(null);
       return;
@@ -4499,6 +5487,7 @@ function AssetsPage({
   };
 
   useEffect(() => {
+    void accountQuery.refetch();
     void refreshActivity();
     const onSynced = () => {
       void accountQuery.refetch();
@@ -4506,9 +5495,9 @@ function AssetsPage({
     };
     window.addEventListener('bitnoir-session-synced', onSynced);
     return () => window.removeEventListener('bitnoir-session-synced', onSynced);
-  }, [user?.solanaAddress]);
+  }, [user?.solanaAddress, isSignedIn]);
 
-  const bitsPurchased = isConnected ? (account?.balances?.purchased ?? 0) : 0;
+  const bitsPurchased = isConnected && isSignedIn ? (account?.balances?.purchased ?? 0) : 0;
 
   const cleanRecipientInput = sendRecipient.trim();
   const resolvedRecipientUid = cleanRecipientInput
@@ -5043,7 +6032,7 @@ function AssetsPage({
 // STANDALONE WITHDRAW PAGE (CLEAN MINIMAL TRANSFER-STYLE · NOT OPENED YET)
 // ---------------------------------------------------------------------------
 function WithdrawPage({ onBack }: { onBack: () => void }) {
-  const { user } = useAuth();
+  const { user, isSignedIn } = useAuth();
   const accountQuery = useGetMyAccount({ query: { queryKey: getGetMyAccountQueryKey() } });
   const account = accountQuery.data;
 
@@ -5051,7 +6040,7 @@ function WithdrawPage({ onBack }: { onBack: () => void }) {
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
 
   const isConnected = Boolean(user?.solanaAddress);
-  const bitsAvailable = isConnected ? (account?.balances?.purchased ?? 0) : 0;
+  const bitsAvailable = isConnected && isSignedIn ? (account?.balances?.purchased ?? 0) : 0;
 
   return (
     <div className="min-h-screen bg-[#070707] text-zinc-100 flex flex-col font-sans">

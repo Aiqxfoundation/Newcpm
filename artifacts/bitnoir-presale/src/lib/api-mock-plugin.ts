@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { Plugin } from 'vite';
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -131,14 +134,14 @@ function isValidSolanaBase58(addr: string): boolean {
 }
 
 const PROTOCOL_TREASURY_SOLANA = 'CFTxmxkCi3h21eXpQ9fkzS6T5oPrzNZUi9njDa5dR7tk';
-const SOLANA_PUBLIC_TESTNET_RPC = 'https://api.testnet.solana.com';
+const SOLANA_PUBLIC_DEVNET_RPC = 'https://api.devnet.solana.com';
 const VERIFICATION_FEE_LAMPORTS = 20_000_000; // 0.02 SOL
 
-async function postTestnetRpc(method: string, params: unknown[], timeoutMs = 7000): Promise<any> {
+async function postDevnetRpc(method: string, params: unknown[], timeoutMs = 7000): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const rpcRes = await fetch(SOLANA_PUBLIC_TESTNET_RPC, {
+    const rpcRes = await fetch(SOLANA_PUBLIC_DEVNET_RPC, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
@@ -150,11 +153,11 @@ async function postTestnetRpc(method: string, params: unknown[], timeoutMs = 700
       }),
     });
     if (!rpcRes.ok) {
-      throw new Error(`Testnet RPC HTTP ${rpcRes.status}`);
+      throw new Error(`Devnet RPC HTTP ${rpcRes.status}`);
     }
     const json = await rpcRes.json().catch(() => null);
     if (json?.error) {
-      throw new Error(String(json.error?.message || 'Testnet RPC error'));
+      throw new Error(String(json.error?.message || 'Devnet RPC error'));
     }
     return json?.result ?? null;
   } finally {
@@ -162,7 +165,114 @@ async function postTestnetRpc(method: string, params: unknown[], timeoutMs = 700
   }
 }
 
-async function verifyTreasuryTransferOnTestnetRpc({
+interface InspectedTreasuryTransfer {
+  sender: string;
+  verifiedLamports: number;
+  senderSpentLamports: number;
+  senderSigned: boolean;
+  parsedSenderMatches: boolean;
+  blockTime?: number;
+  slot?: number;
+}
+
+function inspectTreasuryTransferTransaction(
+  txResult: any,
+  expectedSender?: string,
+): InspectedTreasuryTransfer | null {
+  if (!txResult || txResult.meta?.err) {
+    return null;
+  }
+
+  const accountKeysRaw: any[] = Array.isArray(txResult.transaction?.message?.accountKeys)
+    ? txResult.transaction.message.accountKeys
+    : [];
+  const accountKeys = accountKeysRaw.map((k) =>
+    typeof k === 'string'
+      ? { pubkey: k, signer: false }
+      : { pubkey: String(k?.pubkey || ''), signer: Boolean(k?.signer) },
+  );
+
+  const instructions: any[] = [
+    ...(Array.isArray(txResult.transaction?.message?.instructions)
+      ? txResult.transaction.message.instructions
+      : []),
+    ...(Array.isArray(txResult.meta?.innerInstructions)
+      ? txResult.meta.innerInstructions.flatMap((inner: any) =>
+          Array.isArray(inner?.instructions) ? inner.instructions : [],
+        )
+      : []),
+  ];
+
+  const transferBySource = new Map<string, number>();
+  for (const ix of instructions) {
+    if (ix?.program === 'system' && ix?.parsed?.type === 'transfer') {
+      const info = ix.parsed?.info || {};
+      if (info.destination === PROTOCOL_TREASURY_SOLANA && typeof info.source === 'string') {
+        const lamports = Number(info.lamports);
+        if (Number.isFinite(lamports) && lamports > 0) {
+          const prev = transferBySource.get(info.source) || 0;
+          transferBySource.set(info.source, prev + lamports);
+        }
+      }
+    }
+  }
+
+  let sender = expectedSender || '';
+  if (!sender) {
+    for (const [src, lamports] of transferBySource.entries()) {
+      if (lamports > 0 && accountKeys.some((k) => k.pubkey === src && k.signer)) {
+        sender = src;
+        break;
+      }
+    }
+  }
+
+  if (!sender || sender === PROTOCOL_TREASURY_SOLANA) {
+    return null;
+  }
+
+  const senderSigned = accountKeys.some((k) => k.pubkey === sender && k.signer);
+  const parsedTransferLamports = transferBySource.get(sender) || 0;
+  const parsedSenderMatches = parsedTransferLamports > 0;
+
+  const treasuryIdx = accountKeys.findIndex((k) => k.pubkey === PROTOCOL_TREASURY_SOLANA);
+  const senderIdx = accountKeys.findIndex((k) => k.pubkey === sender);
+  const preBalances: number[] = Array.isArray(txResult.meta?.preBalances)
+    ? txResult.meta.preBalances
+    : [];
+  const postBalances: number[] = Array.isArray(txResult.meta?.postBalances)
+    ? txResult.meta.postBalances
+    : [];
+
+  const deltaLamports =
+    treasuryIdx >= 0 &&
+    typeof preBalances[treasuryIdx] === 'number' &&
+    typeof postBalances[treasuryIdx] === 'number'
+      ? postBalances[treasuryIdx] - preBalances[treasuryIdx]
+      : 0;
+
+  const senderSpentLamports =
+    senderIdx >= 0 &&
+    typeof preBalances[senderIdx] === 'number' &&
+    typeof postBalances[senderIdx] === 'number'
+      ? preBalances[senderIdx] - postBalances[senderIdx]
+      : 0;
+
+  const rawMin = Math.min(parsedTransferLamports, deltaLamports);
+  const verifiedLamports = Number.isFinite(rawMin) ? Math.max(0, rawMin) : 0;
+
+  return {
+    sender,
+    verifiedLamports,
+    senderSpentLamports,
+    senderSigned,
+    parsedSenderMatches,
+    blockTime: typeof txResult.blockTime === 'number' ? txResult.blockTime : undefined,
+    slot: typeof txResult.slot === 'number' ? txResult.slot : undefined,
+  };
+}
+
+async function verifyTreasuryTransferOnDevnetRpc({
   signature,
   expectedSender,
   minLamports,
@@ -171,19 +281,26 @@ async function verifyTreasuryTransferOnTestnetRpc({
   expectedSender: string;
   minLamports: number;
 }): Promise<{ verifiedLamports: number; slot?: number }> {
+  if (expectedSender === PROTOCOL_TREASURY_SOLANA) {
+    throw new HttpRequestError(
+      400,
+      'Protocol Treasury wallet cannot send verification or SOL Power payments to itself. Please use a separate Solana Devnet wallet.',
+    );
+  }
+
   let txResult: any = null;
   let lastRpcError = '';
 
   for (let attempt = 0; attempt < 16; attempt++) {
     try {
-      const statusResult = await postTestnetRpc(
+      const statusResult = await postDevnetRpc(
         'getSignatureStatuses',
         [[signature], { searchTransactionHistory: true }],
         7000,
       );
       const status = statusResult?.value?.[0];
       if (status?.err) {
-        throw new HttpRequestError(400, 'Transaction failed onchain on Solana Testnet.');
+        throw new HttpRequestError(400, 'Transaction failed onchain on Solana Devnet.');
       }
 
       const isConfirmed =
@@ -194,7 +311,7 @@ async function verifyTreasuryTransferOnTestnetRpc({
           (status.confirmations ?? 0) > 0);
 
       if (isConfirmed || attempt >= 2) {
-        const fetchedTx = await postTestnetRpc(
+        const fetchedTx = await postDevnetRpc(
           'getTransaction',
           [
             signature,
@@ -215,7 +332,7 @@ async function verifyTreasuryTransferOnTestnetRpc({
       if (err instanceof HttpRequestError) {
         throw err;
       }
-      lastRpcError = err?.name === 'AbortError' ? 'Testnet RPC timeout' : String(err?.message || 'RPC fetch failed');
+      lastRpcError = err?.name === 'AbortError' ? 'Devnet RPC timeout' : String(err?.message || 'RPC fetch failed');
     }
     await new Promise((r) => setTimeout(r, 1400));
   }
@@ -224,92 +341,38 @@ async function verifyTreasuryTransferOnTestnetRpc({
     throw new HttpRequestError(
       400,
       lastRpcError
-        ? `Could not verify transaction on Solana Testnet RPC (${lastRpcError}). Please try again.`
-        : 'Transaction was not confirmed on Solana Testnet yet. Confirm it was sent on Testnet and retry.',
+        ? `Could not verify transaction on Solana Devnet RPC (${lastRpcError}). Please try again.`
+        : 'Transaction was not confirmed on Solana Devnet yet. Confirm it was sent on Devnet and retry.',
     );
   }
 
   if (txResult.meta?.err) {
-    throw new HttpRequestError(400, 'Transaction failed onchain on Solana Testnet.');
+    throw new HttpRequestError(400, 'Transaction failed onchain on Solana Devnet.');
   }
 
-  const accountKeysRaw: any[] = Array.isArray(txResult.transaction?.message?.accountKeys)
-    ? txResult.transaction.message.accountKeys
-    : [];
-  const accountKeys = accountKeysRaw.map((k) =>
-    typeof k === 'string'
-      ? { pubkey: k, signer: false }
-      : { pubkey: String(k?.pubkey || ''), signer: Boolean(k?.signer) },
-  );
-
-  const senderSigned = accountKeys.some(
-    (k) => k.pubkey === expectedSender && k.signer,
-  );
-
-  const instructions: any[] = [
-    ...(Array.isArray(txResult.transaction?.message?.instructions)
-      ? txResult.transaction.message.instructions
-      : []),
-    ...(Array.isArray(txResult.meta?.innerInstructions)
-      ? txResult.meta.innerInstructions.flatMap((inner: any) =>
-          Array.isArray(inner?.instructions) ? inner.instructions : [],
-        )
-      : []),
-  ];
-
-  let parsedTransferLamports = 0;
-  let parsedSenderMatches = false;
-  for (const ix of instructions) {
-    if (ix?.program === 'system' && ix?.parsed?.type === 'transfer') {
-      const info = ix.parsed?.info || {};
-      if (info.destination === PROTOCOL_TREASURY_SOLANA) {
-        parsedTransferLamports += Number(info.lamports || 0);
-        if (info.source === expectedSender) {
-          parsedSenderMatches = true;
-        }
-      }
-    }
-  }
-
-  if (!senderSigned || !parsedSenderMatches) {
+  const inspected = inspectTreasuryTransferTransaction(txResult, expectedSender);
+  if (!inspected || !inspected.senderSigned || !inspected.parsedSenderMatches) {
     throw new HttpRequestError(
       403,
       'Transaction sender/signer does not match your connected Solana wallet.',
     );
   }
 
-  const treasuryIdx = accountKeys.findIndex(
-    (k) => k.pubkey === PROTOCOL_TREASURY_SOLANA,
-  );
-  const preBalances: number[] = Array.isArray(txResult.meta?.preBalances)
-    ? txResult.meta.preBalances
-    : [];
-  const postBalances: number[] = Array.isArray(txResult.meta?.postBalances)
-    ? txResult.meta.postBalances
-    : [];
-
-  const deltaLamports =
-    treasuryIdx >= 0 &&
-    typeof preBalances[treasuryIdx] === 'number' &&
-    typeof postBalances[treasuryIdx] === 'number'
-      ? postBalances[treasuryIdx] - preBalances[treasuryIdx]
-      : 0;
-
-  const isSelfTransfer = expectedSender === PROTOCOL_TREASURY_SOLANA;
-  const verifiedLamports = isSelfTransfer
-    ? parsedTransferLamports
-    : Math.min(parsedTransferLamports, deltaLamports);
-
-  if (verifiedLamports < minLamports) {
+  if (
+    !Number.isFinite(inspected.verifiedLamports) ||
+    !Number.isFinite(inspected.senderSpentLamports) ||
+    inspected.verifiedLamports < minLamports ||
+    inspected.senderSpentLamports < minLamports
+  ) {
     throw new HttpRequestError(
       400,
-      'Transaction did not transfer the required SOL amount to the protocol treasury on Solana Testnet.',
+      'Transaction did not deduct and transfer the exact required SOL amount to the protocol treasury on Solana Devnet.',
     );
   }
 
   return {
-    verifiedLamports,
-    slot: typeof txResult.slot === 'number' ? txResult.slot : undefined,
+    verifiedLamports: inspected.verifiedLamports,
+    slot: inspected.slot,
   };
 }
 
@@ -345,17 +408,180 @@ function createZeroAccount(address = ''): AccountState {
 }
 
 export function bitnoirApiPlugin(): Plugin {
+  const STATE_FILE = path.join(os.tmpdir(), 'bitnoir-devnet-state.json');
   const accounts = new Map<string, AccountState>();
   const uidRegistry = new Map<string, string>(); // uid -> wallet address
   const verifiedTxRegistry = new Map<string, { owner: string; kind: 'verify' | 'sol-power' }>();
   const pendingTxSignatures = new Set<string>();
+  const treasuryTxCache = new Map<string, InspectedTreasuryTransfer | null>();
+  const lastReconciledAt = new Map<string, number>();
+  const reconcileInFlight = new Map<string, Promise<number>>();
   const authNonces = new Map<
     string,
-    { address: string; nonce: string; message: string; domain: string; issuedAt: string; expiresAt: number }
+    { address: string; nonce: string; message: string; domain: string }
   >();
-  const authSessions = new Map<string, { address: string; signedAt: number; expiresAt: number }>();
-  const seededLegacyDemo = new Set<string>();
-  let activeAddress = '';
+  const SESSIONS_FILE = path.join(os.tmpdir(), 'bitnoir-devnet-auth-sessions.json');
+  const loadPersistedState = () => {
+    try {
+      if (!fs.existsSync(STATE_FILE)) return;
+      const raw = fs.readFileSync(STATE_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+
+      if (parsed.accounts && typeof parsed.accounts === 'object') {
+        for (const [addr, acc] of Object.entries(parsed.accounts)) {
+          if (addr && acc && typeof acc === 'object') {
+            accounts.set(addr, acc as AccountState);
+          }
+        }
+      }
+      if (parsed.uidRegistry && typeof parsed.uidRegistry === 'object') {
+        for (const [uid, owner] of Object.entries(parsed.uidRegistry)) {
+          if (isValidUid(uid) && typeof owner === 'string' && owner) {
+            uidRegistry.set(uid, owner);
+          }
+        }
+      }
+      if (parsed.verifiedTxRegistry && typeof parsed.verifiedTxRegistry === 'object') {
+        for (const [sig, entry] of Object.entries(parsed.verifiedTxRegistry)) {
+          const rec = entry as { owner?: unknown; kind?: unknown } | null;
+          if (
+            sig &&
+            rec &&
+            typeof rec.owner === 'string' &&
+            (rec.kind === 'verify' || rec.kind === 'sol-power')
+          ) {
+            verifiedTxRegistry.set(sig, { owner: rec.owner, kind: rec.kind });
+          }
+        }
+      }
+    } catch {
+      // Ignore corrupt/missing persisted state cache
+    }
+  };
+  loadPersistedState();
+
+  const persistState = () => {
+    try {
+      const accountsObj: Record<string, AccountState> = {};
+      for (const [addr, acc] of accounts.entries()) {
+        accountsObj[addr] = acc;
+      }
+      const uidObj: Record<string, string> = {};
+      for (const [uid, owner] of uidRegistry.entries()) {
+        uidObj[uid] = owner;
+      }
+      const txObj: Record<string, { owner: string; kind: 'verify' | 'sol-power' }> = {};
+      for (const [sig, entry] of verifiedTxRegistry.entries()) {
+        txObj[sig] = entry;
+      }
+      fs.writeFileSync(
+        STATE_FILE,
+        JSON.stringify({
+          accounts: accountsObj,
+          uidRegistry: uidObj,
+          verifiedTxRegistry: txObj,
+        }),
+        'utf8',
+      );
+    } catch {
+      // Ignore temp file write errors
+    }
+  };
+
+  const loadPersistedSessions = (): Map<string, { address: string; signedAt: number }> => {
+    const map = new Map<string, { address: string; signedAt: number }>();
+    try {
+      if (fs.existsSync(SESSIONS_FILE)) {
+        const raw = fs.readFileSync(SESSIONS_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          for (const [token, info] of Object.entries(parsed)) {
+            const rec = info as { address?: unknown; signedAt?: unknown } | null;
+            if (
+              token &&
+              rec &&
+              typeof rec.address === 'string' &&
+              isValidSolanaBase58(rec.address)
+            ) {
+              map.set(token, {
+                address: rec.address,
+                signedAt: Number(rec.signedAt) || Date.now(),
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore corrupt/missing session cache
+    }
+    return map;
+  };
+  const authSessions = loadPersistedSessions();
+  const persistSessions = () => {
+    try {
+      const obj: Record<string, { address: string; signedAt: number }> = {};
+      for (const [token, val] of authSessions.entries()) {
+        obj[token] = val;
+      }
+      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(obj), 'utf8');
+    } catch {
+      // Ignore temp file write errors
+    }
+  };
+  const SESSION_COOKIE_NAME = 'bitnoir_session';
+  const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 30; // 30 days
+
+  const parseCookies = (req: any): Record<string, string> => {
+    const out: Record<string, string> = {};
+    const raw = String(req?.headers?.cookie || '');
+    if (!raw) return out;
+    for (const part of raw.split(';')) {
+      const idx = part.indexOf('=');
+      if (idx <= 0) continue;
+      const key = part.slice(0, idx).trim();
+      const val = part.slice(idx + 1).trim();
+      if (!key) continue;
+      try {
+        out[key] = decodeURIComponent(val);
+      } catch {
+        out[key] = val;
+      }
+    }
+    return out;
+  };
+
+  const isSecureRequest = (req: any): boolean => {
+    const xfProto = String(req?.headers?.['x-forwarded-proto'] || '')
+      .split(',')[0]
+      .trim()
+      .toLowerCase();
+    return xfProto === 'https' || Boolean(req?.socket?.encrypted);
+  };
+
+  const buildSessionCookieHeader = (req: any, token: string, maxAgeSec: number): string => {
+    const secure = isSecureRequest(req);
+    const attrs = [
+      `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+      'Path=/',
+      'HttpOnly',
+      `Max-Age=${maxAgeSec}`,
+    ];
+    if (secure) {
+      attrs.push('Secure', 'SameSite=None', 'Partitioned');
+    } else {
+      attrs.push('SameSite=Lax');
+    }
+    return attrs.join('; ');
+  };
+
+  const setSessionCookie = (res: any, req: any, token: string) => {
+    res.setHeader('Set-Cookie', buildSessionCookieHeader(req, token, SESSION_MAX_AGE_SEC));
+  };
+
+  const clearSessionCookie = (res: any, req: any) => {
+    res.setHeader('Set-Cookie', buildSessionCookieHeader(req, '', 0));
+  };
 
   const getBearerToken = (req: any): string => {
     const raw = String(req?.headers?.authorization || '').trim();
@@ -365,16 +591,62 @@ export function bitnoirApiPlugin(): Plugin {
     return '';
   };
 
+  const getAuthToken = (req: any): string => {
+    const bearer = getBearerToken(req);
+    if (bearer) return bearer;
+    const cookies = parseCookies(req);
+    return String(cookies[SESSION_COOKIE_NAME] || '').trim();
+  };
+
+  const assertSameOriginMutation = (req: any) => {
+    const secFetchSite = String(req?.headers?.['sec-fetch-site'] || '').trim().toLowerCase();
+    if (secFetchSite === 'cross-site' && !getBearerToken(req)) {
+      throw new HttpRequestError(403, 'Cross-site mutation rejected.');
+    }
+    const reqHost = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '')
+      .split(',')[0]
+      .trim()
+      .toLowerCase();
+    const rawOrigin = String(req?.headers?.origin || '').trim();
+    if (rawOrigin && reqHost) {
+      try {
+        if (new URL(rawOrigin).host.toLowerCase() !== reqHost) {
+          throw new HttpRequestError(403, 'Cross-origin request rejected.');
+        }
+      } catch (err) {
+        if (err instanceof HttpRequestError) throw err;
+        throw new HttpRequestError(403, 'Invalid request origin.');
+      }
+    }
+    const rawReferer = String(req?.headers?.referer || '').trim();
+    if (!rawOrigin && rawReferer && reqHost) {
+      try {
+        if (new URL(rawReferer).host.toLowerCase() !== reqHost) {
+          throw new HttpRequestError(403, 'Cross-origin referer rejected.');
+        }
+      } catch (err) {
+        if (err instanceof HttpRequestError) throw err;
+        throw new HttpRequestError(403, 'Invalid request referer.');
+      }
+    }
+  };
+
   const getAuthenticatedAddress = (req: any): string => {
-    const token = getBearerToken(req);
+    const token = getAuthToken(req);
     if (!token) return '';
     const session = authSessions.get(token);
-    if (!session) return '';
-    if (session.expiresAt <= Date.now()) {
-      authSessions.delete(token);
-      return '';
-    }
+    if (!session || !isValidSolanaBase58(session.address)) return '';
     return session.address;
+  };
+
+  const getOrCreateAccount = (address: string): AccountState => {
+    if (!address) return createZeroAccount('');
+    let acc = accounts.get(address);
+    if (!acc) {
+      acc = createZeroAccount(address);
+      accounts.set(address, acc);
+    }
+    return acc;
   };
 
   const requireAuthenticatedAccount = (req: any): { address: string; acc: AccountState } => {
@@ -382,12 +654,7 @@ export function bitnoirApiPlugin(): Plugin {
     if (!authedAddress) {
       throw new HttpRequestError(401, 'Sign in with your Solana wallet signature first.');
     }
-    activeAddress = authedAddress;
-    let acc = accounts.get(authedAddress);
-    if (!acc) {
-      acc = createZeroAccount(authedAddress);
-      accounts.set(authedAddress, acc);
-    }
+    const acc = getOrCreateAccount(authedAddress);
     return { address: authedAddress, acc };
   };
 
@@ -455,72 +722,6 @@ export function bitnoirApiPlugin(): Plugin {
     return testAcc;
   };
   ensureTestUserAccount();
-
-  const seedLegacyBtcsTestDemo = (acc: AccountState, legacyHandle?: string) => {
-    if (!acc.id || !acc.uid || legacyHandle !== 'btcs' || seededLegacyDemo.has(acc.id)) return;
-    seededLegacyDemo.add(acc.id);
-
-    const testAcc = ensureTestUserAccount();
-
-    // 1. Grant 100 test Bits
-    acc.balances.purchased = Number((acc.balances.purchased + 100).toFixed(4));
-
-    // 2. Transfer 25 Bits to test UID 88001001
-    const sendAmount = 25;
-    acc.balances.purchased = Number((acc.balances.purchased - sendAmount).toFixed(4));
-    testAcc.balances.purchased = Number((testAcc.balances.purchased + sendAmount).toFixed(4));
-    const sentAt = new Date(Date.now() - 1000 * 60 * 12).toISOString();
-    const sentId = Date.now() - 120000;
-    testAcc.activities.unshift({
-      id: sentId + 1,
-      kind: 'receive',
-      title: `Received ${sendAmount} Bits from UID ${acc.uid}`,
-      detail: `In-app transfer from UID ${acc.uid}.`,
-      amount: sendAmount,
-      createdAt: sentAt,
-    });
-    acc.activities.unshift({
-      id: sentId,
-      kind: 'send',
-      title: `Sent ${sendAmount} Bits to UID ${testAcc.uid}`,
-      detail: `In-app transfer UID ${acc.uid} → UID ${testAcc.uid}.`,
-      amount: sendAmount,
-      createdAt: sentAt,
-    });
-
-    // 3. Receive 50 Bits from test UID 88001001
-    const receiveAmount = 50;
-    testAcc.balances.purchased = Number((testAcc.balances.purchased - receiveAmount).toFixed(4));
-    acc.balances.purchased = Number((acc.balances.purchased + receiveAmount).toFixed(4));
-    const receivedAt = new Date(Date.now() - 1000 * 60 * 3).toISOString();
-    const receivedId = Date.now() - 30000;
-    testAcc.activities.unshift({
-      id: receivedId + 1,
-      kind: 'send',
-      title: `Sent ${receiveAmount} Bits to UID ${acc.uid}`,
-      detail: `In-app transfer UID ${testAcc.uid} → UID ${acc.uid}.`,
-      amount: receiveAmount,
-      createdAt: receivedAt,
-    });
-    acc.activities.unshift({
-      id: receivedId,
-      kind: 'receive',
-      title: `Received ${receiveAmount} Bits from UID ${testAcc.uid}`,
-      detail: `In-app transfer from UID ${testAcc.uid}.`,
-      amount: receiveAmount,
-      createdAt: receivedAt,
-    });
-  };
-
-  const getActiveAccount = (): AccountState => {
-    if (!activeAddress) return createZeroAccount('');
-    let acc = accounts.get(activeAddress);
-    if (!acc) {
-      acc = createZeroAccount(activeAddress);
-      accounts.set(activeAddress, acc);
-    }
-    return acc;
-  };
 
   const findVerifiedAccountByUid = (rawUid: string): AccountState | null => {
     const clean = normalizeUid(rawUid);
@@ -605,6 +806,176 @@ export function bitnoirApiPlugin(): Plugin {
     }
   };
 
+  const reconcileWalletFromDevnetRpc = async (
+    acc: AccountState,
+    { force = false }: { force?: boolean } = {},
+  ): Promise<number> => {
+    const addr = acc.id;
+    if (
+      !addr ||
+      !isValidSolanaBase58(addr) ||
+      addr === PROTOCOL_TREASURY_SOLANA ||
+      addr === TEST_USER_ADDRESS
+    ) {
+      return 0;
+    }
+
+    const existingFlight = reconcileInFlight.get(addr);
+    if (existingFlight) {
+      return existingFlight;
+    }
+
+    const lastAt = lastReconciledAt.get(addr) || 0;
+    if (!force && Date.now() - lastAt < 12_000) {
+      return 0;
+    }
+
+    const task = (async () => {
+      let newlyCreditedSol = 0;
+      let changed = false;
+      try {
+        const sigsResult = await postDevnetRpc(
+          'getSignaturesForAddress',
+          [addr, { limit: 40 }],
+          7000,
+        );
+        const sigEntries: Array<{ signature?: string; err?: unknown }> = Array.isArray(sigsResult)
+          ? sigsResult
+          : [];
+        // Process chronologically (oldest -> newest) so verification applies before SOL Power
+        const chronological = sigEntries
+          .filter((entry) => Boolean(entry?.signature) && entry.err === null)
+          .reverse();
+
+        for (let i = 0; i < chronological.length; i++) {
+          const sig = String(chronological[i].signature || '').trim();
+          if (!sig) continue;
+          if (verifiedTxRegistry.has(sig) || pendingTxSignatures.has(sig)) {
+            continue;
+          }
+
+          const cacheKey = `${addr}:${sig}`;
+          let inspected = treasuryTxCache.get(cacheKey);
+          if (inspected === undefined) {
+            try {
+              const txResult = await postDevnetRpc(
+                'getTransaction',
+                [
+                  sig,
+                  {
+                    encoding: 'jsonParsed',
+                    commitment: 'confirmed',
+                    maxSupportedTransactionVersion: 0,
+                  },
+                ],
+                7000,
+              );
+              inspected = inspectTreasuryTransferTransaction(txResult, addr);
+              treasuryTxCache.set(cacheKey, inspected);
+            } catch {
+              continue;
+            }
+          }
+
+          if (
+            !inspected ||
+            inspected.sender !== addr ||
+            !inspected.senderSigned ||
+            !inspected.parsedSenderMatches ||
+            inspected.verifiedLamports <= 0 ||
+            inspected.senderSpentLamports < inspected.verifiedLamports
+          ) {
+            continue;
+          }
+
+          const { verifiedLamports, blockTime } = inspected;
+          const txIso = blockTime ? new Date(blockTime * 1000).toISOString() : new Date().toISOString();
+
+          // 1. Recover unrecorded 0.02 SOL verification fee (under 0.1 SOL SOL Power minimum)
+          if (
+            !acc.isVerified &&
+            verifiedLamports >= VERIFICATION_FEE_LAMPORTS &&
+            verifiedLamports < 100_000_000
+          ) {
+            verifiedTxRegistry.set(sig, { owner: addr, kind: 'verify' });
+            acc.isVerified = true;
+            acc.verifiedTx = sig;
+            const assignedUid = assignUniqueUidForAccount(acc, acc.uid || undefined);
+            if (!acc.mining.sessionStartedAt) {
+              acc.mining.sessionStartedAt = new Date().toISOString();
+              acc.mining.sessionEndsAt = new Date(Date.now() + 24 * 3600000).toISOString();
+            }
+            if (!acc.activities.some((a) => a.txHash === sig)) {
+              acc.activities.unshift({
+                id: Date.now() + i,
+                kind: 'uid',
+                title: `Verified · UID ${assignedUid} Assigned`,
+                detail: `One-time Solana Devnet verification confirmed via public RPC, UID ${assignedUid} issued.`,
+                txHash: sig,
+                createdAt: txIso,
+              });
+            }
+            changed = true;
+            continue;
+          }
+
+          // 2. Recover unrecorded SOL Power contribution (>= 0.1 SOL) for verified accounts
+          if (verifiedLamports >= 100_000_000 && acc.isVerified && sig !== acc.verifiedTx) {
+            const maxSol = 3.0;
+            const maxRatePerHour = 10.0;
+            const currentContributed = Math.min(maxSol, acc.mining.burnedSol || 0);
+            const remainingQuota = Math.max(0, Number((maxSol - currentContributed).toFixed(4)));
+
+            verifiedTxRegistry.set(sig, { owner: addr, kind: 'sol-power' });
+            changed = true;
+
+            if (remainingQuota > 0) {
+              const rawSol = Number((verifiedLamports / 1_000_000_000).toFixed(4));
+              const solAmount = Number(Math.min(remainingQuota, rawSol).toFixed(4));
+              if (solAmount > 0) {
+                const nextContributed = Number(
+                  Math.min(maxSol, currentContributed + solAmount).toFixed(4),
+                );
+                const prevBoost = Number(((currentContributed / maxSol) * maxRatePerHour).toFixed(4));
+                const nextBoost = Number(((nextContributed / maxSol) * maxRatePerHour).toFixed(4));
+                const rateBoost = Number((nextBoost - prevBoost).toFixed(4));
+
+                acc.mining.burnedSol = nextContributed;
+                acc.mining.solBurnBoostPerHour = nextBoost;
+                newlyCreditedSol = Number((newlyCreditedSol + solAmount).toFixed(4));
+
+                if (!acc.activities.some((a) => a.txHash === sig)) {
+                  acc.activities.unshift({
+                    id: Date.now() + i + 100,
+                    kind: 'stake',
+                    title: `Acquired SOL Power (${solAmount} SOL)`,
+                    detail: `Acquired +${rateBoost} Bits/hr SOL Power (${acc.mining.burnedSol}/3 SOL) on Solana Devnet.`,
+                    txHash: sig,
+                    createdAt: txIso,
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        lastReconciledAt.set(addr, Date.now());
+        if (changed) {
+          recomputeAllReferralBoosts();
+          persistState();
+        }
+      } catch {
+        // Ignore transient Devnet RPC errors on passive reconciliation
+      } finally {
+        reconcileInFlight.delete(addr);
+      }
+      return newlyCreditedSol;
+    })();
+
+    reconcileInFlight.set(addr, task);
+    return task;
+  };
+
   function parseBody(req: any): Promise<Record<string, any>> {
     return new Promise((resolve, reject) => {
       const MAX_BYTES = 1_048_576; // 1MB
@@ -660,7 +1031,7 @@ export function bitnoirApiPlugin(): Plugin {
         return sendJson(res, 200, { status: 'healthy', version: '2.0.0', time: new Date().toISOString() });
       }
 
-      // Issue single-use off-chain ownership challenge nonce
+      // Issue single-use, non-expiring off-chain ownership challenge nonce
       if (url === '/api/auth/nonce' && req.method === 'POST') {
         const body = await parseBody(req);
         const addr = String(body.solanaAddress || '').trim();
@@ -669,9 +1040,11 @@ export function bitnoirApiPlugin(): Plugin {
           return sendJson(res, 400, { error: 'Valid Solana wallet address is required.' });
         }
 
-        const now = Date.now();
-        for (const [k, v] of authNonces.entries()) {
-          if (v.expiresAt <= now) authNonces.delete(k);
+        // Bound pending nonce map size without timing out active user prompts
+        while (authNonces.size >= 5000) {
+          const oldestKey = authNonces.keys().next().value;
+          if (!oldestKey) break;
+          authNonces.delete(oldestKey);
         }
 
         let originHost = '';
@@ -688,21 +1061,15 @@ export function bitnoirApiPlugin(): Plugin {
           String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost').split(',')[0].trim();
         const domain = rawHost.replace(/[^a-zA-Z0-9.:_-]/g, '') || 'localhost';
         const nonce = crypto.randomBytes(16).toString('hex');
-        const issuedAt = new Date(now).toISOString();
-        const expiresAt = now + 5 * 60_000;
-        const expiresAtIso = new Date(expiresAt).toISOString();
+        const issuedAt = new Date().toISOString();
 
-        // Plain off-chain verification message (avoids malformed SIWS headers that trigger Phantom "App request invalid format")
+        // Clean, non-expiring off-chain verification message keeping single-use Nonce
         const message = [
           'Bitnoir — Wallet Ownership Verification',
           '',
-          'Purpose: Verify ownership of your Solana wallet for Bitnoir',
-          'Cluster: Solana Testnet',
-          `Domain: ${domain}`,
+          'Verify ownership of your Solana Devnet wallet.',
           `Wallet: ${addr}`,
           `Nonce: ${nonce}`,
-          `Issued At: ${issuedAt}`,
-          `Expires At: ${expiresAtIso}`,
         ].join('\n');
 
         authNonces.set(nonce, {
@@ -710,8 +1077,6 @@ export function bitnoirApiPlugin(): Plugin {
           nonce,
           message,
           domain,
-          issuedAt,
-          expiresAt,
         });
 
         return sendJson(res, 200, {
@@ -719,12 +1084,42 @@ export function bitnoirApiPlugin(): Plugin {
           message,
           domain,
           issuedAt,
-          expiresAt: expiresAtIso,
         });
       }
 
-      // Verify Ed25519 wallet ownership signature & issue short-lived Bearer session
+      // Restore persistent HttpOnly wallet session if already signed in for the requested address
+      if (url === '/api/auth/session' && req.method === 'GET') {
+        const parsedUrl = new URL(req.url || '', 'http://localhost');
+        const requestedAddr = String(parsedUrl.searchParams.get('address') || '').trim();
+        const authedAddr = getAuthenticatedAddress(req);
+        if (!authedAddr || (requestedAddr && authedAddr !== requestedAddr)) {
+          return sendJson(res, 200, {
+            signedIn: false,
+            address: '',
+            account: createZeroAccount(''),
+          });
+        }
+        const acc = getOrCreateAccount(authedAddr);
+        recomputeAllReferralBoosts();
+        persistState();
+        void reconcileWalletFromDevnetRpc(acc)
+          .then((credited) => {
+            if (credited > 0) {
+              recomputeAllReferralBoosts();
+              persistState();
+            }
+          })
+          .catch(() => undefined);
+        return sendJson(res, 200, {
+          signedIn: true,
+          address: authedAddr,
+          account: acc,
+        });
+      }
+
+      // Verify Ed25519 wallet ownership signature & issue persistent HttpOnly cookie + session
       if (url === '/api/auth/verify' && req.method === 'POST') {
+        assertSameOriginMutation(req);
         const body = await parseBody(req);
         const addr = String(body.solanaAddress || '').trim();
         const nonce = String(body.nonce || '').trim();
@@ -740,8 +1135,8 @@ export function bitnoirApiPlugin(): Plugin {
         // Always consume nonce atomically (single-use anti-replay)
         authNonces.delete(nonce);
 
-        if (!pending || pending.expiresAt <= Date.now()) {
-          return sendJson(res, 401, { error: 'Sign-in challenge expired. Please retry.' });
+        if (!pending) {
+          return sendJson(res, 401, { error: 'Sign-in challenge was already used or not found. Please retry.' });
         }
         if (pending.address !== addr) {
           return sendJson(res, 403, { error: 'Signature address mismatch.' });
@@ -764,8 +1159,7 @@ export function bitnoirApiPlugin(): Plugin {
             msgText.includes(`${pending.domain} wants you to sign in with your Solana account:`) &&
             msgText.includes(addr) &&
             msgText.includes(`Nonce: ${pending.nonce}`) &&
-            msgText.includes(`Issued At: ${pending.issuedAt}`) &&
-            msgText.includes('Chain ID: solana:testnet');
+            msgText.includes('Chain ID: solana:devnet');
 
           if (!isExactChallenge && !isValidSiwsMessage) {
             return sendJson(res, 401, { error: 'Signed message does not match issued challenge.' });
@@ -785,16 +1179,17 @@ export function bitnoirApiPlugin(): Plugin {
         }
 
         const token = crypto.randomBytes(32).toString('hex');
-        const now = Date.now();
         authSessions.set(token, {
           address: addr,
-          signedAt: now,
-          expiresAt: now + 24 * 3600_000,
+          signedAt: Date.now(),
         });
+        persistSessions();
+        setSessionCookie(res, req, token);
 
-        activeAddress = addr;
-        const acc = getActiveAccount();
+        const acc = getOrCreateAccount(addr);
+        await reconcileWalletFromDevnetRpc(acc);
         recomputeAllReferralBoosts();
+        persistState();
 
         return sendJson(res, 200, {
           success: true,
@@ -805,24 +1200,32 @@ export function bitnoirApiPlugin(): Plugin {
       }
 
       if (url === '/api/auth/logout' && req.method === 'POST') {
-        const token = getBearerToken(req);
-        if (token) authSessions.delete(token);
-        activeAddress = '';
+        assertSameOriginMutation(req);
+        const token = getAuthToken(req);
+        if (token) {
+          authSessions.delete(token);
+          persistSessions();
+        }
+        clearSessionCookie(res, req);
         return sendJson(res, 200, { success: true });
       }
 
       if (url === '/api/accounts/me' && req.method === 'GET') {
         const authed = getAuthenticatedAddress(req);
-        if (authed) activeAddress = authed;
-        const acc = getActiveAccount();
+        if (!authed) {
+          return sendJson(res, 200, createZeroAccount(''));
+        }
+        const acc = getOrCreateAccount(authed);
         recomputeAllReferralBoosts();
         return sendJson(res, 200, acc);
       }
 
       if (url === '/api/accounts/me/activity' && req.method === 'GET') {
         const authed = getAuthenticatedAddress(req);
-        if (authed) activeAddress = authed;
-        return sendJson(res, 200, getActiveAccount().activities);
+        if (!authed) {
+          return sendJson(res, 200, []);
+        }
+        return sendJson(res, 200, getOrCreateAccount(authed).activities);
       }
 
       if (url === '/api/accounts/check-uid' && req.method === 'GET') {
@@ -840,9 +1243,13 @@ export function bitnoirApiPlugin(): Plugin {
       }
 
       if (url === '/api/accounts/me/team' && req.method === 'GET') {
+        const authed = getAuthenticatedAddress(req);
+        if (!authed) {
+          return sendJson(res, 200, []);
+        }
         recomputeAllReferralBoosts();
-        const inviter = getActiveAccount();
-        if (!activeAddress || !isMinerVerified(inviter)) {
+        const inviter = getOrCreateAccount(authed);
+        if (!isMinerVerified(inviter)) {
           return sendJson(res, 200, []);
         }
         const team = getDirectMinersFor(inviter).map((m) => {
@@ -868,76 +1275,72 @@ export function bitnoirApiPlugin(): Plugin {
         return sendJson(res, 200, team);
       }
 
-      // Sync client wallet session (every wallet starts at zero until verified + active)
+      // Sync authenticated wallet session strictly against server & Devnet RPC (no client trust)
       if (url === '/api/accounts/me/sync-session' && req.method === 'POST') {
+        assertSameOriginMutation(req);
+        const { address: authedAddress, acc } = requireAuthenticatedAccount(req);
         const body = await parseBody(req);
-        if (body.reset || !body.solanaAddress) {
-          activeAddress = '';
-          return sendJson(res, 200, { success: true, account: createZeroAccount('') });
-        }
-
-        const addr = String(body.solanaAddress).trim();
-        if (!isValidSolanaBase58(addr)) {
-          return sendJson(res, 400, { error: 'Invalid Solana wallet address.' });
-        }
-
-        activeAddress = addr;
-        const acc = getActiveAccount();
-
-        const candidateTx = typeof body.verifiedTx === 'string' ? body.verifiedTx.trim() : '';
-        if (!acc.isVerified && body.isVerified && /^[1-9A-HJ-NP-Za-km-z]{64,128}$/.test(candidateTx)) {
-          const existing = verifiedTxRegistry.get(candidateTx);
-          if (existing && existing.owner === addr && existing.kind === 'verify') {
-            acc.isVerified = true;
-            acc.verifiedTx = candidateTx;
-          } else if (!existing) {
-            try {
-              await verifyTreasuryTransferOnTestnetRpc({
-                signature: candidateTx,
-                expectedSender: addr,
-                minLamports: VERIFICATION_FEE_LAMPORTS,
-              });
-              verifiedTxRegistry.set(candidateTx, { owner: addr, kind: 'verify' });
-              acc.isVerified = true;
-              acc.verifiedTx = candidateTx;
-            } catch {
-              // Ignore unconfirmed or forged verification tx on passive session sync
-            }
-          }
-        }
-
-        if (acc.isVerified) {
-          assignUniqueUidForAccount(acc, body.uid ? String(body.uid) : undefined);
-          seedLegacyBtcsTestDemo(acc, body.legacyUsername ? String(body.legacyUsername).toLowerCase() : undefined);
-        } else {
-          acc.uid = '';
-          acc.name = '';
-          acc.referralCode = '';
-        }
 
         const rawRef = normalizeUid(body.referredBy);
         if (
           rawRef &&
           !acc.referredBy &&
           rawRef !== acc.uid &&
-          rawRef.toLowerCase() !== addr.toLowerCase()
+          rawRef.toLowerCase() !== authedAddress.toLowerCase() &&
+          (isValidUid(rawRef) || isValidSolanaBase58(rawRef))
         ) {
           acc.referredBy = rawRef;
         }
 
-        recomputeAllReferralBoosts();
+        await reconcileWalletFromDevnetRpc(acc);
 
-        return sendJson(res, 200, { success: true, account: acc });
+        if (acc.isVerified) {
+          assignUniqueUidForAccount(acc, acc.uid || undefined);
+        } else {
+          acc.uid = '';
+          acc.name = '';
+          acc.referralCode = '';
+          acc.verifiedTx = undefined;
+          acc.mining.burnedSol = 0;
+          acc.mining.solBurnBoostPerHour = 0;
+        }
+
+        recomputeAllReferralBoosts();
+        persistState();
+
+        return sendJson(res, 200, {
+          success: true,
+          signedIn: true,
+          account: acc,
+        });
+      }
+
+      // Sync SOL Power & verification directly from Solana Devnet Treasury history for authenticated caller
+      if (url === '/api/accounts/me/sync-sol-power' && req.method === 'POST') {
+        assertSameOriginMutation(req);
+        const { acc } = requireAuthenticatedAccount(req);
+        const creditedSol = await reconcileWalletFromDevnetRpc(acc, { force: true });
+        recomputeAllReferralBoosts();
+        persistState();
+
+        return sendJson(res, 200, {
+          success: true,
+          creditedSol,
+          mining: acc.mining,
+          account: acc,
+        });
       }
 
       // Start Mining Session (requires signed-in wallet ownership)
       if (url === '/api/accounts/me/start-mining' && req.method === 'POST') {
+        assertSameOriginMutation(req);
         const { acc } = requireAuthenticatedAccount(req);
         const isVerifiedNode = isMinerVerified(acc);
         const cycleHours = isVerifiedNode ? 24 : 3;
         acc.mining.sessionStartedAt = new Date().toISOString();
         acc.mining.sessionEndsAt = new Date(Date.now() + cycleHours * 3600000).toISOString();
         recomputeAllReferralBoosts();
+        persistState();
 
         return sendJson(res, 200, {
           success: true,
@@ -946,13 +1349,14 @@ export function bitnoirApiPlugin(): Plugin {
         });
       }
 
-      // Wallet Verification with 0.02 SOL Onchain Testnet Transaction -> Verified via Public Testnet RPC
+      // Wallet Verification with 0.02 SOL Onchain Devnet Transaction -> Verified via Public Devnet RPC
       if (url === '/api/accounts/me/verify-wallet' && req.method === 'POST') {
+        assertSameOriginMutation(req);
         const { address: authedAddress, acc } = requireAuthenticatedAccount(req);
         const body = await parseBody(req);
         const signature = String(body.signature || '').trim();
         if (!/^[1-9A-HJ-NP-Za-km-z]{64,128}$/.test(signature)) {
-          return sendJson(res, 400, { error: 'A valid Solana Testnet transaction signature is required.' });
+          return sendJson(res, 400, { error: 'A valid Solana Devnet transaction signature is required.' });
         }
 
         if (acc.isVerified && acc.verifiedTx === signature && acc.uid) {
@@ -984,7 +1388,7 @@ export function bitnoirApiPlugin(): Plugin {
 
         pendingTxSignatures.add(signature);
         try {
-          await verifyTreasuryTransferOnTestnetRpc({
+          await verifyTreasuryTransferOnDevnetRpc({
             signature,
             expectedSender: authedAddress,
             minLamports: VERIFICATION_FEE_LAMPORTS,
@@ -1006,10 +1410,11 @@ export function bitnoirApiPlugin(): Plugin {
           id: Date.now(),
           kind: 'uid',
           title: `Verified · UID ${assignedUid} Assigned`,
-          detail: `One-time Solana Testnet verification confirmed via public RPC, UID ${assignedUid} issued.`,
+          detail: `One-time Solana Devnet verification confirmed via public RPC, UID ${assignedUid} issued.`,
           txHash: signature,
           createdAt: new Date().toISOString(),
         });
+        persistState();
 
         return sendJson(res, 200, {
           success: true,
@@ -1024,8 +1429,9 @@ export function bitnoirApiPlugin(): Plugin {
         });
       }
 
-      // Contribute SOL to Acquire SOL Power (Max 3 SOL / +10 Bits/hr per account) -> Verified via Public Testnet RPC
+      // Contribute SOL to Acquire SOL Power (Max 3 SOL / +10 Bits/hr per account) -> Verified via Public Devnet RPC
       if (url === '/api/accounts/me/contribute-sol' && req.method === 'POST') {
+        assertSameOriginMutation(req);
         const { address: authedAddress, acc } = requireAuthenticatedAccount(req);
         if (!acc.isVerified || !acc.uid) {
           return sendJson(res, 403, {
@@ -1039,10 +1445,27 @@ export function bitnoirApiPlugin(): Plugin {
           return sendJson(res, 400, { error: 'Enter a valid SOL contribution amount.' });
         }
         if (!/^[1-9A-HJ-NP-Za-km-z]{64,128}$/.test(txSignature)) {
-          return sendJson(res, 400, { error: 'A valid Solana Testnet transaction signature is required.' });
+          return sendJson(res, 400, { error: 'A valid Solana Devnet transaction signature is required.' });
         }
-        if (verifiedTxRegistry.has(txSignature)) {
-          return sendJson(res, 409, { error: 'This transaction signature has already been credited.' });
+
+        const existingContrib = verifiedTxRegistry.get(txSignature);
+        if (existingContrib) {
+          if (existingContrib.owner === authedAddress && existingContrib.kind === 'sol-power') {
+            return sendJson(res, 200, {
+              success: true,
+              solContributed: Number(rawSol.toFixed(4)),
+              rateBoost: 0,
+              alreadyCredited: true,
+              mining: acc.mining,
+              message: 'SOL Power already credited for this Solana Devnet transaction.',
+            });
+          }
+          return sendJson(res, 409, {
+            error:
+              existingContrib.owner !== authedAddress
+                ? 'This transaction signature has already been used by another wallet.'
+                : 'This transaction signature has already been processed.',
+          });
         }
         if (pendingTxSignatures.has(txSignature)) {
           return sendJson(res, 409, { error: 'Verification for this transaction is already in progress.' });
@@ -1051,7 +1474,7 @@ export function bitnoirApiPlugin(): Plugin {
         const maxSol = 3.0;
         const maxRatePerHour = 10.0;
         const currentContributed = Math.min(maxSol, acc.mining.burnedSol || 0);
-        const remainingQuota = Math.max(0, Number((maxSol - currentContributed).toFixed(3)));
+        const remainingQuota = Math.max(0, Number((maxSol - currentContributed).toFixed(4)));
 
         if (remainingQuota <= 0) {
           return sendJson(res, 400, {
@@ -1059,22 +1482,46 @@ export function bitnoirApiPlugin(): Plugin {
           });
         }
 
-        const solAmount = Number(Math.max(Math.min(0.1, remainingQuota), Math.min(remainingQuota, rawSol)).toFixed(2));
+        const minAllowed = Math.min(0.1, remainingQuota);
+        if (rawSol + 1e-9 < minAllowed) {
+          return sendJson(res, 400, {
+            error: `Minimum SOL Power contribution is ${minAllowed} SOL.`,
+          });
+        }
+        if (rawSol - 1e-9 > remainingQuota) {
+          return sendJson(res, 400, {
+            error: `Requested amount (${rawSol} SOL) exceeds remaining quota (${remainingQuota} SOL).`,
+          });
+        }
+
+        const solAmount = Number(rawSol.toFixed(4));
         const expectedLamports = Math.round(solAmount * 1_000_000_000);
 
         pendingTxSignatures.add(txSignature);
         try {
-          await verifyTreasuryTransferOnTestnetRpc({
+          await verifyTreasuryTransferOnDevnetRpc({
             signature: txSignature,
             expectedSender: authedAddress,
             minLamports: expectedLamports,
           });
+          // Re-check in case concurrent Devnet reconciliation already credited this exact tx
+          const raceCheck = verifiedTxRegistry.get(txSignature);
+          if (raceCheck && raceCheck.owner === authedAddress && raceCheck.kind === 'sol-power') {
+            return sendJson(res, 200, {
+              success: true,
+              solContributed: solAmount,
+              rateBoost: 0,
+              alreadyCredited: true,
+              mining: acc.mining,
+              message: 'SOL Power already credited for this Solana Devnet transaction.',
+            });
+          }
           verifiedTxRegistry.set(txSignature, { owner: authedAddress, kind: 'sol-power' });
         } finally {
           pendingTxSignatures.delete(txSignature);
         }
 
-        const nextContributed = Number(Math.min(maxSol, currentContributed + solAmount).toFixed(3));
+        const nextContributed = Number(Math.min(maxSol, currentContributed + solAmount).toFixed(4));
         const prevBoost = Number(((currentContributed / maxSol) * maxRatePerHour).toFixed(4));
         const nextBoost = Number(((nextContributed / maxSol) * maxRatePerHour).toFixed(4));
         const rateBoost = Number((nextBoost - prevBoost).toFixed(4));
@@ -1087,10 +1534,11 @@ export function bitnoirApiPlugin(): Plugin {
           id: Date.now(),
           kind: 'stake',
           title: `Acquired SOL Power (${solAmount} SOL)`,
-          detail: `Acquired +${rateBoost} Bits/hr SOL Power (${acc.mining.burnedSol}/3 SOL) on Solana Testnet.`,
+          detail: `Acquired +${rateBoost} Bits/hr SOL Power (${acc.mining.burnedSol}/3 SOL) on Solana Devnet.`,
           txHash: txSignature,
           createdAt: new Date().toISOString(),
         });
+        persistState();
 
         return sendJson(res, 200, {
           success: true,
@@ -1101,30 +1549,59 @@ export function bitnoirApiPlugin(): Plugin {
         });
       }
 
-      // Claim accumulated mined Bits into available balance (20% minimum cycle threshold)
+      // Claim accumulated mined Bits into available balance (20% minimum cycle threshold + server elapsed cap)
       if (url === '/api/accounts/me/claim-mined-bits' && req.method === 'POST') {
+        assertSameOriginMutation(req);
         const { acc } = requireAuthenticatedAccount(req);
         const body = await parseBody(req);
-        const unclaimed = Number(body.amount);
-        if (!Number.isFinite(unclaimed) || unclaimed <= 0) {
+        const requestedAmount = Number(body.amount);
+        if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
           return sendJson(res, 400, {
             error: 'Invalid mined Bits claim amount.',
           });
         }
 
+        const startedMs = acc.mining.sessionStartedAt ? Date.parse(acc.mining.sessionStartedAt) : NaN;
+        if (!Number.isFinite(startedMs) || startedMs <= 0) {
+          return sendJson(res, 400, {
+            error: 'Start a mining session before claiming mined Bits.',
+          });
+        }
+
         const isVerifiedNode = Boolean(acc.isVerified && acc.uid);
         const cycleHours = isVerifiedNode ? 24 : 3;
-        const rate = isVerifiedNode
-          ? Math.max(0.1, acc.mining.totalMiningRatePerHour || 0.1)
-          : 0.01;
-        const minThreshold = rate * cycleHours * 0.2;
+        const baseCycleMs = cycleHours * 3600 * 1000;
+        const maxWindowMs = 24 * 3600 * 1000;
+        const elapsedMs = Math.max(0, Math.min(maxWindowMs, Date.now() - startedMs));
 
-        if (unclaimed + 1e-9 < minThreshold) {
+        if (elapsedMs + 1000 < baseCycleMs * 0.195) {
           return sendJson(res, 400, {
             error: 'Minimum claim threshold (20%) has not been reached yet.',
           });
         }
 
+        recomputeAllReferralBoosts();
+        const serverRate = isVerifiedNode
+          ? Math.max(0.1, acc.mining.baseRatePerHour + acc.mining.solBurnBoostPerHour + acc.mining.referralBoostPerHour)
+          : 0.01;
+        const minThreshold = serverRate * cycleHours * 0.195;
+        if (requestedAmount + 1e-9 < minThreshold) {
+          return sendJson(res, 400, {
+            error: 'Minimum claim threshold (20%) has not been reached yet.',
+          });
+        }
+
+        const maxCardAllowance = isVerifiedNode ? 10.0 : 0.1;
+        const maxClaimable = Number(
+          (((elapsedMs / 3600000) * (serverRate + maxCardAllowance)) * 1.02 + 0.001).toFixed(4),
+        );
+        if (requestedAmount > maxClaimable) {
+          return sendJson(res, 400, {
+            error: 'Requested claim amount exceeds mined session allowance.',
+          });
+        }
+
+        const unclaimed = Number(requestedAmount.toFixed(4));
         acc.mining.minedBitsTotalClaimed = Number((acc.mining.minedBitsTotalClaimed + unclaimed).toFixed(4));
         acc.mining.minedBitsUnclaimed = 0;
         acc.mining.sessionStartedAt = new Date().toISOString();
@@ -1139,6 +1616,7 @@ export function bitnoirApiPlugin(): Plugin {
           detail: `Claimed +${unclaimed.toFixed(4)} mined Bits into available balance.`,
           createdAt: new Date().toISOString(),
         });
+        persistState();
 
         return sendJson(res, 200, {
           success: true,
@@ -1151,12 +1629,13 @@ export function bitnoirApiPlugin(): Plugin {
 
       // In-App Send: UID to UID only (requires signed-in wallet + verified UID)
       if ((url === '/api/wallet/send-inapp' || url === '/api/wallet/send-onchain') && req.method === 'POST') {
+        assertSameOriginMutation(req);
         const { acc } = requireAuthenticatedAccount(req);
         const body = await parseBody(req);
         const asset = String(body.asset || 'bits').toLowerCase();
         const amount = Number(body.amount);
         const rawRecipient = String(body.recipient || '').trim();
-        const senderUid = normalizeUid(body.sender || acc.uid || '');
+        const senderUid = normalizeUid(acc.uid || '');
 
         if (!acc.isVerified || !isValidUid(senderUid)) {
           return sendJson(res, 403, {
@@ -1225,6 +1704,7 @@ export function bitnoirApiPlugin(): Plugin {
           createdAt: new Date().toISOString(),
         };
         acc.activities.unshift(activityItem);
+        persistState();
 
         return sendJson(res, 200, {
           success: true,
@@ -1233,58 +1713,15 @@ export function bitnoirApiPlugin(): Plugin {
         });
       }
 
-      // Onchain Withdraw to External Solana Address
+      // Onchain Withdraw to External Solana Address (disabled until withdrawal launch)
       if (url === '/api/wallet/withdraw-onchain' && req.method === 'POST') {
+        assertSameOriginMutation(req);
         const { acc } = requireAuthenticatedAccount(req);
-        const body = await parseBody(req);
-        const asset = String(body.asset || 'bitnoir').toLowerCase();
-        const amount = Number(body.amount);
-        const destinationAddress = String(body.destinationAddress || '').trim();
-        if (asset !== 'bits' && asset !== 'bitnoir') {
-          return sendJson(res, 400, { error: 'Unsupported asset selected.' });
+        if (!acc.isVerified || !isValidUid(acc.uid)) {
+          return sendJson(res, 403, { error: 'Verify your wallet before requesting withdrawals.' });
         }
-        if (!isValidSolanaBase58(destinationAddress)) {
-          return sendJson(res, 400, { error: 'Please enter a valid Solana wallet address.' });
-        }
-        if (!Number.isFinite(amount) || amount <= 0) {
-          return sendJson(res, 400, { error: 'Please enter a valid positive amount.' });
-        }
-
-        if (asset === 'bits') {
-          if (amount > acc.balances.purchased) {
-            return sendJson(res, 400, { error: 'Insufficient Bits balance.' });
-          }
-          acc.balances.purchased = Number((acc.balances.purchased - amount).toFixed(4));
-        } else {
-          if (amount > acc.balances.claimed) {
-            return sendJson(res, 400, { error: 'Insufficient Bitnoir balance.' });
-          }
-          acc.balances.claimed = Number((acc.balances.claimed - amount).toFixed(4));
-        }
-
-        const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-        const txSig =
-          String(body.txSignature || '').trim() ||
-          Array.from({ length: 88 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-
-        const activityItem = {
-          id: Date.now(),
-          kind: 'withdraw' as const,
-          title: `Withdrew ${amount} ${asset === 'bits' ? 'Bits' : 'Bitnoir'} Onchain`,
-          detail: `Onchain withdrawal to ${destinationAddress.slice(0, 6)}…${destinationAddress.slice(-6)}.`,
-          amount,
-          asset,
-          txHash: txSig,
-          createdAt: new Date().toISOString(),
-        };
-        acc.activities.unshift(activityItem);
-
-        return sendJson(res, 200, {
-          success: true,
-          signature: txSig,
-          txHash: txSig,
-          balances: acc.balances,
-          activity: activityItem,
+        return sendJson(res, 403, {
+          error: 'On-chain Bits withdrawals are not opened yet.',
         });
       }
 
