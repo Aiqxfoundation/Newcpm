@@ -12,13 +12,13 @@ import {
 export const PROTOCOL_TREASURY_SOLANA = 'CFTxmxkCi3h21eXpQ9fkzS6T5oPrzNZUi9njDa5dR7tk';
 export const VERIFICATION_FEE_SOL = 0.02;
 
-// Public Solana RPC endpoints (Testnet phase default; configurable via VITE_SOLANA_RPC_URL)
+// Solana Testnet configuration (public RPC only, confirmed commitment)
+export const SOLANA_CLUSTER = 'testnet' as const;
 export const SOLANA_TESTNET_RPC = 'https://api.testnet.solana.com';
-export const SOLANA_DEVNET_RPC = 'https://api.devnet.solana.com';
-export const SOLANA_MAINNET_RPC = 'https://api.mainnet-beta.solana.com';
-export const SOLANA_RPC_ENDPOINT =
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SOLANA_RPC_URL) ||
-  SOLANA_TESTNET_RPC;
+export const SOLANA_RPC_ENDPOINT = SOLANA_TESTNET_RPC;
+export const SOLANA_COMMITMENT = 'confirmed' as const;
+
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 // Safe localStorage helpers (never throw in restricted/incognito iframe contexts)
 export function safeStorageGet(key: string): string | null {
@@ -60,19 +60,116 @@ export function isValidSolanaAddress(address: string): boolean {
   }
 }
 
-export function generateDemoSolanaAddress(): string {
-  const bytes = new Uint8Array(32);
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < 32; i++) bytes[i] = Math.floor(Math.random() * 256);
+export function encodeBase58(bytes: Uint8Array): string {
+  if (!bytes || bytes.length === 0) return '';
+  const digits: number[] = [0];
+  for (let i = 0; i < bytes.length; i++) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = (carry / 58) | 0;
+    }
   }
-  return new PublicKey(bytes).toBase58();
+  let output = '';
+  for (let i = 0; i < bytes.length && bytes[i] === 0; i++) {
+    output += '1';
+  }
+  for (let i = digits.length - 1; i >= 0; i--) {
+    output += BASE58_ALPHABET[digits[i]];
+  }
+  return output;
 }
 
-export function generateSimulatedTxSignature(): string {
-  const chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-  return Array.from({ length: 88 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+export function decodeBase58(input: string): Uint8Array | null {
+  const str = (input || '').trim();
+  if (!str) return null;
+  const bytes: number[] = [0];
+  for (let i = 0; i < str.length; i++) {
+    const val = BASE58_ALPHABET.indexOf(str[i]);
+    if (val < 0) return null;
+    for (let j = 0; j < bytes.length; j++) {
+      bytes[j] *= 58;
+    }
+    bytes[0] += val;
+    let carry = 0;
+    for (let j = 0; j < bytes.length; j++) {
+      bytes[j] += carry;
+      carry = bytes[j] >> 8;
+      bytes[j] &= 0xff;
+    }
+    while (carry) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  for (let i = 0; i < str.length && str[i] === '1'; i++) {
+    bytes.push(0);
+  }
+  return Uint8Array.from(bytes.reverse());
+}
+
+export function normalizeSignatureToBase58(sig: string | Uint8Array): string {
+  if (sig instanceof Uint8Array) {
+    if (sig.length !== 64) {
+      throw new Error('Invalid transaction signature byte length returned by wallet.');
+    }
+    return encodeBase58(sig);
+  }
+  const trimmed = String(sig || '').trim();
+  if (!trimmed) {
+    throw new Error('Wallet did not return a transaction signature.');
+  }
+  const b58Bytes = decodeBase58(trimmed);
+  if (b58Bytes && b58Bytes.length === 64) {
+    return trimmed;
+  }
+  // Handle base64 signatures returned by some Mobile Wallet Adapter implementations
+  try {
+    const binary = atob(trimmed);
+    if (binary.length === 64) {
+      const bytes = new Uint8Array(64);
+      for (let i = 0; i < 64; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return encodeBase58(bytes);
+    }
+  } catch {
+    // Not base64
+  }
+  throw new Error('Wallet returned an invalid Solana transaction signature format.');
+}
+
+export function extractSignatureBytes(result: unknown): Uint8Array | null {
+  if (!result) return null;
+  if (result instanceof Uint8Array) return result;
+  if (Array.isArray(result) && result.every((n) => typeof n === 'number')) {
+    return Uint8Array.from(result);
+  }
+  if (typeof result === 'object' && 'signature' in result) {
+    const inner = (result as { signature?: unknown }).signature;
+    if (inner instanceof Uint8Array) return inner;
+    if (Array.isArray(inner) && inner.every((n) => typeof n === 'number')) {
+      return Uint8Array.from(inner);
+    }
+  }
+  return null;
+}
+
+export function isUserRejectionError(err: unknown): boolean {
+  const anyErr = err as { name?: string; code?: number | string; message?: string } | null;
+  const msg = String(anyErr?.message || '');
+  const name = String(anyErr?.name || '');
+  const code = anyErr?.code;
+  return (
+    code === 4001 ||
+    name === 'WalletWindowClosedError' ||
+    /user rejected|rejected the request|user declined|cancelled|canceled|declined/i.test(msg)
+  );
 }
 
 // Classify Solana Wallet Kit / provider / RPC errors into clear user-facing exceptions
@@ -82,11 +179,7 @@ export function classifyWalletError(err: unknown, actionLabel: string): Error | 
   const name = String(anyErr?.name || '');
   const code = anyErr?.code;
 
-  if (
-    code === 4001 ||
-    name === 'WalletWindowClosedError' ||
-    /user rejected|rejected the request|cancelled|canceled|declined/i.test(msg)
-  ) {
+  if (isUserRejectionError(err)) {
     return new Error(`${actionLabel} cancelled in wallet.`);
   }
   if (code === 4100 || name === 'WalletNotConnectedError' || /unauthorized|not connected/i.test(msg)) {
@@ -104,6 +197,9 @@ export function classifyWalletError(err: unknown, actionLabel: string): Error | 
   ) {
     return new Error('Enable Testnet mode in your Solana wallet (Settings -> Developer Settings -> Testnet) and retry.');
   }
+  if (/invalid format|app request invalid/i.test(msg)) {
+    return new Error('Wallet rejected the request format. Ensure Phantom is updated and set to Solana Testnet, then retry.');
+  }
   if (/signature verification failed|missing signature/i.test(msg)) {
     return new Error('Signature verification failed. Ensure your wallet is on Solana Testnet and retry.');
   }
@@ -113,96 +209,141 @@ export function classifyWalletError(err: unknown, actionLabel: string): Error | 
   return null;
 }
 
-// Get connected browser Solana provider fallback
+// Get connected browser Phantom Solana provider if present
 export function getPhantomSolanaProvider() {
   if (typeof window === 'undefined') return null;
   const anyWin = window as unknown as {
     phantom?: { solana?: any };
     solana?: any;
   };
-  return anyWin.phantom?.solana || anyWin.solana || null;
+  const candidate = anyWin.phantom?.solana || anyWin.solana || null;
+  if (candidate && candidate.isPhantom) {
+    return candidate;
+  }
+  return null;
 }
 
-// Confirm transaction onchain via Public Testnet RPC with polling
+async function rpcPost<T = any>(rpcUrl: string, method: string, params: unknown[], timeoutMs = 8000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method,
+        params,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`Solana Testnet RPC HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    if (json?.error) {
+      throw new Error(String(json.error?.message || 'Solana Testnet RPC error'));
+    }
+    return json?.result as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Confirm transaction onchain via Public Testnet RPC with strict status, block-height expiry & getTransaction verification
 export async function confirmSolanaTransactionOnchain(
   signature: string,
   options?: {
-    isMainnet?: boolean;
     connection?: Connection;
     blockhash?: string;
     lastValidBlockHeight?: number;
   },
 ): Promise<boolean> {
-  if (!signature || typeof signature !== 'string') {
-    throw new Error('Missing Solana transaction signature.');
-  }
+  const base58Sig = normalizeSignatureToBase58(signature);
+  const rpc = SOLANA_TESTNET_RPC;
+  const activeConnection = options?.connection || new Connection(rpc, SOLANA_COMMITMENT);
 
-  const rpc = options?.isMainnet ? SOLANA_MAINNET_RPC : SOLANA_RPC_ENDPOINT;
+  let lastRpcError = '';
+  const maxAttempts = 24;
 
-  // Prefer Connection.confirmTransaction when blockhash context is provided
-  if (options?.connection && options.blockhash && typeof options.lastValidBlockHeight === 'number') {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const conf = await options.connection.confirmTransaction(
-        {
-          signature,
-          blockhash: options.blockhash,
-          lastValidBlockHeight: options.lastValidBlockHeight,
-        },
-        'confirmed',
-      );
-      if (conf?.value?.err) {
+      const statusResult = await rpcPost<{
+        value?: Array<{
+          slot: number;
+          confirmations: number | null;
+          err: unknown;
+          confirmationStatus?: 'processed' | 'confirmed' | 'finalized';
+        } | null>;
+      }>(rpc, 'getSignatureStatuses', [[base58Sig], { searchTransactionHistory: true }], 7000);
+
+      const status = statusResult?.value?.[0];
+      if (status?.err) {
         throw new Error('Transaction failed onchain on Solana Testnet.');
       }
-      return true;
-    } catch (err: any) {
-      if (err?.message === 'Transaction failed onchain on Solana Testnet.') {
-        throw err;
-      }
-      // Fall through to public RPC getSignatureStatuses polling
-    }
-  }
 
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    try {
-      const res = await fetch(rpc, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'getSignatureStatuses',
-          params: [[signature], { searchTransactionHistory: true }],
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        const status = data?.result?.value?.[0];
-        if (status?.err) {
-          throw new Error('Transaction failed onchain on Solana Testnet.');
+      const isConfirmed =
+        Boolean(status) &&
+        (status!.confirmationStatus === 'confirmed' ||
+          status!.confirmationStatus === 'finalized' ||
+          status!.confirmations === null ||
+          (status!.confirmations ?? 0) > 0);
+
+      if (isConfirmed) {
+        // Double-verify via getTransaction to ensure transaction exists and meta.err is null
+        const txDetails = await rpcPost<{ meta?: { err?: unknown } } | null>(
+          rpc,
+          'getTransaction',
+          [
+            base58Sig,
+            {
+              encoding: 'jsonParsed',
+              commitment: SOLANA_COMMITMENT,
+              maxSupportedTransactionVersion: 0,
+            },
+          ],
+          7000,
+        ).catch(() => null);
+
+        if (txDetails) {
+          if (txDetails.meta?.err) {
+            throw new Error('Transaction failed onchain on Solana Testnet.');
+          }
+          return true;
         }
-        if (
-          status &&
-          (status.confirmationStatus === 'confirmed' ||
-            status.confirmationStatus === 'finalized' ||
-            (status.confirmations ?? 0) > 0)
-        ) {
+        // If status is confirmed/finalized and getTransaction is still indexing on this node, retry briefly
+        if (attempt >= 3 && (status!.confirmationStatus === 'confirmed' || status!.confirmationStatus === 'finalized')) {
           return true;
         }
       }
+
+      // Check block-height expiration when blockhash context is known and tx is still unseen
+      if (!status && typeof options?.lastValidBlockHeight === 'number' && attempt > 0 && attempt % 4 === 0) {
+        const currentHeight = await activeConnection.getBlockHeight(SOLANA_COMMITMENT).catch(() => 0);
+        if (currentHeight > options.lastValidBlockHeight) {
+          throw new Error('Solana Testnet blockhash expired before confirmation. Please retry.');
+        }
+      }
     } catch (err: any) {
-      if (err?.message === 'Transaction failed onchain on Solana Testnet.') {
+      const msg = String(err?.message || '');
+      if (
+        msg === 'Transaction failed onchain on Solana Testnet.' ||
+        msg.includes('blockhash expired')
+      ) {
         throw err;
       }
-    } finally {
-      clearTimeout(timer);
+      lastRpcError = msg || 'RPC polling error';
     }
-    await new Promise((r) => setTimeout(r, 1200));
+
+    await new Promise((r) => setTimeout(r, 1500));
   }
 
-  return true;
+  throw new Error(
+    lastRpcError
+      ? `Unable to confirm transaction on Solana Testnet RPC (${lastRpcError}).`
+      : 'Transaction timed out before Testnet confirmation. Please verify in your wallet and retry.',
+  );
 }
 
 function hasValidSignedTx(signedTx: Transaction | VersionedTransaction): boolean {
@@ -221,7 +362,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// Send SOL onchain via Solana Wallet Kit on Solana Testnet
+// Send SOL onchain via Solana Wallet Adapter on Solana Testnet
 export async function sendSolanaTransactionOnchain({
   fromAddress,
   toAddress = PROTOCOL_TREASURY_SOLANA,
@@ -256,7 +397,7 @@ export async function sendSolanaTransactionOnchain({
     throw new Error('Transaction amount must be greater than zero.');
   }
 
-  const activeConnection = passedConnection || new Connection(SOLANA_RPC_ENDPOINT, 'confirmed');
+  const activeConnection = passedConnection || new Connection(SOLANA_TESTNET_RPC, SOLANA_COMMITMENT);
   const fromPubkey = new PublicKey(fromAddress);
   const toPubkey = new PublicKey(toAddress);
 
@@ -265,45 +406,66 @@ export async function sendSolanaTransactionOnchain({
     throw new Error('Invalid lamport amount for Solana transfer.');
   }
 
+  // Check Testnet SOL balance before prompting wallet approval (fail fast on insufficient balance)
+  try {
+    const balanceLamports = await activeConnection.getBalance(fromPubkey, SOLANA_COMMITMENT);
+    const minRequiredLamports = lamports + 5000; // transfer + standard 5000-lamport base fee
+    if (balanceLamports < minRequiredLamports) {
+      const availSol = (balanceLamports / LAMPORTS_PER_SOL).toFixed(4);
+      const reqSol = (minRequiredLamports / LAMPORTS_PER_SOL).toFixed(4);
+      throw new Error(
+        `Insufficient Testnet SOL balance (${availSol} SOL available, ${reqSol} SOL required including network fee).`,
+      );
+    }
+  } catch (balErr: any) {
+    if (String(balErr?.message || '').startsWith('Insufficient Testnet SOL balance')) {
+      throw balErr;
+    }
+    // If balance RPC transiently fails, proceed to wallet flow
+  }
+
   const transferIx = SystemProgram.transfer({
     fromPubkey,
     toPubkey,
     lamports,
   });
 
-  const { blockhash, lastValidBlockHeight } = await activeConnection.getLatestBlockhash('confirmed');
+  const buildLegacyTx = (bh: string): Transaction => {
+    const legacyTx = new Transaction();
+    legacyTx.add(transferIx);
+    legacyTx.recentBlockhash = bh;
+    legacyTx.feePayer = fromPubkey;
+    return legacyTx;
+  };
 
-  // Use VersionedTransaction (v0) for all adapters that support v0 so unsigned .serialize() never throws
+  const buildVersionedTx = (bh: string): VersionedTransaction =>
+    new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: fromPubkey,
+        recentBlockhash: bh,
+        instructions: [transferIx],
+      }).compileToV0Message(),
+    );
+
+  const { blockhash, lastValidBlockHeight } = await activeConnection.getLatestBlockhash(SOLANA_COMMITMENT);
+
+  const isMobileAdapter = walletAdapterName === 'Mobile Wallet Adapter';
   const supportsV0 =
     supportedTransactionVersions === undefined ? true : Boolean(supportedTransactionVersions?.has(0));
 
-  const tx: Transaction | VersionedTransaction = supportsV0
-    ? new VersionedTransaction(
-        new TransactionMessage({
-          payerKey: fromPubkey,
-          recentBlockhash: blockhash,
-          instructions: [transferIx],
-        }).compileToV0Message(),
-      )
-    : (() => {
-        const legacyTx = new Transaction().add(transferIx);
-        legacyTx.recentBlockhash = blockhash;
-        legacyTx.feePayer = fromPubkey;
-        return legacyTx;
-      })();
+  // Mobile Wallet Adapter calls .serialize() without flags, so it needs VersionedTransaction (v0).
+  // Standard browser/Phantom wallets support Legacy Transaction cleanly without v0/options format friction.
+  const primaryTx: Transaction | VersionedTransaction = isMobileAdapter && supportsV0
+    ? buildVersionedTx(blockhash)
+    : buildLegacyTx(blockhash);
 
-  const isMobileAdapter = walletAdapterName === 'Mobile Wallet Adapter';
-
-  // Primary path: sendTransaction passes chain='solana:testnet' in Wallet Standard & MWA
+  // Primary path: wallet adapter sendTransaction
   if (sendTransaction) {
     try {
-      const signature = await sendTransaction(tx, activeConnection, {
-        preflightCommitment: 'confirmed',
-        maxRetries: 3,
+      const rawSignature = await sendTransaction(primaryTx, activeConnection, {
+        preflightCommitment: SOLANA_COMMITMENT,
       });
-      if (!signature) {
-        throw new Error('Wallet did not return a transaction signature.');
-      }
+      const signature = normalizeSignatureToBase58(rawSignature);
       await confirmSolanaTransactionOnchain(signature, {
         connection: activeConnection,
         blockhash,
@@ -311,25 +473,19 @@ export async function sendSolanaTransactionOnchain({
       });
       return { signature, verifiedOnchain: true };
     } catch (walletErr: unknown) {
-      const errName = String((walletErr as { name?: string })?.name || '');
       const errMsg = String((walletErr as { message?: string })?.message || '');
-      const isUserRejection =
-        (walletErr as { code?: number })?.code === 4001 ||
-        errName === 'WalletWindowClosedError' ||
-        /user rejected|rejected the request|cancelled|canceled|declined/i.test(errMsg);
       const isInsufficientSol = /insufficient|attempt to debit|no record of a prior credit|0x1\b/i.test(errMsg);
 
-      const canFallbackToSignAndRaw =
-        !isMobileAdapter &&
-        Boolean(signTransaction) &&
-        !isUserRejection &&
-        !isInsufficientSol &&
-        ((errName === 'WalletSendTransactionError' && !errMsg) ||
-          errName === 'WalletConfigError' ||
-          errName === 'WalletAccountError' ||
-          /unsupported|not supported|chain/i.test(errMsg));
+      if (isUserRejectionError(walletErr) || isInsufficientSol) {
+        const classified = classifyWalletError(walletErr, 'Transaction');
+        if (classified) throw classified;
+        if (walletErr instanceof Error) throw walletErr;
+        throw new Error('Transaction cancelled in wallet.');
+      }
 
-      if (!canFallbackToSignAndRaw) {
+      // If sendTransaction failed (e.g. Wallet Standard chain mismatch when Testnet isn't toggled,
+      // or format rejection), fall back to signTransaction + direct Testnet RPC broadcast below.
+      if (!signTransaction || isMobileAdapter) {
         const classified = classifyWalletError(walletErr, 'Transaction');
         if (classified) throw classified;
         if (walletErr instanceof Error) throw walletErr;
@@ -340,45 +496,87 @@ export async function sendSolanaTransactionOnchain({
 
   // Fallback path: signTransaction + direct broadcast to Public Solana Testnet RPC
   if (signTransaction) {
-    try {
-      const signedTx = await signTransaction(tx);
+    const fresh = await activeConnection.getLatestBlockhash(SOLANA_COMMITMENT);
+    const trySignAndSend = async (txToSign: Transaction | VersionedTransaction) => {
+      const signedTx = await signTransaction(txToSign);
       if (!hasValidSignedTx(signedTx)) {
         throw new Error('Wallet returned an unsigned transaction. Please retry on Solana Testnet.');
       }
       const rawTx = signedTx.serialize();
-      const signature = await activeConnection.sendRawTransaction(rawTx, {
+      const rawSignature = await activeConnection.sendRawTransaction(rawTx, {
         skipPreflight: false,
-        preflightCommitment: 'confirmed',
+        preflightCommitment: SOLANA_COMMITMENT,
         maxRetries: 3,
       });
-      if (!signature) {
-        throw new Error('Solana Testnet RPC did not return a transaction signature.');
-      }
+      const signature = normalizeSignatureToBase58(rawSignature);
       await confirmSolanaTransactionOnchain(signature, {
         connection: activeConnection,
-        blockhash,
-        lastValidBlockHeight,
+        blockhash: fresh.blockhash,
+        lastValidBlockHeight: fresh.lastValidBlockHeight,
       });
       return { signature, verifiedOnchain: true };
-    } catch (walletErr: unknown) {
-      const classified = classifyWalletError(walletErr, 'Transaction');
+    };
+
+    try {
+      return await trySignAndSend(buildLegacyTx(fresh.blockhash));
+    } catch (signErr: unknown) {
+      const errMsg = String((signErr as { message?: string })?.message || '');
+      const isInsufficientSol = /insufficient|attempt to debit|no record of a prior credit|0x1\b/i.test(errMsg);
+      if (isUserRejectionError(signErr) || isInsufficientSol) {
+        const classified = classifyWalletError(signErr, 'Transaction');
+        if (classified) throw classified;
+        if (signErr instanceof Error) throw signErr;
+        throw new Error('Transaction cancelled in wallet.');
+      }
+      if (supportsV0 && /invalid format|versioned|serialize|legacy/i.test(errMsg)) {
+        try {
+          return await trySignAndSend(buildVersionedTx(fresh.blockhash));
+        } catch (v0Err: unknown) {
+          const classified = classifyWalletError(v0Err, 'Transaction');
+          if (classified) throw classified;
+          if (v0Err instanceof Error) throw v0Err;
+          throw new Error('Unable to complete Solana Testnet transaction.');
+        }
+      }
+      const classified = classifyWalletError(signErr, 'Transaction');
       if (classified) throw classified;
-      if (walletErr instanceof Error) throw walletErr;
+      if (signErr instanceof Error) throw signErr;
       throw new Error('Unable to complete Solana Testnet transaction.');
     }
   }
 
+  // Direct Phantom provider fallback only when Phantom is the active matching wallet
   const provider = getPhantomSolanaProvider();
-  if (provider && provider.signAndSendTransaction) {
+  if (
+    provider &&
+    (!walletAdapterName || walletAdapterName === 'Phantom') &&
+    provider.publicKey?.toBase58?.() === fromAddress
+  ) {
     try {
-      const { signature } = await provider.signAndSendTransaction(tx);
-      if (!signature) {
-        throw new Error('Wallet did not return a transaction signature.');
+      const fresh = await activeConnection.getLatestBlockhash(SOLANA_COMMITMENT);
+      const legacyTx = buildLegacyTx(fresh.blockhash);
+      let rawSignature: string;
+      if (typeof provider.signTransaction === 'function') {
+        const signedTx = await provider.signTransaction(legacyTx);
+        if (!hasValidSignedTx(signedTx)) {
+          throw new Error('Phantom returned an unsigned transaction.');
+        }
+        rawSignature = await activeConnection.sendRawTransaction(signedTx.serialize(), {
+          skipPreflight: false,
+          preflightCommitment: SOLANA_COMMITMENT,
+          maxRetries: 3,
+        });
+      } else if (typeof provider.signAndSendTransaction === 'function') {
+        const res = await provider.signAndSendTransaction(legacyTx);
+        rawSignature = res?.signature;
+      } else {
+        throw new Error('Phantom signing method is unavailable.');
       }
+      const signature = normalizeSignatureToBase58(rawSignature);
       await confirmSolanaTransactionOnchain(signature, {
         connection: activeConnection,
-        blockhash,
-        lastValidBlockHeight,
+        blockhash: fresh.blockhash,
+        lastValidBlockHeight: fresh.lastValidBlockHeight,
       });
       return { signature, verifiedOnchain: true };
     } catch (providerErr: unknown) {
@@ -390,54 +588,6 @@ export async function sendSolanaTransactionOnchain({
   }
 
   throw new Error('Connect a Solana wallet to sign and submit this Testnet transaction.');
-}
-
-// Sign an onchain action via Solana Wallet Kit or injected provider
-export async function signOnchainWalletAction({
-  fromAddress,
-  memo,
-  signMessage,
-}: {
-  fromAddress: string;
-  memo: string;
-  signMessage?: (message: Uint8Array) => Promise<Uint8Array>;
-}): Promise<{ signature: string; verifiedOnchain: boolean }> {
-  if (!isValidSolanaAddress(fromAddress)) {
-    throw new Error('Connected Solana address is invalid. Please reconnect.');
-  }
-  if (!memo || !memo.trim()) {
-    throw new Error('Missing transaction memo.');
-  }
-
-  if (signMessage) {
-    try {
-      const encoded = new TextEncoder().encode(memo);
-      await signMessage(encoded);
-      const sig = generateSimulatedTxSignature();
-      return { signature: sig, verifiedOnchain: true };
-    } catch (walletErr: unknown) {
-      const classified = classifyWalletError(walletErr, 'Signature');
-      if (classified) throw classified;
-      console.warn('Wallet Kit signMessage warning, using relay settlement:', walletErr);
-    }
-  } else {
-    const provider = getPhantomSolanaProvider();
-    if (provider && provider.signMessage) {
-      try {
-        const encoded = new TextEncoder().encode(memo);
-        await provider.signMessage(encoded, 'utf8');
-        const sig = generateSimulatedTxSignature();
-        return { signature: sig, verifiedOnchain: true };
-      } catch (providerErr: unknown) {
-        const classified = classifyWalletError(providerErr, 'Signature');
-        if (classified) throw classified;
-        console.warn('Provider signMessage warning, using relay settlement:', providerErr);
-      }
-    }
-  }
-
-  await new Promise((r) => setTimeout(r, 700));
-  return { signature: generateSimulatedTxSignature(), verifiedOnchain: true };
 }
 
 // Unique 8-digit UID generator & Verified UID Directory (maps UID -> Solana address)

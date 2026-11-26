@@ -29,8 +29,11 @@ import {
   calculateSolPowerBoost,
   claimLocalUniqueUid,
   classifyWalletError,
+  extractSignatureBytes,
   getLocalWalletActivities,
+  getPhantomSolanaProvider,
   getWalletMiningState,
+  isUserRejectionError,
   isValidSolanaAddress,
   isValidUidFormat,
   normalizeUidInput,
@@ -44,6 +47,7 @@ import {
   sendSolanaTransactionOnchain,
   SOL_POWER_MAX_RATE_PER_HOUR,
   SOL_POWER_MAX_SOL,
+  SOLANA_COMMITMENT,
   SOLANA_RPC_ENDPOINT,
   VERIFICATION_FEE_SOL,
 } from './lib/solana';
@@ -500,12 +504,15 @@ function SolanaWalletKitProvider({ children }: { children: ReactNode }) {
   const handleWalletError = useCallback((error: WalletError) => {
     const name = String(error?.name || '');
     const msg = String(error?.message || '');
-    // Ignore background autoConnect noise and transaction errors already surfaced by modal handlers
+    // Ignore background autoConnect noise and signing/tx errors already surfaced by modal handlers
     if (
       name === 'WalletNotReadyError' ||
       name === 'WalletWindowClosedError' ||
       name === 'WalletSendTransactionError' ||
       name === 'WalletSignTransactionError' ||
+      name === 'WalletSignMessageError' ||
+      name === 'WalletSignInError' ||
+      isUserRejectionError(error) ||
       /not installed|not detected/i.test(msg)
     ) {
       return;
@@ -517,7 +524,7 @@ function SolanaWalletKitProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <ConnectionProvider endpoint={endpoint} config={{ commitment: 'confirmed' }}>
+    <ConnectionProvider endpoint={endpoint} config={{ commitment: SOLANA_COMMITMENT }}>
       <WalletProvider wallets={wallets} autoConnect onError={handleWalletError}>
         <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>
@@ -728,28 +735,56 @@ function AuthProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ solanaAddress: addr }),
         });
 
-        let signatureBytes: Uint8Array;
+        let signatureBytes: Uint8Array | null = null;
         let signedMessageBytes: Uint8Array;
 
-        if (signMessage) {
-          const messageBytes = new TextEncoder().encode(challenge.message);
-          signatureBytes = await signMessage(messageBytes);
-          signedMessageBytes = messageBytes;
-        } else if (adapterSignIn) {
-          const siwsOut = await adapterSignIn({
-            domain: challenge.domain,
-            address: addr,
-            statement: 'Sign in to verify wallet ownership on Bitnoir (Solana Testnet).',
-            nonce: challenge.nonce,
-            issuedAt: challenge.issuedAt,
-            chainId: 'solana:testnet',
-          });
-          signatureBytes = siwsOut.signature;
-          signedMessageBytes = siwsOut.signedMessage;
-        } else {
-          throw new Error(
-            'This wallet does not support message signature verification. Please use Phantom or Solflare.',
-          );
+        const messageBytes = new TextEncoder().encode(challenge.message);
+
+        try {
+          if (signMessage) {
+            const rawSig = await signMessage(messageBytes);
+            signatureBytes = extractSignatureBytes(rawSig);
+            signedMessageBytes = messageBytes;
+          } else {
+            const phantomProvider = getPhantomSolanaProvider();
+            const canUsePhantomProvider =
+              Boolean(phantomProvider) &&
+              (!wallet?.adapter?.name || wallet.adapter.name === 'Phantom') &&
+              phantomProvider.publicKey?.toBase58?.() === addr &&
+              typeof phantomProvider.signMessage === 'function';
+
+            if (canUsePhantomProvider) {
+              const rawSig = await phantomProvider.signMessage(messageBytes, 'utf8');
+              signatureBytes = extractSignatureBytes(rawSig);
+              signedMessageBytes = messageBytes;
+            } else if (adapterSignIn) {
+              const siwsOut = await adapterSignIn({
+                domain: (typeof window !== 'undefined' && window.location.host) || challenge.domain,
+                address: addr,
+                statement: 'Sign in to verify wallet ownership on Bitnoir (Solana Testnet).',
+                uri: typeof window !== 'undefined' ? window.location.origin : undefined,
+                version: '1',
+                chainId: 'solana:testnet',
+                nonce: challenge.nonce,
+                issuedAt: challenge.issuedAt,
+              });
+              signatureBytes = extractSignatureBytes(siwsOut?.signature);
+              signedMessageBytes = siwsOut?.signedMessage;
+            } else {
+              throw new Error(
+                'This wallet does not support message signature verification. Please use Phantom or Solflare.',
+              );
+            }
+          }
+        } catch (signErr: unknown) {
+          const classified = classifyWalletError(signErr, 'Signature');
+          if (classified) throw classified;
+          if (signErr instanceof Error) throw signErr;
+          throw new Error('Unable to sign wallet verification message.');
+        }
+
+        if (!signatureBytes || signatureBytes.length !== 64 || !signedMessageBytes?.length) {
+          throw new Error('Wallet returned an invalid ownership signature.');
         }
 
         const verified = await apiFetchJson<{
@@ -792,7 +827,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
     signInPromiseRef.current = { address: addr, promise: run };
     return run;
-  }, [connected, publicKey, signMessage, adapterSignIn]);
+  }, [connected, publicKey, wallet, signMessage, adapterSignIn]);
 
   const ensureSignedIn = useCallback(async (): Promise<boolean> => {
     const addr = publicKey?.toBase58() || '';
@@ -1243,7 +1278,7 @@ function VerifyAndUsernameModal({
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400 font-sans">Treasury</span>
-                <span className="text-zinc-300 tabular-nums">{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
+                <span className="text-zinc-300 tabular-nums" title={PROTOCOL_TREASURY_SOLANA}>{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
                 <span className="text-zinc-400 font-sans">Unlocks</span>
@@ -1917,7 +1952,7 @@ function SolPowerModal({
                 </div>
                 <div className="flex justify-between items-center text-zinc-300">
                   <span className="text-zinc-400 font-sans">Treasury:</span>
-                  <span className="text-zinc-300 tabular-nums">{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
+                  <span className="text-zinc-300 tabular-nums" title={PROTOCOL_TREASURY_SOLANA}>{shortSolanaAddress(PROTOCOL_TREASURY_SOLANA)}</span>
                 </div>
                 <div className="flex justify-between items-center text-zinc-300">
                   <span className="text-zinc-400 font-sans">Acquire With SOL:</span>
@@ -4007,12 +4042,13 @@ function MiningPage({
         signTransaction,
         sendTransaction,
       });
-      await apiFetchJson('/api/accounts/me/contribute-sol', {
+      const contributeRes = await apiFetchJson<{ solContributed?: number }>('/api/accounts/me/contribute-sol', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ solAmount, txSignature: tx.signature }),
       });
-      const nextSol = Math.min(SOL_POWER_MAX_SOL, Number((contributedSol + solAmount).toFixed(2)));
+      const verifiedSol = Number(contributeRes?.solContributed || solAmount);
+      const nextSol = Math.min(SOL_POWER_MAX_SOL, Number((contributedSol + verifiedSol).toFixed(2)));
       const boost = Number((calculateSolPowerBoost(nextSol) - calculateSolPowerBoost(contributedSol)).toFixed(4));
 
       // Lock in accrued bits and elapsed time before changing rate

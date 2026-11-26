@@ -131,9 +131,36 @@ function isValidSolanaBase58(addr: string): boolean {
 }
 
 const PROTOCOL_TREASURY_SOLANA = 'CFTxmxkCi3h21eXpQ9fkzS6T5oPrzNZUi9njDa5dR7tk';
-const SOLANA_PUBLIC_TESTNET_RPC =
-  (process.env.SOLANA_RPC_URL || '').trim() || 'https://api.testnet.solana.com';
+const SOLANA_PUBLIC_TESTNET_RPC = 'https://api.testnet.solana.com';
 const VERIFICATION_FEE_LAMPORTS = 20_000_000; // 0.02 SOL
+
+async function postTestnetRpc(method: string, params: unknown[], timeoutMs = 7000): Promise<any> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const rpcRes = await fetch(SOLANA_PUBLIC_TESTNET_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method,
+        params,
+      }),
+    });
+    if (!rpcRes.ok) {
+      throw new Error(`Testnet RPC HTTP ${rpcRes.status}`);
+    }
+    const json = await rpcRes.json().catch(() => null);
+    if (json?.error) {
+      throw new Error(String(json.error?.message || 'Testnet RPC error'));
+    }
+    return json?.result ?? null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function verifyTreasuryTransferOnTestnetRpc({
   signature,
@@ -147,19 +174,29 @@ async function verifyTreasuryTransferOnTestnetRpc({
   let txResult: any = null;
   let lastRpcError = '';
 
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 7000);
+  for (let attempt = 0; attempt < 16; attempt++) {
     try {
-      const rpcRes = await fetch(SOLANA_PUBLIC_TESTNET_RPC, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'getTransaction',
-          params: [
+      const statusResult = await postTestnetRpc(
+        'getSignatureStatuses',
+        [[signature], { searchTransactionHistory: true }],
+        7000,
+      );
+      const status = statusResult?.value?.[0];
+      if (status?.err) {
+        throw new HttpRequestError(400, 'Transaction failed onchain on Solana Testnet.');
+      }
+
+      const isConfirmed =
+        Boolean(status) &&
+        (status.confirmationStatus === 'confirmed' ||
+          status.confirmationStatus === 'finalized' ||
+          status.confirmations === null ||
+          (status.confirmations ?? 0) > 0);
+
+      if (isConfirmed || attempt >= 2) {
+        const fetchedTx = await postTestnetRpc(
+          'getTransaction',
+          [
             signature,
             {
               encoding: 'jsonParsed',
@@ -167,23 +204,18 @@ async function verifyTreasuryTransferOnTestnetRpc({
               maxSupportedTransactionVersion: 0,
             },
           ],
-        }),
-      });
-      if (!rpcRes.ok) {
-        lastRpcError = `Testnet RPC HTTP ${rpcRes.status}`;
-      } else {
-        const json = await rpcRes.json().catch(() => null);
-        if (json?.error) {
-          lastRpcError = String(json.error?.message || 'Testnet RPC error');
-        } else if (json?.result) {
-          txResult = json.result;
+          7000,
+        );
+        if (fetchedTx) {
+          txResult = fetchedTx;
           break;
         }
       }
     } catch (err: any) {
+      if (err instanceof HttpRequestError) {
+        throw err;
+      }
       lastRpcError = err?.name === 'AbortError' ? 'Testnet RPC timeout' : String(err?.message || 'RPC fetch failed');
-    } finally {
-      clearTimeout(timer);
     }
     await new Promise((r) => setTimeout(r, 1400));
   }
@@ -193,7 +225,7 @@ async function verifyTreasuryTransferOnTestnetRpc({
       400,
       lastRpcError
         ? `Could not verify transaction on Solana Testnet RPC (${lastRpcError}). Please try again.`
-        : 'Transaction was not found on Solana Testnet yet. Confirm it was sent on Testnet and retry.',
+        : 'Transaction was not confirmed on Solana Testnet yet. Confirm it was sent on Testnet and retry.',
     );
   }
 
@@ -239,10 +271,10 @@ async function verifyTreasuryTransferOnTestnetRpc({
     }
   }
 
-  if (!senderSigned && !parsedSenderMatches) {
+  if (!senderSigned || !parsedSenderMatches) {
     throw new HttpRequestError(
       403,
-      'Transaction signer does not match your connected Solana wallet.',
+      'Transaction sender/signer does not match your connected Solana wallet.',
     );
   }
 
@@ -263,11 +295,15 @@ async function verifyTreasuryTransferOnTestnetRpc({
       ? postBalances[treasuryIdx] - preBalances[treasuryIdx]
       : 0;
 
-  const verifiedLamports = Math.max(deltaLamports, parsedTransferLamports);
+  const isSelfTransfer = expectedSender === PROTOCOL_TREASURY_SOLANA;
+  const verifiedLamports = isSelfTransfer
+    ? parsedTransferLamports
+    : Math.min(parsedTransferLamports, deltaLamports);
+
   if (verifiedLamports < minLamports) {
     throw new HttpRequestError(
       400,
-      'Transaction did not transfer the required SOL fee to the protocol treasury on Solana Testnet.',
+      'Transaction did not transfer the required SOL amount to the protocol treasury on Solana Testnet.',
     );
   }
 
@@ -312,9 +348,10 @@ export function bitnoirApiPlugin(): Plugin {
   const accounts = new Map<string, AccountState>();
   const uidRegistry = new Map<string, string>(); // uid -> wallet address
   const verifiedTxRegistry = new Map<string, { owner: string; kind: 'verify' | 'sol-power' }>();
+  const pendingTxSignatures = new Set<string>();
   const authNonces = new Map<
     string,
-    { address: string; nonce: string; message: string; domain: string; expiresAt: number }
+    { address: string; nonce: string; message: string; domain: string; issuedAt: string; expiresAt: number }
   >();
   const authSessions = new Map<string, { address: string; signedAt: number; expiresAt: number }>();
   const seededLegacyDemo = new Set<string>();
@@ -623,7 +660,7 @@ export function bitnoirApiPlugin(): Plugin {
         return sendJson(res, 200, { status: 'healthy', version: '2.0.0', time: new Date().toISOString() });
       }
 
-      // Issue single-use SIWS (Sign-In With Solana) nonce challenge
+      // Issue single-use off-chain ownership challenge nonce
       if (url === '/api/auth/nonce' && req.method === 'POST') {
         const body = await parseBody(req);
         const addr = String(body.solanaAddress || '').trim();
@@ -637,19 +674,35 @@ export function bitnoirApiPlugin(): Plugin {
           if (v.expiresAt <= now) authNonces.delete(k);
         }
 
-        const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost').split(',')[0].trim();
+        let originHost = '';
+        const rawOrigin = String(req.headers.origin || '').trim();
+        if (rawOrigin) {
+          try {
+            originHost = new URL(rawOrigin).host;
+          } catch {
+            originHost = '';
+          }
+        }
+        const rawHost =
+          originHost ||
+          String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost').split(',')[0].trim();
         const domain = rawHost.replace(/[^a-zA-Z0-9.:_-]/g, '') || 'localhost';
         const nonce = crypto.randomBytes(16).toString('hex');
         const issuedAt = new Date(now).toISOString();
+        const expiresAt = now + 5 * 60_000;
+        const expiresAtIso = new Date(expiresAt).toISOString();
+
+        // Plain off-chain verification message (avoids malformed SIWS headers that trigger Phantom "App request invalid format")
         const message = [
-          `${domain} wants you to sign in with your Solana account:`,
-          addr,
+          'Bitnoir — Wallet Ownership Verification',
           '',
-          'Sign in to verify wallet ownership on Bitnoir (Solana Testnet).',
-          '',
-          'Network: Solana Testnet',
+          'Purpose: Verify ownership of your Solana wallet for Bitnoir',
+          'Cluster: Solana Testnet',
+          `Domain: ${domain}`,
+          `Wallet: ${addr}`,
           `Nonce: ${nonce}`,
           `Issued At: ${issuedAt}`,
+          `Expires At: ${expiresAtIso}`,
         ].join('\n');
 
         authNonces.set(nonce, {
@@ -657,7 +710,8 @@ export function bitnoirApiPlugin(): Plugin {
           nonce,
           message,
           domain,
-          expiresAt: now + 5 * 60_000,
+          issuedAt,
+          expiresAt,
         });
 
         return sendJson(res, 200, {
@@ -665,6 +719,7 @@ export function bitnoirApiPlugin(): Plugin {
           message,
           domain,
           issuedAt,
+          expiresAt: expiresAtIso,
         });
       }
 
@@ -704,7 +759,15 @@ export function bitnoirApiPlugin(): Plugin {
         if (signedMessageBase64) {
           const decodedMsg = Buffer.from(signedMessageBase64, 'base64');
           const msgText = decodedMsg.toString('utf8');
-          if (!msgText.includes(pending.nonce) || !msgText.includes(addr) || !msgText.includes(pending.domain)) {
+          const isExactChallenge = msgText === pending.message;
+          const isValidSiwsMessage =
+            msgText.includes(`${pending.domain} wants you to sign in with your Solana account:`) &&
+            msgText.includes(addr) &&
+            msgText.includes(`Nonce: ${pending.nonce}`) &&
+            msgText.includes(`Issued At: ${pending.issuedAt}`) &&
+            msgText.includes('Chain ID: solana:testnet');
+
+          if (!isExactChallenge && !isValidSiwsMessage) {
             return sendJson(res, 401, { error: 'Signed message does not match issued challenge.' });
           }
           messageBytes = new Uint8Array(decodedMsg);
@@ -907,17 +970,30 @@ export function bitnoirApiPlugin(): Plugin {
         }
 
         const existingTx = verifiedTxRegistry.get(signature);
-        if (existingTx && existingTx.owner !== authedAddress) {
-          return sendJson(res, 409, { error: 'This transaction signature has already been used by another wallet.' });
+        if (existingTx) {
+          return sendJson(res, 409, {
+            error:
+              existingTx.owner !== authedAddress
+                ? 'This transaction signature has already been used by another wallet.'
+                : 'This transaction signature has already been processed.',
+          });
+        }
+        if (pendingTxSignatures.has(signature)) {
+          return sendJson(res, 409, { error: 'Verification for this transaction is already in progress.' });
         }
 
-        await verifyTreasuryTransferOnTestnetRpc({
-          signature,
-          expectedSender: authedAddress,
-          minLamports: VERIFICATION_FEE_LAMPORTS,
-        });
+        pendingTxSignatures.add(signature);
+        try {
+          await verifyTreasuryTransferOnTestnetRpc({
+            signature,
+            expectedSender: authedAddress,
+            minLamports: VERIFICATION_FEE_LAMPORTS,
+          });
+          verifiedTxRegistry.set(signature, { owner: authedAddress, kind: 'verify' });
+        } finally {
+          pendingTxSignatures.delete(signature);
+        }
 
-        verifiedTxRegistry.set(signature, { owner: authedAddress, kind: 'verify' });
         acc.isVerified = true;
         acc.verifiedTx = signature;
         const assignedUid = assignUniqueUidForAccount(acc, acc.uid || undefined);
@@ -968,6 +1044,9 @@ export function bitnoirApiPlugin(): Plugin {
         if (verifiedTxRegistry.has(txSignature)) {
           return sendJson(res, 409, { error: 'This transaction signature has already been credited.' });
         }
+        if (pendingTxSignatures.has(txSignature)) {
+          return sendJson(res, 409, { error: 'Verification for this transaction is already in progress.' });
+        }
 
         const maxSol = 3.0;
         const maxRatePerHour = 10.0;
@@ -983,12 +1062,17 @@ export function bitnoirApiPlugin(): Plugin {
         const solAmount = Number(Math.max(Math.min(0.1, remainingQuota), Math.min(remainingQuota, rawSol)).toFixed(2));
         const expectedLamports = Math.round(solAmount * 1_000_000_000);
 
-        await verifyTreasuryTransferOnTestnetRpc({
-          signature: txSignature,
-          expectedSender: authedAddress,
-          minLamports: expectedLamports,
-        });
-        verifiedTxRegistry.set(txSignature, { owner: authedAddress, kind: 'sol-power' });
+        pendingTxSignatures.add(txSignature);
+        try {
+          await verifyTreasuryTransferOnTestnetRpc({
+            signature: txSignature,
+            expectedSender: authedAddress,
+            minLamports: expectedLamports,
+          });
+          verifiedTxRegistry.set(txSignature, { owner: authedAddress, kind: 'sol-power' });
+        } finally {
+          pendingTxSignatures.delete(txSignature);
+        }
 
         const nextContributed = Number(Math.min(maxSol, currentContributed + solAmount).toFixed(3));
         const prevBoost = Number(((currentContributed / maxSol) * maxRatePerHour).toFixed(4));
